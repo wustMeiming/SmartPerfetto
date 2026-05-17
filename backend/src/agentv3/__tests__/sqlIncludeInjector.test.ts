@@ -218,6 +218,7 @@ describe('sqlIncludeInjector - completeness gate', () => {
     'execute_sql', 'execute_sql_on', 'lookup_sql_schema',
     'invoke_skill', 'list_skills', 'query_perfetto_source',
     'cpufreq',
+    'thread_name', 'process_name',
   ]);
 
   const extractAdvertisedNames = () => {
