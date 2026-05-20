@@ -582,7 +582,6 @@ async function finalizeTraceUpload(
     let processorError: string | undefined;
     try {
       await tps.completeUpload(traceId);
-      console.log(`[TraceProcessor] Loaded trace ${traceId}`);
     } catch (tpError: any) {
       processorError = tpError.message;
       console.error(`[TraceProcessor] Failed to load trace ${traceId}:`, tpError.message);
@@ -600,6 +599,7 @@ async function finalizeTraceUpload(
       };
     }
 
+    console.log(`[TraceProcessor] Loaded trace ${traceId}`);
     const acquisition = acquireFrontendTraceLease(context, traceId);
     return acquisition ? { ...(traceWithPort ?? {}), ...leaseResponseFields(acquisition) } : traceWithPort;
   }

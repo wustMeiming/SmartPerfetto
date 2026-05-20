@@ -436,6 +436,37 @@ describe('enterprise trace metadata routes', () => {
     expect(readTraceProcessorLeases(traceId)).toEqual([]);
   });
 
+  it('does not log a trace as loaded when trace_processor reports an error status', async () => {
+    const app = makeApp();
+    const sourceTracePath = path.join(tmpDir, 'tp-status-error.trace');
+    await fs.writeFile(sourceTracePath, 'tp-status-error');
+    const tpError = 'trace_processor_shell not found at: /missing/trace_processor_shell';
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    fakeTraceProcessorService.completeUpload.mockImplementationOnce(async () => undefined);
+    fakeTraceProcessorService.getTraceWithPort.mockImplementationOnce((traceId: unknown) => ({
+      id: String(traceId),
+      filename: 'tp-status-error.trace',
+      size: 'tp-status-error'.length,
+      uploadTime: new Date(),
+      status: 'error',
+      error: tpError,
+    }));
+
+    const uploadRes = await ssoHeaders(
+      request(app)
+        .post('/api/traces/upload')
+        .attach('file', sourceTracePath),
+    );
+
+    expect(uploadRes.status).toBe(200);
+    expect(uploadRes.body).toEqual(expect.objectContaining({
+      success: false,
+      error: expect.stringContaining(tpError),
+    }));
+    expect(logSpy.mock.calls.some(call => String(call[0]).includes('[TraceProcessor] Loaded trace'))).toBe(false);
+    expect(readTraceProcessorLeases(uploadRes.body.trace.id)).toEqual([]);
+  });
+
   it('keeps simultaneous user uploads scoped while concurrent cleanup is blocked by active holders', async () => {
     const app = makeApp();
 
