@@ -34,6 +34,11 @@ import {createHash} from 'crypto';
 
 import type {RagStore} from './ragStore';
 import type {RagChunk} from '../types/sparkContracts';
+import {
+  chunkSourceBySymbols,
+  estimateTokenCount,
+  languageForPath,
+} from './rag/baseIngester';
 
 /** One AOSP source file the fetcher returns. License is REQUIRED;
  * undefined license rejects the file at the ingester. */
@@ -52,6 +57,10 @@ export interface AospFile {
   /** License of the source file. Required — typical values are
    *  `Apache-2.0` for AOSP / `BSD-3-Clause` for Linux kernel paths. */
   license: string;
+  /** Optional binary build-id for native source pinning. */
+  buildId?: string;
+  /** Optional codebase id when this AOSP snapshot was registered by CodebaseRegistry. */
+  codebaseId?: string;
   /** Optional title; falls back to last path segment. */
   title?: string;
 }
@@ -94,12 +103,25 @@ const FUNCTION_BOUNDARY_REGEX =
 interface PackedChunk {
   text: string;
   offset: number;
+  startLine?: number;
+  endLine?: number;
+  symbol?: string;
 }
 
 /** Section-based chunker. Tries to split on function / class
  * boundaries; falls back to fixed-size when no boundaries land
  * within `maxChars * 2`. */
 function chunkSource(text: string, maxChars: number): PackedChunk[] {
+  const symbolChunks = chunkSourceBySymbols(text, maxChars);
+  if (symbolChunks.length > 0) {
+    return symbolChunks.map(chunk => ({
+      text: chunk.text,
+      offset: chunk.startLine,
+      startLine: chunk.startLine,
+      endLine: chunk.endLine,
+      symbol: chunk.symbol,
+    }));
+  }
   if (text.trim().length === 0) return [];
 
   const boundaries: number[] = [0];
@@ -155,10 +177,6 @@ function makeChunkId(filePath: string, offset: number): string {
     .slice(0, 16);
 }
 
-function estimateTokenCount(text: string): number {
-  return Math.max(1, Math.round(text.length / 4));
-}
-
 export class AospKnowledgeIngester {
   constructor(
     private readonly store: RagStore,
@@ -208,9 +226,13 @@ export class AospKnowledgeIngester {
             license: file.license,
             indexedAt: file.fetchedAt,
             verifiedAt: file.fetchedAt,
-            // Use SHA prefix as a "build id"-ish marker by reusing
-            // license string slot is wrong — keep commit hash off-band
-            // for now; M2 will add a richer chunk shape if needed.
+            filePath: file.filePath,
+            ...(p.startLine && p.endLine ? {lineRange: {start: p.startLine, end: p.endLine}} : {}),
+            ...(p.symbol ? {symbol: p.symbol} : {}),
+            language: languageForPath(file.filePath),
+            commitHash: file.commitHash,
+            ...(file.buildId ? {buildId: file.buildId} : {}),
+            ...(file.codebaseId ? {codebaseId: file.codebaseId, registryOrigin: 'codebase_registry' as const} : {}),
           };
           this.store.addChunk(chunk);
           result.chunksAdded++;

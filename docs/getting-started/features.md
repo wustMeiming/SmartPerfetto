@@ -136,7 +136,25 @@ Trace 实时对比用于在同一个 AI 对话中选择一条 reference Trace，
 
 完整说明见 [多 Trace 分析结果对比](multi-trace-result-comparison.md)。
 
-## 8. Provider 管理和运行时切换
+## 8. Code-Aware 本机源码分析
+
+Code-Aware Analysis 允许用户把本机 App、AOSP、kernel 或 OEM SDK 源码注册给 SmartPerfetto。分析时模型默认只看到 `CodeRef` 元数据，不直接接触源码正文。
+
+入口：
+
+- AI Assistant 设置面板中的 `Codebases` 页：preview、register、reindex、audit。
+- CLI：`smp codebase preview/register/reindex/symbols`。
+- 分析时显式传入 `--code-aware metadata_only` 和 `--codebase-id <id>`，或在 UI 中选择已注册代码库。
+
+效果：
+
+- 把调用栈、native frame 或 kernel symbol 映射到相对文件路径、行号和 symbol。
+- 报告展示 `CodeRef`，源码正文只通过受控 excerpt endpoint 临时读取。
+- 未给 session 配置 codebase 时，普通 trace-only 分析路径保持不变。
+
+完整说明见 [Code-Aware Analysis](code-aware-analysis.md)。
+
+## 9. Provider 管理和运行时切换
 
 SmartPerfetto 支持在 UI 中管理模型 provider，也支持通过 `.env` 配置。
 
@@ -154,7 +172,7 @@ SmartPerfetto 支持在 UI 中管理模型 provider，也支持通过 `.env` 配
 
 完整配置见 [配置指南](configuration.md)。
 
-## 9. 自动化、API 和 CLI
+## 10. 自动化、API 和 CLI
 
 除了 UI，SmartPerfetto 也提供后端 API、CLI 和 MCP 工具文档，适合自动化场景。
 
@@ -169,7 +187,7 @@ SmartPerfetto 支持在 UI 中管理模型 provider，也支持通过 `.env` 配
 - 可以把 Trace 分析接入脚本、CI、批处理或内部平台。
 - 可以复用相同的 Skill、策略、报告和 evidence-backed 输出机制。
 
-## 10. 运行和分发方式
+## 11. 运行和分发方式
 
 SmartPerfetto 支持多种运行方式：
 
@@ -192,4 +210,5 @@ SmartPerfetto 支持多种运行方式：
 | 生成可分享的分析结论 | HTML report |
 | 当前对话中临时对比 reference Trace | `compare_arrows` Trace 实时对比 |
 | 跨窗口/跨用户对比已完成结果 | `fact_check` 多 Trace 分析结果对比 |
+| 把结论映射到本机源码文件和行号 | Code-Aware Analysis |
 | 接入脚本或平台 | API / CLI / MCP 工具 |

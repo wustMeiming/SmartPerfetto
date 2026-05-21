@@ -18,6 +18,7 @@ import { createRenderer, type OutputFormat } from '../repl/renderer';
 import { startSession } from '../services/turnRunner';
 import { assertAnalysisRuntimeReady } from '../services/runtimeGuard';
 import { withConsoleLogToStderr } from '../io/stdio';
+import type {CodeAwareMode} from '../../services/codebase/codeAwareFeature';
 
 export interface AnalyzeCommandArgs {
   trace: string;
@@ -27,6 +28,8 @@ export interface AnalyzeCommandArgs {
   verbose: boolean;
   noColor: boolean;
   format?: OutputFormat;
+  codeAwareMode?: CodeAwareMode;
+  codebaseIds?: string[];
 }
 
 export async function runAnalyzeCommand(args: AnalyzeCommandArgs): Promise<number> {
@@ -45,6 +48,8 @@ export async function runAnalyzeCommand(args: AnalyzeCommandArgs): Promise<numbe
       const turn = await startSession({ paths, service, renderer }, {
         tracePath,
         query: args.query,
+        codeAwareMode: args.codeAwareMode,
+        codebaseIds: args.codebaseIds,
       });
       exitCode = turn.success ? 0 : 1;
     });

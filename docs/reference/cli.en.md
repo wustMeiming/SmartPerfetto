@@ -39,7 +39,7 @@ Options:
   -p, --prompt <question>   analysis prompt (shortcut for --query)
   -q, --query <question>    analysis question (alias for --prompt)
   --session-dir <path>      override session storage root (default: ~/.smartperfetto)
-  --env-file <path>         path to .env file (default: backend/.env)
+  --env-file <path>         path to explicit .env file (skips default env chain)
   --verbose                 show verbose event stream
   --no-color                disable ANSI colors
   --resume <sessionId>      start the REPL with this session already loaded
@@ -87,6 +87,17 @@ smp provider test system
 smp provider test <providerId> --format json
 ```
 
+CLI configuration and Web UI configuration are separate entry points. For
+first-time CLI setup, run `smp config init`, then edit the printed env file,
+usually `~/.smartperfetto/env`. When `--env-file` is not passed, the CLI loads:
+
+1. `backend/.env` from the package or source backend directory.
+2. `~/.smartperfetto/env`, which overrides earlier values.
+
+If you pass `--env-file /path/to/env`, the CLI reads only that file. As with
+Web/Docker setup, enable only one provider source for first setup: local Claude
+login, one Claude-compatible env block, or one OpenAI-compatible env block.
+
 Runtime checks follow the actually selected provider/runtime:
 
 - Claude Agent SDK accepts API keys, Anthropic-compatible proxies, Bedrock,
@@ -96,7 +107,7 @@ Runtime checks follow the actually selected provider/runtime:
 - Ollama providers use the OpenAI-compatible runtime.
 
 The first CLI productization pass does not include `provider add/edit`; key
-writing needs a dedicated secure interaction design.
+writing still goes through env files or a later secure interaction design.
 
 ## Trace Query And Skills
 
@@ -110,6 +121,32 @@ smp skill trace.perfetto-trace startup_slow_reasons --params '{"package":"com.ex
 
 `query` and `skill` do not start the Web UI. `skill` loads SmartPerfetto's YAML
 Skills and SQL fragments.
+
+## Code-Aware Analysis
+
+Register and index a local codebase first, then explicitly expose it to an
+analysis session:
+
+```bash
+smp codebase preview /path/to/app
+smp codebase register /path/to/app --kind app_source --name MyApp --path-filter app/src/main/ --dry-run
+smp codebase register /path/to/app --kind app_source --name MyApp --path-filter app/src/main/
+smp codebase list
+smp codebase reindex cb_xxx
+smp codebase symbols MainActivity --codebase-id cb_xxx
+
+smp run trace.perfetto-trace \
+  --code-aware metadata_only \
+  --codebase-id cb_xxx \
+  "Find the startup bottleneck and map it to source code"
+```
+
+`metadata_only` exposes only `CodeRef` metadata to the model; raw source text is
+not persisted into sessions, reports, or exports. `provider_send` can send
+snippets only when the codebase was registered with `--send-to-provider` and the
+current analysis also uses `--code-aware provider_send`. If `--codebase-id` is
+omitted, the run stays on the trace-only path even when local codebases are
+registered. See [Code-Aware Analysis](../getting-started/code-aware-analysis.en.md).
 
 ## Trace Comparison
 

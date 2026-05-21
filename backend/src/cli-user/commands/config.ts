@@ -16,6 +16,9 @@ export interface ConfigInitCommandArgs {
 
 const ENV_TEMPLATE = `# SmartPerfetto CLI user environment
 # This file is loaded after backend/.env when no --env-file is passed.
+#
+# First setup: choose ONE provider path. Do not enable Claude-compatible and
+# OpenAI-compatible blocks together.
 
 # Default runtime keeps Claude Agent SDK behavior. Claude local login fallback
 # is valid when no explicit Anthropic/Bedrock/Vertex credentials are set.
@@ -44,7 +47,7 @@ const ENV_TEMPLATE = `# SmartPerfetto CLI user environment
 # OPENAI_AGENTS_PROTOCOL=chat_completions
 
 # Output language for AI analysis.
-# SMARTPERFETTO_OUTPUT_LANGUAGE=zh
+# SMARTPERFETTO_OUTPUT_LANGUAGE=zh-CN
 `;
 
 export async function runConfigInitCommand(args: ConfigInitCommandArgs): Promise<number> {

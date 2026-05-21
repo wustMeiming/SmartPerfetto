@@ -25,6 +25,9 @@ export type RbacPermission =
   | 'analysis_result:delete'
   | 'comparison:create'
   | 'comparison:read'
+  | 'codebase:read'
+  | 'codebase:manage'
+  | 'codebase:admin'
   | 'provider:manage_workspace'
   | 'provider:manage_org'
   | 'audit:read'
@@ -44,6 +47,7 @@ const ROLE_PERMISSIONS: Record<string, RbacPermission[]> = {
     'analysis_result:share',
     'comparison:create',
     'comparison:read',
+    'codebase:read',
   ],
   workspace_admin: [
     'trace:read',
@@ -60,6 +64,8 @@ const ROLE_PERMISSIONS: Record<string, RbacPermission[]> = {
     'analysis_result:delete',
     'comparison:create',
     'comparison:read',
+    'codebase:read',
+    'codebase:manage',
     'provider:manage_workspace',
     'audit:read',
     'runtime:manage',
@@ -79,6 +85,9 @@ const ROLE_PERMISSIONS: Record<string, RbacPermission[]> = {
     'analysis_result:delete',
     'comparison:create',
     'comparison:read',
+    'codebase:read',
+    'codebase:manage',
+    'codebase:admin',
     'provider:manage_workspace',
     'provider:manage_org',
     'audit:read',

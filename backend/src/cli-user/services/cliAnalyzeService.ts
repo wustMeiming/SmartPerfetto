@@ -34,6 +34,9 @@ import { getHTMLReportGenerator } from '../../services/htmlReportGenerator';
 import { buildAgentDrivenReportData } from '../../services/agentReportData';
 import { normalizeResultForReport } from '../../services/agentResultNormalizer';
 import { persistAgentTurn } from '../../services/persistAgentSession';
+import { backendLogPath } from '../../runtimePaths';
+import { RagStore } from '../../services/ragStore';
+import { SymbolResolver, type ResolvedSymbolCandidate } from '../../services/symbol/symbolResolver';
 import { getTraceProcessorPath } from '../../services/workingTraceProcessor';
 import { installTraceProcessorPrebuilt } from './traceProcessorInstaller';
 import {
@@ -43,6 +46,7 @@ import {
 import type { StreamingUpdate } from '../../agent/types';
 import type { AnalysisResult } from '../../agent/core/orchestratorTypes';
 import type { QueryResult } from '../../services/traceProcessorService';
+import type { CodeAwareMode } from '../../services/codebase/codeAwareFeature';
 
 export interface RunTurnInput {
   tracePath?: string;
@@ -50,6 +54,8 @@ export interface RunTurnInput {
   referenceTraceId?: string;
   query: string;
   sessionId?: string;
+  codeAwareMode?: CodeAwareMode;
+  codebaseIds?: string[];
   /** Receives every StreamingUpdate from the orchestrator in real time. */
   onEvent: (update: StreamingUpdate) => void;
   /**
@@ -186,10 +192,14 @@ export class CliAnalyzeService {
       result = await orchestrator.analyze(input.query, sessionId, traceId, {
         providerId: session.providerId,
         referenceTraceId: effectiveReferenceTraceId,
+        codeAwareMode: input.codeAwareMode,
+        codebaseIds: input.codebaseIds,
       });
     } finally {
       orchestrator.off('update', handler);
     }
+    (session as unknown as {codeAwareMode?: CodeAwareMode; codebaseIds?: string[]}).codeAwareMode = input.codeAwareMode;
+    (session as unknown as {codeAwareMode?: CodeAwareMode; codebaseIds?: string[]}).codebaseIds = input.codebaseIds;
 
     // Persist to SQLite BEFORE building the report — the snapshot is stashed on
     // the session as `_lastSnapshot` and read by the HTML generator. Routes
@@ -339,12 +349,25 @@ async function runCliE2eFakeTurn(input: RunTurnInput, traceId: string): Promise<
 
   const startedAt = Date.now();
   const timestamp = Date.now();
-  const fakeConclusion = process.env.SMARTPERFETTO_CLI_E2E_FAKE_RESPONSE?.trim() || [
+  const codeAware = buildCliE2eFakeCodeAwareContext(input);
+  const baseConclusion = process.env.SMARTPERFETTO_CLI_E2E_FAKE_RESPONSE?.trim() || [
     'CLI E2E fake analysis completed.',
     `Question: ${input.query}`,
     `Trace: ${traceId}`,
     ...(input.referenceTraceId ? [`Reference trace: ${input.referenceTraceId}`] : []),
   ].join('\n');
+  const fakeConclusion = codeAware.codeReferences.length > 0
+    ? [
+        baseConclusion,
+        '',
+        'Code-aware source references:',
+        ...codeAware.codeReferences.map(ref => {
+          const lineRange = ref.lineRange ? `:${ref.lineRange.start}-${ref.lineRange.end}` : '';
+          const symbol = ref.symbol ? `${ref.symbol} ` : '';
+          return `- CodeRef ${symbol}${ref.filePath}${lineRange} (chunkId=${ref.chunkId}, codebaseId=${ref.codebaseId})`;
+        }),
+      ].join('\n')
+    : baseConclusion;
 
   input.onEvent({
     type: 'progress',
@@ -357,7 +380,9 @@ async function runCliE2eFakeTurn(input: RunTurnInput, traceId: string): Promise<
   input.onEvent({
     type: 'thought',
     content: {
-      thought: 'Using SMARTPERFETTO_CLI_E2E_FAKE to exercise CLI persistence and rendering without a live LLM.',
+      thought: codeAware.codeReferences.length > 0
+        ? 'Using SMARTPERFETTO_CLI_E2E_FAKE with deterministic code-aware symbol lookup to exercise source-level report rendering without a live LLM.'
+        : 'Using SMARTPERFETTO_CLI_E2E_FAKE to exercise CLI persistence and rendering without a live LLM.',
     },
     timestamp,
   });
@@ -370,6 +395,30 @@ async function runCliE2eFakeTurn(input: RunTurnInput, traceId: string): Promise<
   });
 
   const totalDurationMs = Math.max(1, Date.now() - startedAt);
+  const conclusionContract = codeAware.codeReferences.length > 0
+    ? {
+        schemaVersion: 'conclusion_contract_v1',
+        mode: 'focused_answer',
+        conclusions: [{
+          rank: 1,
+          statement: 'Deterministic code-aware CLI E2E conclusion references source-level CodeRefs.',
+          confidencePercent: 100,
+        }],
+        clusters: [],
+        evidenceChain: [{
+          conclusionId: 'cli-e2e-code-aware',
+          text: 'CodeRef metadata was resolved from the registered local codebase RAG store.',
+        }],
+        claims: [],
+        uncertainties: [],
+        nextSteps: [],
+        metadata: {
+          confidencePercent: 100,
+          rounds: 1,
+        },
+        codeReferences: codeAware.codeReferences,
+      } as AnalysisResult['conclusionContract'] & {codeReferences: CliE2eFakeCodeReference[]}
+    : undefined;
   return {
     sessionId,
     traceId,
@@ -384,6 +433,7 @@ async function runCliE2eFakeTurn(input: RunTurnInput, traceId: string): Promise<
       referenceTraceId: input.referenceTraceId,
       query: input.query,
       conclusion: fakeConclusion,
+      conclusionContract,
       totalDurationMs,
     }),
     result: {
@@ -401,10 +451,64 @@ async function runCliE2eFakeTurn(input: RunTurnInput, traceId: string): Promise<
       ],
       hypotheses: [],
       conclusion: fakeConclusion,
+      ...(conclusionContract ? { conclusionContract } : {}),
       confidence: 1,
       rounds: 1,
       totalDurationMs,
     },
+  };
+}
+
+interface CliE2eFakeCodeReference {
+  chunkId: string;
+  codebaseId: string;
+  filePath: string;
+  lineRange?: {start: number; end: number};
+  symbol?: string;
+}
+
+function buildCliE2eFakeCodeAwareContext(input: RunTurnInput): {codeReferences: CliE2eFakeCodeReference[]} {
+  if (!input.codeAwareMode || input.codeAwareMode === 'off' || !input.codebaseIds?.length) {
+    return {codeReferences: []};
+  }
+
+  const store = new RagStore(backendLogPath('rag_store.json'));
+  const resolver = new SymbolResolver(store);
+  const symbols = [
+    'MainActivity',
+    'onActivityCreate',
+    'LoadSimulator',
+    'simulateAsyncNetworkLoad',
+    'runChaosLoop',
+    'LaunchConfig',
+    'LoadConfig',
+  ];
+  const refs = new Map<string, CliE2eFakeCodeReference>();
+
+  for (const codebaseId of input.codebaseIds) {
+    for (const symbol of symbols) {
+      const resolved = resolver.resolveApp({symbol, codebaseId, topK: 2});
+      for (const candidate of resolved.candidates) {
+        const ref = candidateToCodeReference(candidate, codebaseId);
+        if (ref) refs.set(ref.chunkId, ref);
+      }
+    }
+  }
+
+  return {codeReferences: Array.from(refs.values()).slice(0, 8)};
+}
+
+function candidateToCodeReference(
+  candidate: ResolvedSymbolCandidate,
+  fallbackCodebaseId: string,
+): CliE2eFakeCodeReference | undefined {
+  if (!candidate.chunkId || !candidate.filePath) return undefined;
+  return {
+    chunkId: candidate.chunkId,
+    codebaseId: candidate.codebaseId ?? fallbackCodebaseId,
+    filePath: candidate.filePath,
+    ...(candidate.lineRange ? {lineRange: candidate.lineRange} : {}),
+    ...(candidate.symbol ? {symbol: candidate.symbol} : {}),
   };
 }
 
@@ -414,34 +518,34 @@ function buildCliE2eFakeReportHtml(input: {
   referenceTraceId?: string;
   query: string;
   conclusion: string;
+  conclusionContract?: unknown;
   totalDurationMs: number;
 }): string {
-  const reference = input.referenceTraceId
-    ? `<p><strong>Reference trace:</strong> ${escapeHtml(input.referenceTraceId)}</p>`
-    : '';
-  return [
-    '<!doctype html>',
-    '<html>',
-    '<head><meta charset="utf-8"><title>SmartPerfetto CLI E2E Report</title></head>',
-    '<body>',
-    '<h1>SmartPerfetto CLI E2E Report</h1>',
-    `<p><strong>Session:</strong> ${escapeHtml(input.sessionId)}</p>`,
-    `<p><strong>Trace:</strong> ${escapeHtml(input.traceId)}</p>`,
-    reference,
-    `<p><strong>Duration:</strong> ${input.totalDurationMs}ms</p>`,
-    '<h2>Question</h2>',
-    `<pre>${escapeHtml(input.query)}</pre>`,
-    '<h2>Conclusion</h2>',
-    `<pre>${escapeHtml(input.conclusion)}</pre>`,
-    '</body>',
-    '</html>',
-  ].join('');
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return getHTMLReportGenerator().generateAgentDrivenHTML({
+    traceId: input.traceId,
+    query: input.query,
+    result: {
+      sessionId: input.sessionId,
+      success: true,
+      findings: [
+        {
+          id: 'cli-e2e-fake-finding',
+          severity: 'info',
+          title: 'CLI E2E fake finding',
+          description: 'Deterministic finding emitted by the CLI E2E fake runtime.',
+          confidence: 1,
+          source: 'cli-e2e',
+        },
+      ],
+      hypotheses: [],
+      conclusion: input.conclusion,
+      ...(input.conclusionContract ? {conclusionContract: input.conclusionContract} : {}),
+      confidence: 1,
+      rounds: 1,
+      totalDurationMs: input.totalDurationMs,
+    },
+    hypotheses: [],
+    dialogue: [],
+    timestamp: Date.now(),
+  });
 }

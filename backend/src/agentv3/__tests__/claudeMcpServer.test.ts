@@ -144,7 +144,12 @@ jest.mock('fs', () => {
   };
 });
 
-import { createClaudeMcpServer, MCP_NAME_PREFIX, loadLearnedSqlFixPairs } from '../claudeMcpServer';
+import {
+  createClaudeMcpServer,
+  MCP_NAME_PREFIX,
+  loadLearnedSqlFixPairs,
+  normalizeOptionalToolString,
+} from '../claudeMcpServer';
 import { ArtifactStore } from '../artifactStore';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -284,6 +289,16 @@ function parseLeadingJsonObject(text: string): unknown | null {
 // ── Tests ────────────────────────────────────────────────────────────────
 
 describe('createClaudeMcpServer', () => {
+  describe('tool input normalization', () => {
+    it('normalizes LLM string nulls for optional tool fields', () => {
+      expect(normalizeOptionalToolString('null')).toBeUndefined();
+      expect(normalizeOptionalToolString(' undefined ')).toBeUndefined();
+      expect(normalizeOptionalToolString('none')).toBeUndefined();
+      expect(normalizeOptionalToolString('')).toBeUndefined();
+      expect(normalizeOptionalToolString(' app/src/MainActivity.kt ')).toBe('app/src/MainActivity.kt');
+    });
+  });
+
   describe('tool registration', () => {
     it('should register the full MCP toolset (range guard, not exact count)', () => {
       // Asserting an exact count breaks every time we add or retire a tool;

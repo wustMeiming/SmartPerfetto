@@ -24,6 +24,8 @@ import type { AnalysisNote, AnalysisPlanV3, Hypothesis, UncertaintyFlag } from '
 import type { StoredArtifact } from './artifactStore';
 import type { ArchitectureInfo } from '../agent/detectors/types';
 import type { DataEnvelope } from '../types/dataContract';
+import type { CodeAwareMode } from '../services/codebase/codeAwareFeature';
+import type { CodeLookupSummary } from '../services/codebase/codeLookupLedger';
 
 export type ComparisonSourceKind = 'raw_trace_pair' | 'analysis_result_snapshots';
 
@@ -163,6 +165,18 @@ export interface SessionStateSnapshot {
   openAILastResponseId?: string;
   /** Reserved serialized OpenAI run state for future SDK-native restoration. */
   openAIRunState?: string;
+  /** Code-aware analysis mode persisted with the session. */
+  codeAwareMode?: CodeAwareMode;
+  /** Explicit codebase allowlist used by this session. */
+  codebaseIds?: string[];
+  /** Non-secret consent/index-generation state captured for resume/report safety. */
+  codebaseSnapshot?: Array<{
+    codebaseId: string;
+    indexGeneration: number;
+    consentHash?: string;
+  }>;
+  /** Append-only lookup ledger summary for this session. */
+  codeLookupSummary?: CodeLookupSummary;
 
   // --- Artifact Store (optional, can be large) ---
   artifacts?: StoredArtifact[];
@@ -202,6 +216,10 @@ export interface SessionFieldsForSnapshot {
   agentRuntimeProviderId?: string | null;
   /** Non-secret hash of the resolved provider/runtime configuration. */
   agentRuntimeProviderSnapshotHash?: string | null;
+  codeAwareMode?: CodeAwareMode;
+  codebaseIds?: string[];
+  codebaseSnapshot?: SessionStateSnapshot['codebaseSnapshot'];
+  codeLookupSummary?: CodeLookupSummary;
   runSequence: number;
   conversationOrdinal: number;
 }

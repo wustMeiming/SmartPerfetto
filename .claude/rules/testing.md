@@ -25,6 +25,7 @@ and the 6-trace scene regression gate.
 | Strategy/template Markdown | `cd backend && npm run validate:strategies` plus scene trace regression |
 | Frontend generated types | `cd backend && npm run generate:frontend-types` plus relevant tests |
 | AI plugin UI | Browser verification in `start-dev.sh`, relevant `perfetto/ui` tests/typecheck, then `./scripts/update-frontend.sh` |
+| Code-aware analysis, codebase registry, source ingestion, symbol resolution, or CodeRef report/export | `npm --prefix backend run verify:codebase-aware` plus `npm run verify:pr` before landing |
 | npm CLI package/release | `npm --prefix backend run cli:pack-check` plus isolated install smoke |
 | Portable packaging/release | Shell syntax/static checks, Node script syntax checks, launcher cross-compile, full package build, and package manifest verification |
 

@@ -33,6 +33,7 @@ import { appendStreamEvent } from '../io/transcriptWriter';
 import {
   buildComparisonAppendix,
 } from '../../services/comparisonAppendixService';
+import type {CodeAwareMode} from '../../services/codebase/codeAwareFeature';
 
 const RESUME_CONTEXT_MAX_CHARS = 4000;
 const RESUME_TURN_MAX_CHARS = 1200;
@@ -61,7 +62,13 @@ export interface TurnResult {
  */
 export async function startSession(
   ctx: TurnRunnerContext,
-  input: { tracePath: string; query: string; referenceTracePath?: string },
+  input: {
+    tracePath: string;
+    query: string;
+    referenceTracePath?: string;
+    codeAwareMode?: CodeAwareMode;
+    codebaseIds?: string[];
+  },
 ): Promise<TurnResult> {
   const tracePath = path.resolve(input.tracePath);
   logText(ctx, `Loading trace: ${tracePath}`);
@@ -104,6 +111,8 @@ export async function startSession(
     traceId,
     referenceTraceId,
     query: input.query,
+    codeAwareMode: input.codeAwareMode,
+    codebaseIds: input.codebaseIds,
     onSessionReady: (sid) => {
       sp = sessionPaths(ctx.paths, sid);
       ensureSessionLayout(sp);
@@ -137,6 +146,8 @@ export async function startSession(
     providerSnapshotHash: result.providerSnapshotHash,
     sdkSessionId: result.sdkSessionId,
     model: result.model,
+    codeAwareMode: input.codeAwareMode,
+    codebaseIds: input.codebaseIds,
     createdAt: startedAt,
     lastTurnAt: now,
     turnCount: 1,
@@ -248,6 +259,8 @@ export async function continueSession(
     referenceTraceId: effectiveReferenceTraceId,
     query: effectiveQuery,
     sessionId: requestedSessionId,
+    codeAwareMode: existingConfig.codeAwareMode,
+    codebaseIds: existingConfig.codebaseIds,
     onSessionReady: () => {
       ensureSessionLayout(sp);
     },

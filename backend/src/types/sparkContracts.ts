@@ -116,7 +116,11 @@ export type RagSourceKind =
   /** Plan 44 — world-scope consolidated memory (post-review). */
   | 'world_memory'
   /** Plan 54 — published case library entries. */
-  | 'case_library';
+  | 'case_library'
+  /** Codebase-aware analysis — user application source. */
+  | 'app_source'
+  /** Codebase-aware analysis — Linux kernel or vendor kernel source. */
+  | 'kernel_source';
 
 /**
  * Pointer to a RAG-indexed document chunk.
@@ -1389,6 +1393,24 @@ export interface RagChunk {
    * traceable.
    */
   unsupportedReason?: string;
+  /** Path relative to the registered codebase root, when this chunk is source-backed. */
+  filePath?: string;
+  /** 1-based source line range covered by this chunk. */
+  lineRange?: { start: number; end: number };
+  /** Primary symbol/function/class represented by the chunk. */
+  symbol?: string;
+  /** Best-effort language tag for source-backed chunks. */
+  language?: 'cpp' | 'c' | 'java' | 'kotlin' | 'rust' | 'go' | 'py' | 'unknown';
+  /** Pinned source commit, when available. */
+  commitHash?: string;
+  /** Vendor tag for kernel/OEM sources. */
+  vendor?: string;
+  /** Build-id or equivalent artifact identity used to pin symbolization. */
+  buildId?: string;
+  /** Registered codebase id for user-configured source chunks. */
+  codebaseId?: string;
+  /** Origin that decides legacy-vs-codebase filtering. Missing old values are backfilled by RagStore. */
+  registryOrigin?: 'codebase_registry' | 'legacy_plan55' | 'plan44_memory' | 'plan54_cases';
 }
 
 /** A single retrieval hit — supports per-hit missing-data paths. */
@@ -1860,13 +1882,21 @@ export interface CaseGraphLibraryContract extends SparkProvenance {
  * Tool exposure level. Drives whether external hosts (Claude Code,
  * Cursor, Codex via stdio) and remote A2A peers see the tool.
  *
- * - `public` — safe for any host. Read-only data tools.
+ * - `public` — safe for any host.
+ * - `public-readonly` — externally visible read-only metadata tool.
  * - `internal` — agentv3 protocol tools (plan / hypothesis / note
  *   updates). Writing them from an external host would corrupt the
  *   active session.
+ * - `requires_codebase_permission` — only visible inside a request/session
+ *   with codebase permission; never exposed via stdio/A2A.
  * - `deprecated` — kept for compatibility, hidden from public surface.
  */
-export type McpToolExposure = 'public' | 'internal' | 'deprecated';
+export type McpToolExposure =
+  | 'public'
+  | 'public-readonly'
+  | 'internal'
+  | 'requires_codebase_permission'
+  | 'deprecated';
 
 /**
  * ACI — Agent-Callable Interface descriptor (Spark #96).

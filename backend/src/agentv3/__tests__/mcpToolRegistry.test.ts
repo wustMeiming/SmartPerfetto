@@ -68,6 +68,24 @@ describe('McpToolRegistry — allowedTools shape', () => {
     ]);
   });
 
+  it('filters codebase tools through request-scoped allowedTools', () => {
+    const registry = new McpToolRegistry();
+    registry.registerSdk(stub('a'), 'execute_sql', 'public');
+    registry.registerSdk(stub('b'), 'lookup_app_source', 'requires_codebase_permission');
+
+    expect(registry.buildAllowedTools({
+      sessionId: 's1',
+      hasCodebaseAccess: false,
+    })).toEqual([`${MCP_NAME_PREFIX}execute_sql`]);
+    expect(registry.buildAllowedTools({
+      sessionId: 's1',
+      hasCodebaseAccess: true,
+    })).toEqual([
+      `${MCP_NAME_PREFIX}execute_sql`,
+      `${MCP_NAME_PREFIX}lookup_app_source`,
+    ]);
+  });
+
   it('MCP_NAME_PREFIX matches the SDK contract', () => {
     expect(MCP_NAME_PREFIX).toBe('mcp__smartperfetto__');
   });
@@ -142,6 +160,21 @@ describe('McpToolRegistry — ACI snapshot', () => {
     const aci = registry.getAci();
     expect(aci[0].summary).toBe('');
     expect(aci[1].summary).toBe('Run a skill.');
+  });
+
+  it('hides requires_codebase_permission tools from request scopes without access', () => {
+    const registry = new McpToolRegistry();
+    registry.registerSdk(stub('a'), 'list_codebases', 'public-readonly');
+    registry.registerSdk(stub('b'), 'lookup_app_source', 'requires_codebase_permission');
+
+    expect(registry.getAci({
+      sessionId: 's1',
+      hasCodebaseAccess: false,
+    }).map(tool => tool.toolName)).toEqual(['list_codebases']);
+    expect(registry.getAci({
+      sessionId: 's1',
+      hasCodebaseAccess: true,
+    }).map(tool => tool.toolName)).toEqual(['list_codebases', 'lookup_app_source']);
   });
 });
 

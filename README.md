@@ -24,6 +24,7 @@ The project is open source and in active development. The UI, backend runtime, a
 
 SmartPerfetto uses exactly one active model-provider source at runtime. Pick one path and avoid mixing them during first setup:
 
+- You do not need to configure both Claude Code and the OpenAI Agents SDK. Claude Code is the local-auth / Claude-compatible runtime path; the OpenAI Agents SDK is the OpenAI / OpenAI-compatible runtime path. Pick one for first setup.
 - UI Provider Manager: easiest for portable packages, Docker, and new users. Start SmartPerfetto, open **AI Assistant Settings → Providers**, add a provider, paste the **Provider API Key**, verify the Base URL/runtime, save it, test it, then activate it. Saving a provider is not enough; the active provider is what takes effect.
 - Env file: best for scripted or server deployments. Local source runs read `backend/.env`; Docker reads the repository-root `.env`.
 - Local Claude Code config: best for source runs when `claude` already works in the same terminal. No SmartPerfetto `.env` is required.
@@ -36,11 +37,11 @@ Step 1: Choose your run mode and credential file.
 |----------|-----------------|-------|
 | Local source checkout where Claude Code already works in the same terminal | No `.env` required | Verify with `claude`; then run `./start.sh`, which starts both backend and the pre-built frontend |
 | Local source checkout with explicit API key or compatible proxy | `backend/.env` | Create it with `cp backend/.env.example backend/.env` |
-| Docker Hub image | `.env` in the repository root | Create it with `cp .env.example .env`; Docker cannot see the host Claude Code login |
-| Source Docker build | `.env` in the repository root | Read by `docker-compose.yml`; same credential file as the Docker Hub path |
+| Docker Hub image | Provider Manager UI or repository-root `.env` | Docker cannot see the host Claude Code login; use `.env` only for scripted setup |
+| Source Docker build | Provider Manager UI or repository-root `.env` | `docker-compose.yml` reads root `.env`; same credential file as the Docker Hub path |
 | Portable package | Provider Manager UI first | Use the package UI at `http://localhost:10000`; only use the package env file if you need scripted setup |
 
-Step 2: Choose the runtime and provider settings. Claude Agent SDK is for Claude Code / Anthropic-compatible providers; OpenAI Agents SDK is for OpenAI / OpenAI-compatible providers. If both credential families are present, `SMARTPERFETTO_AGENT_RUNTIME` or the active UI provider decides; otherwise the default is Claude Agent SDK.
+Step 2: Choose the runtime and provider settings. Claude Agent SDK is for Claude Code / Anthropic-compatible providers; OpenAI Agents SDK is for OpenAI / OpenAI-compatible providers. For first setup, keep only one credential family enabled. In advanced deployments where both credential families are present, `SMARTPERFETTO_AGENT_RUNTIME` or the active UI provider decides; otherwise the default is Claude Agent SDK.
 
 For direct Anthropic API access, set:
 
@@ -85,7 +86,7 @@ Step 4: Start or restart services. For Docker, run `docker compose -f docker-com
 
 ## Feature Overview
 
-- [Feature Overview](docs/getting-started/features.en.md): AI Assistant workflows, performance scenarios, selection-aware analysis, reports, live trace comparison, multi-trace result comparison, provider management, API/CLI automation, and runtime options.
+- [Feature Overview](docs/getting-started/features.en.md): AI Assistant workflows, performance scenarios, selection-aware analysis, reports, live trace comparison, multi-trace result comparison, code-aware local-source analysis, provider management, API/CLI automation, and runtime options.
 
 ## Tech Stack
 
@@ -119,11 +120,11 @@ pre-built content, and Node boundaries stay aligned.
 
 ### Docker (Recommended)
 
-Use this path if you only want to run SmartPerfetto. You need Docker Desktop/Engine and LLM provider credentials in `.env`; you do not need Node.js, a C++ toolchain, or the `perfetto/` submodule. The Docker Hub image is published nightly from `main` and includes the backend, the pre-built Perfetto UI, and the pinned `trace_processor_shell`, so it also avoids first-run access to Google's artifact bucket on the host.
+Use this path if you only want to run SmartPerfetto. You need Docker Desktop/Engine; configure the AI provider in the UI Provider Manager after startup, or use the repository-root `.env` when you need scripted deployment. You do not need Node.js, a C++ toolchain, or the `perfetto/` submodule. The Docker Hub image is published nightly from `main` and includes the backend, the pre-built Perfetto UI, and the pinned `trace_processor_shell`, so it also avoids first-run access to Google's artifact bucket on the host.
 
 Both the Docker Hub image and source Docker builds serve the committed pre-built UI from `frontend/`; Docker users never build the Perfetto submodule frontend locally.
 
-The container starts without a local `.env` file for health/UI smoke checks, but AI analysis needs one explicit provider block, for example `ANTHROPIC_API_KEY` for Anthropic direct, `ANTHROPIC_BASE_URL` plus `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` for a Claude-compatible provider, or `SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk` plus `OPENAI_*` fields for an OpenAI-compatible provider.
+The container starts without a local `.env` file for health/UI smoke checks. Real AI analysis needs one explicit provider source: either a UI Provider Manager profile, or one env provider block such as `ANTHROPIC_API_KEY` for Anthropic direct, `ANTHROPIC_BASE_URL` plus `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` for a Claude-compatible provider, or `SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk` plus `OPENAI_*` fields for an OpenAI-compatible provider.
 
 Provider profiles created in the UI are stored in the `provider-data` Docker volume. They survive container restarts and normal `docker compose down`; they are removed by `docker compose down -v`.
 
@@ -133,7 +134,7 @@ Windows users should use Docker Desktop with the WSL2 backend. The published ima
 
 Step 1: Download the source. Run `git clone https://github.com/Gracker/SmartPerfetto.git`, then run `cd SmartPerfetto`.
 
-Step 2 (optional): Create the Docker env file. Run `cp .env.example .env`, edit `.env`, uncomment one provider block, and start by replacing the API key/token. If your provider console shows a different Base URL or model ID, use the console value. You can skip this for health/UI smoke checks; real AI analysis requires a provider.
+Step 2 (optional): Create the Docker env file. Run `cp .env.example .env`, edit `.env`, uncomment one provider block, and start by replacing the API key/token. If your provider console shows a different Base URL or model ID, use the console value. Skip this step if you will configure the provider in the UI; real AI analysis requires one provider source.
 
 Step 3: Pull the Docker Hub image. Run `docker compose -f docker-compose.hub.yml pull`.
 
@@ -378,6 +379,7 @@ Do not hardcode prompt content in TypeScript. Put scene logic in `backend/strate
 
 - [Documentation Center](docs/README.en.md)
 - [Quick Start](docs/getting-started/quick-start.en.md)
+- [Code-Aware Analysis](docs/getting-started/code-aware-analysis.en.md)
 - [Architecture Overview](docs/architecture/overview.en.md)
 - [API Reference](docs/reference/api.en.md)
 - [CLI Reference](docs/reference/cli.en.md)

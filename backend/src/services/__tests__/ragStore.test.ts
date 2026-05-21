@@ -41,7 +41,10 @@ describe('RagStore — basic CRUD', () => {
     const store = new RagStore(storagePath);
     const chunk = makeChunk({chunkId: 'a'});
     store.addChunk(chunk);
-    expect(store.getChunk('a')).toEqual(chunk);
+    expect(store.getChunk('a')).toEqual({
+      ...chunk,
+      registryOrigin: 'legacy_plan55',
+    });
   });
 
   it('returns undefined for an unknown chunkId', () => {
@@ -96,10 +99,12 @@ describe('RagStore — license gate', () => {
   it('ragStoreRequiresLicense reports the right kinds', () => {
     expect(ragStoreRequiresLicense('aosp')).toBe(true);
     expect(ragStoreRequiresLicense('oem_sdk')).toBe(true);
+    expect(ragStoreRequiresLicense('kernel_source')).toBe(true);
     expect(ragStoreRequiresLicense('androidperformance.com')).toBe(false);
     expect(ragStoreRequiresLicense('project_memory')).toBe(false);
     expect(ragStoreRequiresLicense('world_memory')).toBe(false);
     expect(ragStoreRequiresLicense('case_library')).toBe(false);
+    expect(ragStoreRequiresLicense('app_source')).toBe(false);
   });
 });
 
@@ -112,12 +117,12 @@ describe('RagStore — persistence', () => {
     expect(store2.getChunk('a')?.snippet).toBe('persisted');
   });
 
-  it('persisted file is valid JSON with schemaVersion 1', () => {
+  it('persisted file is valid JSON with schemaVersion 2', () => {
     const store = new RagStore(storagePath);
     store.addChunk(makeChunk({chunkId: 'a'}));
     const raw = fs.readFileSync(storagePath, 'utf-8');
     const parsed = JSON.parse(raw);
-    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.schemaVersion).toBe(2);
     expect(parsed.chunks).toHaveLength(1);
   });
 
@@ -141,6 +146,29 @@ describe('RagStore — persistence', () => {
     const store = new RagStore(storagePath);
     store.addChunk(makeChunk({chunkId: 'a'}));
     expect(fs.existsSync(`${storagePath}.tmp`)).toBe(false);
+  });
+
+  it('backfills schemaVersion 1 legacy chunks with registryOrigin', () => {
+    fs.writeFileSync(storagePath, JSON.stringify({
+      schemaVersion: 1,
+      chunks: [
+        makeChunk({chunkId: 'blog-v1'}),
+        makeChunk({chunkId: 'case-v1', kind: 'case_library'}),
+      ],
+    }), 'utf-8');
+    const store = new RagStore(storagePath);
+    expect(store.getChunk('blog-v1')?.registryOrigin).toBe('legacy_plan55');
+    expect(store.getChunk('case-v1')?.registryOrigin).toBe('plan54_cases');
+  });
+
+  it('rejects code-aware chunks without codebase metadata', () => {
+    const store = new RagStore(storagePath);
+    expect(() => store.addChunk(makeChunk({
+      chunkId: 'bad-app',
+      kind: 'app_source',
+      uri: 'src/MainActivity.kt',
+      snippet: 'class MainActivity',
+    }))).toThrow(/codebaseId/i);
   });
 });
 
@@ -197,6 +225,44 @@ describe('RagStore — search', () => {
     const result = store.search('composition', {kinds: ['aosp']});
     expect(result.results.length).toBeGreaterThan(0);
     expect(result.results.every(r => r.chunk?.kind === 'aosp')).toBe(true);
+  });
+
+  it('supports codebase metadata filters and rank tiers', () => {
+    const store = new RagStore(storagePath);
+    store.addChunk(makeChunk({
+      chunkId: 'app-main',
+      kind: 'app_source',
+      uri: 'launch-aosp/src/main/java/com/example/launch/aosp/MainActivity.kt',
+      snippet: 'simulate async network load during startup',
+      codebaseId: 'codebase-1',
+      registryOrigin: 'codebase_registry',
+      filePath: 'launch-aosp/src/main/java/com/example/launch/aosp/MainActivity.kt',
+      lineRange: {start: 22, end: 140},
+      symbol: 'MainActivity',
+      language: 'kotlin',
+    }));
+    store.addChunk(makeChunk({
+      chunkId: 'app-load',
+      kind: 'app_source',
+      uri: 'launch-common/src/main/java/com/example/launch/common/LoadSimulator.kt',
+      snippet: 'Application init blocking load simulator',
+      codebaseId: 'codebase-1',
+      registryOrigin: 'codebase_registry',
+      filePath: 'launch-common/src/main/java/com/example/launch/common/LoadSimulator.kt',
+      lineRange: {start: 1, end: 80},
+      symbol: 'LoadSimulator',
+      language: 'kotlin',
+    }));
+
+    const result = store.search('startup load', {
+      kinds: ['app_source'],
+      codebaseIds: ['codebase-1'],
+      symbolExact: 'MainActivity',
+      languages: ['kotlin'],
+    });
+
+    expect(result.results[0].chunkId).toBe('app-main');
+    expect(result.results.every(hit => hit.chunk?.codebaseId === 'codebase-1')).toBe(true);
   });
 
   it('skips chunks with unsupportedReason', () => {
@@ -282,5 +348,7 @@ describe('RagStore — stats', () => {
     expect(stats.aosp.chunkCount).toBe(1);
     expect(stats.aosp.lastIndexedAt).toBe(300);
     expect(stats.oem_sdk.chunkCount).toBe(0);
+    expect(stats.app_source.chunkCount).toBe(0);
+    expect(stats.kernel_source.chunkCount).toBe(0);
   });
 });

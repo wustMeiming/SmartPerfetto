@@ -4264,6 +4264,21 @@ export class HTMLReportGenerator {
     .claim-source-status.found { background: #dcfce7; color: #166534; }
     .claim-source-status.missing { background: #fee2e2; color: #991b1b; }
     .claim-source-status.ambiguous { background: #fef3c7; color: #92400e; }
+    .code-aware-grid { display: grid; gap: 10px; }
+    .code-ref-card, .patch-card {
+      border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; padding: 12px;
+    }
+    .code-ref-title, .patch-title { font-weight: 700; color: #1e3a8a; margin-bottom: 6px; }
+    .code-ref-meta, .patch-meta {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px; color: #334155; word-break: break-word;
+    }
+    .patch-status {
+      display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; margin-left: 6px;
+    }
+    .patch-status.verified { background: #dcfce7; color: #166534; }
+    .patch-status.sketch { background: #fef3c7; color: #92400e; }
+    .patch-status.unverified { background: #fee2e2; color: #991b1b; }
     .timeline-list {
       display: flex; flex-direction: column; gap: 10px;
       max-height: 420px; overflow-y: auto; padding-right: 4px;
@@ -4454,6 +4469,8 @@ export class HTMLReportGenerator {
     ${this.renderDataEnvelopesSection(dataEnvelopes, traceStartNs, outputLanguage)}
 
     ${this.renderFindingsSection(result.findings, dataEnvelopes)}
+
+    ${this.renderCodeAwareReferencesSection(result.conclusionContract, outputLanguage)}
 
     <div class="section">
       <h2 class="section-title">${localize(outputLanguage, '分析结论', 'Analysis Conclusion')}</h2>
@@ -4723,6 +4740,60 @@ export class HTMLReportGenerator {
     })();
 
     return `${skillId}:${stepId}:${source}:${traceSide}:${traceId}:${compactData.slice(0, 512)}`;
+  }
+
+  private renderCodeAwareReferencesSection(
+    contract: unknown,
+    outputLanguage: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE,
+  ): string {
+    const record = this.asReportRecord(contract);
+    if (!record) return '';
+    const codeReferences = this.readReportAliasedRecords(record, ['codeReferences', 'code_refs', 'codeRefs']);
+    const patchProposals = this.readReportAliasedRecords(record, ['patchProposals', 'patch_proposals', 'patches']);
+    if (codeReferences.length === 0 && patchProposals.length === 0) return '';
+
+    const codeRefHtml = codeReferences.map(ref => {
+      const chunkId = this.escapeHtml(String(ref.chunkId ?? ref.chunk_id ?? ''));
+      const codebaseId = this.escapeHtml(String(ref.codebaseId ?? ref.codebase_id ?? ''));
+      const filePath = this.escapeHtml(String(ref.filePath ?? ref.file_path ?? ''));
+      const symbol = this.escapeHtml(String(ref.symbol ?? ''));
+      const lineRange = this.formatLineRange(ref.lineRange ?? ref.line_range);
+      return `
+        <div class="code-ref-card">
+          <div class="code-ref-title">${symbol || chunkId || filePath}</div>
+          <div class="code-ref-meta">chunkId=${chunkId}${codebaseId ? ` · codebaseId=${codebaseId}` : ''}${filePath ? ` · ${filePath}${lineRange}` : ''}</div>
+        </div>`;
+    }).join('');
+
+    const patchHtml = patchProposals.map(patch => {
+      const status = String(patch.patchStatus ?? patch.patch_status ?? 'unverified');
+      const safeStatus = status === 'verified' || status === 'sketch' || status === 'unverified' ? status : 'unverified';
+      const proposalId = this.escapeHtml(String(patch.patchProposalId ?? patch.patch_proposal_id ?? ''));
+      const rationale = this.escapeHtml(String(patch.rationale ?? patch.patchSketch ?? patch.patch_sketch ?? ''));
+      return `
+        <div class="patch-card">
+          <div class="patch-title">${proposalId || 'patch'}<span class="patch-status ${safeStatus}">${safeStatus}</span></div>
+          <div class="patch-meta">${rationale}</div>
+        </div>`;
+    }).join('');
+
+    return `
+    <div class="section">
+      <h2 class="section-title">${localize(outputLanguage, '代码引用与 Patch', 'Code References and Patches')}</h2>
+      <div class="code-aware-grid">
+        ${codeRefHtml}
+        ${patchHtml}
+      </div>
+    </div>`;
+  }
+
+  private formatLineRange(value: unknown): string {
+    const record = this.asReportRecord(value);
+    if (!record) return '';
+    const start = record.start ?? record.line_start;
+    const end = record.end ?? record.line_end;
+    if (start === undefined || end === undefined) return '';
+    return `:${this.escapeHtml(String(start))}-${this.escapeHtml(String(end))}`;
   }
 
   private renderConclusionClaimSourcesSection(

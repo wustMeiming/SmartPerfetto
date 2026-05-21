@@ -47,6 +47,7 @@ import {
 const LICENSE_REQUIRED_KINDS: ReadonlySet<RagSourceKind> = new Set([
   'aosp',
   'oem_sdk',
+  'kernel_source',
 ]);
 
 /** All RagSourceKind values. Kept here so getStats() can initialize a
@@ -60,12 +61,14 @@ const ALL_RAG_SOURCE_KINDS: readonly RagSourceKind[] = [
   'project_memory',
   'world_memory',
   'case_library',
+  'app_source',
+  'kernel_source',
 ];
 
 /** Stable on-disk envelope. The schemaVersion is bumped when the layout
  * is no longer backward compatible — readers must skip on mismatch. */
 interface StorageEnvelope {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   chunks: RagChunk[];
 }
 
@@ -79,6 +82,14 @@ export interface RagStoreSearchOptions {
   kinds?: RagSourceKind[];
   /** Enterprise tenant/workspace scope. Ignored by legacy JSON storage. */
   scope?: KnowledgeScope;
+  /** Restrict source-backed chunks to selected codebases. */
+  codebaseIds?: string[];
+  vendor?: string;
+  buildId?: string;
+  pathPrefix?: string;
+  symbolExact?: string;
+  filePathExact?: string;
+  languages?: RagChunk['language'][];
 }
 
 /** Per-kind index summary returned by `getStats()`. */
@@ -107,6 +118,55 @@ function emptyStats(): RagStoreStats {
   return stats;
 }
 
+function defaultRegistryOrigin(kind: RagSourceKind): RagChunk['registryOrigin'] {
+  switch (kind) {
+    case 'androidperformance.com':
+    case 'aosp':
+    case 'oem_sdk':
+      return 'legacy_plan55';
+    case 'project_memory':
+    case 'world_memory':
+      return 'plan44_memory';
+    case 'case_library':
+      return 'plan54_cases';
+    case 'app_source':
+    case 'kernel_source':
+      return 'codebase_registry';
+  }
+}
+
+function normalizeChunkForStorage(chunk: RagChunk): RagChunk {
+  const registryOrigin = chunk.registryOrigin ?? defaultRegistryOrigin(chunk.kind);
+  if ((chunk.kind === 'app_source' || chunk.kind === 'kernel_source') && !chunk.codebaseId) {
+    throw new Error(
+      `Code-aware source chunk '${chunk.chunkId}' (${chunk.kind}) requires codebaseId`,
+    );
+  }
+  if (registryOrigin === 'codebase_registry' && !chunk.codebaseId) {
+    throw new Error(
+      `Codebase registry chunk '${chunk.chunkId}' requires codebaseId`,
+    );
+  }
+  return {
+    ...chunk,
+    registryOrigin,
+  };
+}
+
+function backfillChunk(chunk: RagChunk): RagChunk {
+  if (chunk.registryOrigin) return chunk;
+  if (chunk.kind === 'app_source' || chunk.kind === 'kernel_source') {
+    return {
+      ...chunk,
+      unsupportedReason: chunk.unsupportedReason ?? 'pre_v3_2_invalid_kind_origin_combo',
+    };
+  }
+  return {
+    ...chunk,
+    registryOrigin: defaultRegistryOrigin(chunk.kind),
+  };
+}
+
 /**
  * Local file-backed RAG store. Single instance per storage path is
  * enough for M0 — concurrent writers in the same process serialize via
@@ -130,13 +190,13 @@ export class RagStore {
     try {
       const raw = fs.readFileSync(this.storagePath, 'utf-8');
       const parsed = JSON.parse(raw) as StorageEnvelope;
-      if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.chunks)) {
+      if ((parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2) || !Array.isArray(parsed.chunks)) {
         // Schema mismatch: leave in-memory empty; do not delete the file
         // so the operator can inspect it.
         return;
       }
       for (const c of parsed.chunks) {
-        this.chunks.set(c.chunkId, c);
+        this.chunks.set(c.chunkId, backfillChunk(c));
       }
     } catch {
       // Corrupted JSON: same policy as schema mismatch — empty cache,
@@ -151,23 +211,24 @@ export class RagStore {
    */
   addChunk(chunk: RagChunk, scope?: KnowledgeScope): void {
     this.load();
+    const normalized = normalizeChunkForStorage(chunk);
     if (LICENSE_REQUIRED_KINDS.has(chunk.kind) && !chunk.license) {
       throw new Error(
         `License required for source kind '${chunk.kind}' but missing on chunk '${chunk.chunkId}'`,
       );
     }
     if (legacyKnowledgeFilesystemWritesEnabled()) {
-      this.chunks.set(chunk.chunkId, chunk);
+      this.chunks.set(normalized.chunkId, normalized);
       this.persist();
     }
     if (enterpriseKnowledgeDbWritesEnabled()) {
       upsertScopedKnowledgeRecord(
         KNOWLEDGE_KIND,
-        chunk.chunkId,
-        ragRowScope(chunk.kind),
-        chunk,
+        normalized.chunkId,
+        ragRowScope(normalized.kind),
+        normalized,
         scope,
-        {createdAt: chunk.indexedAt, updatedAt: chunk.indexedAt},
+        {createdAt: normalized.indexedAt, updatedAt: normalized.indexedAt},
       );
     }
   }
@@ -244,33 +305,48 @@ export class RagStore {
           {rowScopePrefix: RAG_ROW_SCOPE_PREFIX, includeSystem: true},
         ).map(row => row.record)
       : Array.from(this.chunks.values());
+    const codebaseFilter = opts.codebaseIds ? new Set(opts.codebaseIds) : null;
+    const languageFilter = opts.languages ? new Set(opts.languages) : null;
 
     const probed = opts.kinds
       ? [...opts.kinds]
       : Array.from(new Set(chunks.map(c => c.kind)));
 
     const queryTokens = new Set(tokenize(query));
-    const candidates: Array<{chunk: RagChunk; score: number}> = [];
+    const candidates: Array<{chunk: RagChunk; score: number; tier: number}> = [];
     let eligibleSeen = 0;
 
     for (const chunk of chunks) {
       if (kindFilter && !kindFilter.has(chunk.kind)) continue;
       if (chunk.unsupportedReason) continue;
+      if (codebaseFilter && (!chunk.codebaseId || !codebaseFilter.has(chunk.codebaseId))) continue;
+      if (opts.vendor && chunk.vendor !== opts.vendor) continue;
+      if (opts.buildId && chunk.buildId !== opts.buildId) continue;
+      if (opts.pathPrefix && !(chunk.filePath ?? chunk.uri).startsWith(opts.pathPrefix)) continue;
+      if (opts.symbolExact && chunk.symbol !== opts.symbolExact) continue;
+      if (opts.filePathExact && (chunk.filePath ?? chunk.uri) !== opts.filePathExact) continue;
+      if (languageFilter && (!chunk.language || !languageFilter.has(chunk.language))) continue;
       eligibleSeen++;
       const chunkTokens = new Set([
         ...tokenize(chunk.snippet),
         ...tokenize(chunk.title ?? ''),
+        ...tokenize(chunk.symbol ?? ''),
+        ...tokenize(chunk.filePath ?? ''),
       ]);
       let overlap = 0;
       for (const t of queryTokens) {
         if (chunkTokens.has(t)) overlap++;
       }
-      if (overlap === 0) continue;
+      const exactSymbol = Boolean(opts.symbolExact && chunk.symbol === opts.symbolExact);
+      const exactFile = Boolean(opts.filePathExact && (chunk.filePath ?? chunk.uri) === opts.filePathExact);
+      const pathPrefix = Boolean(opts.pathPrefix && (chunk.filePath ?? chunk.uri).startsWith(opts.pathPrefix));
+      const tier = exactSymbol || exactFile ? 3 : pathPrefix ? 2 : 1;
+      if (overlap === 0 && tier === 1) continue;
       const score = overlap / Math.max(queryTokens.size, 1);
-      candidates.push({chunk, score});
+      candidates.push({chunk, score, tier});
     }
 
-    candidates.sort((a, b) => b.score - a.score);
+    candidates.sort((a, b) => (b.tier - a.tier) || (b.score - a.score));
     const top = candidates.slice(0, topK);
     const results: RagRetrievalHit[] = top.map(c => ({
       chunkId: c.chunk.chunkId,
@@ -314,7 +390,7 @@ export class RagStore {
     // unique suffix costs nothing and removes the foot-gun.
     const tmp = `${this.storagePath}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
     const envelope: StorageEnvelope = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       chunks: Array.from(this.chunks.values()),
     };
     fs.writeFileSync(tmp, JSON.stringify(envelope, null, 2), 'utf-8');

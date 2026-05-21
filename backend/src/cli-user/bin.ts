@@ -31,7 +31,15 @@ import { runQueryCommand } from './commands/query';
 import { runSkillCommand } from './commands/skill';
 import { runCompareCommand } from './commands/compare';
 import { runCaptureAndroidCommand } from './commands/capture';
+import {
+  runCodebaseListCommand,
+  runCodebasePreviewCommand,
+  runCodebaseRegisterCommand,
+  runCodebaseReindexCommand,
+  runCodebaseSymbolsCommand,
+} from './commands/codebase';
 import { DEFAULT_ANALYSIS_QUERY } from './constants';
+import type {CodeAwareMode} from '../services/codebase/codeAwareFeature';
 
 interface GlobalOpts {
   file?: string;
@@ -93,7 +101,7 @@ function main(): void {
     .option('-p, --prompt <question>', 'analysis prompt (shortcut for --query)')
     .option('-q, --query <question>', 'analysis question (alias for --prompt)')
     .option('--session-dir <path>', 'override session storage root (default: ~/.smartperfetto)')
-    .option('--env-file <path>', 'path to .env file (default: backend/.env)')
+    .option('--env-file <path>', 'path to explicit .env file (skips default env chain)')
     .option('--verbose', 'show verbose event stream', false)
     .option('--no-color', 'disable ANSI colors')
     .option('--resume <sessionId>', 'start the REPL with this session already loaded');
@@ -105,12 +113,20 @@ function main(): void {
   const runAndExit = async (fn: () => Promise<number>) => {
     process.exit(await fn());
   };
+  const collectCodebaseId = (value: string, previous: string[] = []): string[] => [...previous, value];
+  const codeAwareMode = (value?: string): CodeAwareMode | undefined => {
+    if (!value) return undefined;
+    if (value === 'off' || value === 'metadata_only' || value === 'provider_send') return value;
+    throw new Error(`Invalid code-aware mode: ${value}. Expected off, metadata_only, or provider_send.`);
+  };
 
   program
     .command('run <trace> [question...]')
     .description('run one-shot analysis against a trace file')
     .option('--format <format>', 'output format: text, json, ndjson')
-    .action(async (trace: string, question: string[] | undefined, opts: { format?: string }) => {
+    .option('--code-aware <mode>', 'code-aware mode: off, metadata_only, provider_send')
+    .option('--codebase-id <id>', 'registered codebase id to expose to the analysis session', collectCodebaseId, [])
+    .action(async (trace: string, question: string[] | undefined, opts: { format?: string; codeAware?: string; codebaseId?: string[] }) => {
       const g = globals();
       await runAndExit(() => runAnalyzeCommand({
         trace,
@@ -120,6 +136,8 @@ function main(): void {
         verbose: Boolean(g.verbose),
         noColor: g.color === false,
         format: format(opts.format),
+        codeAwareMode: codeAwareMode(opts.codeAware),
+        codebaseIds: opts.codebaseId,
       }));
     });
 
@@ -128,7 +146,9 @@ function main(): void {
     .description('run one-shot analysis against a trace file')
     .option('-q, --query <question>', 'analysis question', DEFAULT_ANALYSIS_QUERY)
     .option('--format <format>', 'output format: text, json, ndjson')
-    .action(async (trace: string, opts: { query?: string; format?: string }) => {
+    .option('--code-aware <mode>', 'code-aware mode: off, metadata_only, provider_send')
+    .option('--codebase-id <id>', 'registered codebase id to expose to the analysis session', collectCodebaseId, [])
+    .action(async (trace: string, opts: { query?: string; format?: string; codeAware?: string; codebaseId?: string[] }) => {
       const g = globals();
       const query = g.prompt ?? g.query ?? opts.query ?? DEFAULT_ANALYSIS_QUERY;
       await runAndExit(() => runAnalyzeCommand({
@@ -139,6 +159,8 @@ function main(): void {
         verbose: Boolean(g.verbose),
         noColor: g.color === false,
         format: format(opts.format),
+        codeAwareMode: codeAwareMode(opts.codeAware),
+        codebaseIds: opts.codebaseId,
       }));
     });
 
@@ -327,6 +349,97 @@ function main(): void {
       }));
     });
 
+  const codebaseCmd = program.command('codebase').description('manage local codebases for code-aware analysis');
+  codebaseCmd
+    .command('list')
+    .description('list registered codebases')
+    .action(async () => {
+      const g = globals();
+      await runAndExit(() => runCodebaseListCommand({
+        envFile: g.envFile,
+        sessionDir: g.sessionDir,
+      }));
+    });
+
+  codebaseCmd
+    .command('preview <rootPath>')
+    .description('preview files accepted by the path security gate')
+    .action(async (rootPath: string) => {
+      const g = globals();
+      await runAndExit(() => runCodebasePreviewCommand({
+        rootPath,
+        envFile: g.envFile,
+        sessionDir: g.sessionDir,
+      }));
+    });
+
+  codebaseCmd
+    .command('register <rootPath>')
+    .description('register a local app/AOSP/kernel source codebase')
+    .option('--kind <kind>', 'codebase kind: app_source, aosp, kernel_source, oem_sdk', 'app_source')
+    .option('--name <name>', 'display name')
+    .option('--send-to-provider', 'allow snippets to be sent when the session also uses provider_send mode', false)
+    .option('--path-filter <prefix>', 'relative path prefix to ingest; repeatable', collectCodebaseId, [])
+    .option('--vendor <vendor>', 'vendor id for kernel/OEM codebases')
+    .option('--build-id <id>', 'build id for source/symbol matching')
+    .option('--commit <hash>', 'commit hash pinned to the registered source tree')
+    .option('--license <id>', 'license tag for source chunks, for example Apache-2.0 or GPL-2.0-only')
+    .option('--dry-run', 'preview the registration without writing registry state', false)
+    .action(async (rootPath: string, opts: {
+      kind?: string;
+      name?: string;
+      sendToProvider?: boolean;
+      pathFilter?: string[];
+      vendor?: string;
+      buildId?: string;
+      commit?: string;
+      license?: string;
+      dryRun?: boolean;
+    }) => {
+      const g = globals();
+      const kind = parseCodebaseKind(opts.kind);
+      await runAndExit(() => runCodebaseRegisterCommand({
+        rootPath,
+        kind,
+        name: opts.name,
+        sendToProvider: opts.sendToProvider,
+        pathFilters: opts.pathFilter,
+        vendor: opts.vendor,
+        buildId: opts.buildId,
+        commitHash: opts.commit,
+        licenseTag: opts.license,
+        dryRun: opts.dryRun,
+        envFile: g.envFile,
+        sessionDir: g.sessionDir,
+      }));
+    });
+
+  codebaseCmd
+    .command('reindex <codebaseId>')
+    .description('index registered app source files into the RAG store')
+    .action(async (codebaseId: string) => {
+      const g = globals();
+      await runAndExit(() => runCodebaseReindexCommand({
+        codebaseId,
+        envFile: g.envFile,
+        sessionDir: g.sessionDir,
+      }));
+    });
+
+  codebaseCmd
+    .command('symbols <symbol>')
+    .description('resolve a symbol against indexed app source chunks')
+    .option('--codebase-id <id>', 'restrict to one registered codebase id')
+    .action(async (symbol: string, opts: {codebaseId?: string}) => {
+      const g = globals();
+      await runAndExit(() => runCodebaseSymbolsCommand({
+        symbol,
+        codebaseId: opts.codebaseId,
+        envFile: g.envFile,
+        sessionDir: g.sessionDir,
+      }));
+    });
+
   program
     .command('query <trace>')
     .description('run SQL against a trace using trace_processor_shell')
@@ -495,6 +608,11 @@ function parsePositiveInteger(value: string): number {
 function parseReportExportFormat(format: string): 'html' | 'md' | 'json' {
   if (format === 'html' || format === 'md' || format === 'json') return format;
   throw new Error(`Invalid report export format: ${format}. Expected html, md, or json.`);
+}
+
+function parseCodebaseKind(kind: string | undefined): 'app_source' | 'aosp' | 'kernel_source' | 'oem_sdk' {
+  if (kind === 'app_source' || kind === 'aosp' || kind === 'kernel_source' || kind === 'oem_sdk') return kind;
+  throw new Error(`Invalid codebase kind: ${kind}. Expected app_source, aosp, kernel_source, or oem_sdk.`);
 }
 
 main();

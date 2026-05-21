@@ -380,6 +380,8 @@ interface AnalysisSession {
   providerSnapshotHash?: string | null;
   providerSnapshotChanged?: boolean;
   providerSnapshotChangeReason?: string;
+  codeAwareMode?: import('../services/codebase/codeAwareFeature').CodeAwareMode;
+  codebaseIds?: string[];
   /** Reference trace ID for comparison mode (dual-trace analysis) */
   referenceTraceId?: string;
   comparisonSource?: 'raw_trace_pair' | 'analysis_result_snapshots';
@@ -1226,6 +1228,8 @@ async function handleAnalyzeRequest(
       sessionForRun.referenceTraceId = effectiveReferenceTraceId;
       sessionForRun.comparisonSource = 'raw_trace_pair';
     }
+    sessionForRun.codeAwareMode = options.codeAwareMode;
+    sessionForRun.codebaseIds = Array.isArray(options.codebaseIds) ? options.codebaseIds : undefined;
 
     const runContext = startSessionRun(sessionForRun, query, requestId);
     sessionForRun.logger.setMetadata({
@@ -2971,6 +2975,8 @@ async function runAgentDrivenAnalysis(
         traceContext: options.traceContext,
         referenceTraceId: options.referenceTraceId,
         providerId: options.providerId,
+        codeAwareMode: options.codeAwareMode,
+        codebaseIds: Array.isArray(options.codebaseIds) ? options.codebaseIds : undefined,
         tenantId: session.tenantId,
         workspaceId: session.workspaceId,
         userId: session.userId,

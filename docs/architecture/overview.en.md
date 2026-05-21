@@ -9,12 +9,14 @@ Frontend: Perfetto UI @ :10000
   └─ com.smartperfetto.AIAssistant plugin
        ├─ trace upload / open trace
        ├─ AI panel / floating window
+       ├─ Codebase Config Panel
        ├─ DataEnvelope tables and charts
        └─ SSE client
 
 Backend: Express @ :3000
   ├─ /api/agent/v1/*          main agent analysis path
   ├─ /api/traces/*            trace upload and lifecycle
+  ├─ /api/rag/*               RAG and codebase management
   ├─ /api/skills/*            Skill query and execution
   ├─ /api/export/*            exports
   ├─ /api/reports/*           HTML reports
@@ -52,6 +54,7 @@ boundaries. The LLM/agent checklist is in
 | Skill engine | `backend/src/services/skillEngine/` | YAML Skill loading, parameter substitution, SQL execution, DataEnvelope output |
 | Skills | `backend/skills/` | Atomic, composite, deep, and rendering-pipeline analysis |
 | Strategies | `backend/strategies/` | Scene strategies, prompt templates, knowledge templates |
+| Code-aware analysis | `backend/src/services/codebase/`, `backend/src/services/rag/`, `backend/src/services/symbol/` | Local codebase registry, source ingestion, symbol resolution, lookup filtering, and patch status verification |
 | Trace processor | `backend/src/services/traceProcessorService.ts` | Trace loading, RPC management, SQL query execution |
 | Reports | `backend/src/services/htmlReportGenerator.ts` | HTML report generation |
 | CLI | `backend/src/cli-user/` | `smp` / `smartperfetto` commands, session/history/report export |
@@ -73,13 +76,17 @@ boundaries. The LLM/agent checklist is in
       -> execute_sql -> trace_processor_shell
       -> invoke_skill -> SkillExecutor -> SQL / DataEnvelope
       -> lookup_knowledge / lookup_sql_schema / fetch_artifact
+      -> resolve_symbol / lookup_app_source / lookup_aosp_source / lookup_kernel_source
+         -> LookupResponseFilter -> CodeRef metadata
+      -> propose_patch -> PatchProposer -> verified / sketch / unverified
 
 4. Backend streams output
    SDK events -> runtime bridge -> StreamProjector -> SSE
       -> frontend renders progress, tables, thoughts, answer tokens
 
 5. Finish and report
-   conclusion -> analysis_completed -> HTML report -> /api/reports/:id
+   conclusion -> analysis_completed -> sanitized CodeRef/patch metadata
+      -> HTML report -> /api/reports/:id
 ```
 
 CLI `smp run` / `smp ask` / `smp compare` reuse the same session, runtime,

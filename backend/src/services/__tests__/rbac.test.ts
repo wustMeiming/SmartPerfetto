@@ -29,6 +29,7 @@ describe('enterprise RBAC matrix', () => {
   test('maps viewer, analyst, workspace admin, and org admin role permissions', () => {
     expect(hasRbacPermission(context('viewer'), 'trace:read')).toBe(true);
     expect(hasRbacPermission(context('viewer'), 'analysis_result:read')).toBe(true);
+    expect(hasRbacPermission(context('viewer'), 'codebase:read')).toBe(false);
     expect(hasRbacPermission(context('viewer'), 'analysis_result:create')).toBe(false);
     expect(hasRbacPermission(context('viewer'), 'trace:write')).toBe(false);
     expect(hasRbacPermission(context('viewer'), 'agent:run')).toBe(false);
@@ -37,6 +38,8 @@ describe('enterprise RBAC matrix', () => {
     expect(hasRbacPermission(context('analyst'), 'agent:run')).toBe(true);
     expect(hasRbacPermission(context('analyst'), 'analysis_result:create')).toBe(true);
     expect(hasRbacPermission(context('analyst'), 'comparison:create')).toBe(true);
+    expect(hasRbacPermission(context('analyst'), 'codebase:read')).toBe(true);
+    expect(hasRbacPermission(context('analyst'), 'codebase:manage')).toBe(false);
     expect(hasRbacPermission(context('analyst'), 'trace:delete_any')).toBe(false);
 
     expect(hasRbacPermission(context('workspace_admin'), 'trace:delete_any')).toBe(true);
@@ -44,9 +47,12 @@ describe('enterprise RBAC matrix', () => {
     expect(hasRbacPermission(context('workspace_admin'), 'provider:manage_workspace')).toBe(true);
     expect(hasRbacPermission(context('workspace_admin'), 'provider:manage_org')).toBe(false);
     expect(hasRbacPermission(context('workspace_admin'), 'runtime:manage')).toBe(true);
+    expect(hasRbacPermission(context('workspace_admin'), 'codebase:manage')).toBe(true);
+    expect(hasRbacPermission(context('workspace_admin'), 'codebase:admin')).toBe(false);
 
     expect(hasRbacPermission(context('org_admin'), 'provider:manage_org')).toBe(true);
     expect(hasRbacPermission(context('org_admin'), 'runtime:manage')).toBe(true);
+    expect(hasRbacPermission(context('org_admin'), 'codebase:admin')).toBe(true);
   });
 
   test('lets explicit scopes authorize API key contexts without granting unrelated permissions', () => {

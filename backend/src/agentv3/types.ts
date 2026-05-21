@@ -7,6 +7,7 @@ import type { Finding } from '../agent/types';
 import type { DetectedFocusApp } from './focusAppDetector';
 import type { SceneType } from './sceneClassifier';
 import type { OutputLanguage } from './outputLanguage';
+import type { CodeAwareMode } from '../services/codebase/codeAwareFeature';
 
 // =============================================================================
 // Query Complexity Classification
@@ -105,6 +106,10 @@ export interface ClaudeAnalysisContext {
   traceFormat?: 'perfetto_protobuf' | 'systrace_text' | 'atrace_text' | 'unknown';
   /** User-facing output language for answers, reports, and insight text. */
   outputLanguage?: OutputLanguage;
+  /** Codebase-aware analysis mode for source lookup and output discipline. */
+  codeAwareMode?: CodeAwareMode;
+  /** Explicitly whitelisted codebase ids for this session. */
+  codebaseIds?: string[];
 }
 
 // =============================================================================

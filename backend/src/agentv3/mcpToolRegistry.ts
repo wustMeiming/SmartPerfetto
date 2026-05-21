@@ -67,6 +67,12 @@ export interface McpToolDefinition {
   requires?: string[];
 }
 
+export interface ToolRequestScope {
+  sessionId: string;
+  hasCodebaseAccess: boolean;
+  capabilities?: string[];
+}
+
 /**
  * Filter the registry contents by one or more exposure levels.
  *
@@ -131,24 +137,34 @@ export class McpToolRegistry {
     return this.entries;
   }
 
+  listForRequest(scope: ToolRequestScope): McpToolDefinition[] {
+    return this.entries.filter(entry => {
+      if (entry.exposure === 'requires_codebase_permission') {
+        return scope.hasCodebaseAccess;
+      }
+      return entry.exposure !== 'deprecated';
+    });
+  }
+
   /** Build the SDK's in-process MCP server. The SDK names the server
    * `smartperfetto` to align with `MCP_NAME_PREFIX`; that linkage is
    * preserved here. */
-  buildSdkServer(opts: {name?: string; version?: string} = {}) {
+  buildSdkServer(opts: {name?: string; version?: string; scope?: ToolRequestScope} = {}) {
+    const entries = opts.scope ? this.listForRequest(opts.scope) : this.entries;
     return createSdkMcpServer({
       name: opts.name ?? 'smartperfetto',
       version: opts.version ?? '1.0.0',
       // The SDK accepts `unknown[]` here because tool() returns its own
       // opaque shape. Cast at the boundary; consumers do not get to
       // peek inside a tool descriptor.
-      tools: this.entries.map(e => e.tool) as never,
+      tools: entries.map(e => e.tool) as never,
     });
   }
 
   /** Allowed-tools array prefixed for the SDK call site. Matches the
    * exact format `claudeMcpServer.ts` returned before the refactor. */
-  buildAllowedTools(): string[] {
-    return buildAllowedTools(this.entries);
+  buildAllowedTools(scope?: ToolRequestScope): string[] {
+    return buildAllowedTools(scope ? this.listForRequest(scope) : this.entries);
   }
 
   /** Snapshot of the registry as `McpToolAci[]` — drives the future
@@ -156,8 +172,9 @@ export class McpToolRegistry {
    * inputSchema / examples per tool. M0 emits a minimal ACI with
    * just name + qualified name + exposure; the description / schema
    * fields stay optional so older snapshots remain readable. */
-  getAci(): McpToolAci[] {
-    return this.entries.map(e => ({
+  getAci(scope?: ToolRequestScope): McpToolAci[] {
+    const entries = scope ? this.listForRequest(scope) : this.entries;
+    return entries.map(e => ({
       toolName: e.name,
       qualifiedName: `${MCP_NAME_PREFIX}${e.name}`,
       exposure: e.exposure,
@@ -172,10 +189,11 @@ export class McpToolRegistry {
   buildPublicApiContract(opts: {
     serverVersion?: string;
     protocolVersion?: string;
+    scope?: ToolRequestScope;
   } = {}): McpPublicApiContract {
     return {
       ...makeSparkProvenance({source: 'mcpToolRegistry'}),
-      tools: this.getAci(),
+      tools: this.getAci(opts.scope),
       serverVersion: opts.serverVersion ?? '1.0.0',
       protocolVersion: opts.protocolVersion ?? '2024-11-05',
       coverage: [
@@ -192,5 +210,18 @@ export class McpToolRegistry {
   /** Number of registered tools — useful in tests. */
   size(): number {
     return this.entries.length;
+  }
+
+  probeCapabilities(scope: ToolRequestScope): {
+    codeAwareAvailable: boolean;
+    reason?: 'feature_disabled' | 'no_codebase_configured' | 'no_permission' | 'consent_required_but_missing';
+  } {
+    if (process.env.SMARTPERFETTO_CODE_AWARE === 'off') {
+      return {codeAwareAvailable: false, reason: 'feature_disabled'};
+    }
+    if (!scope.hasCodebaseAccess) {
+      return {codeAwareAvailable: false, reason: 'no_permission'};
+    }
+    return {codeAwareAvailable: true};
   }
 }

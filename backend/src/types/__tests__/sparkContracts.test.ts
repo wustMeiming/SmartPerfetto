@@ -970,7 +970,7 @@ describe('Plan 18 — DomainSkillEvalContract', () => {
 // =============================================================================
 
 describe('First-tier shared base types', () => {
-  it('RagSourceKind enumerates the six known knowledge sources', () => {
+  it('RagSourceKind enumerates the known knowledge sources', () => {
     const sources: RagSourceKind[] = [
       'androidperformance.com',
       'aosp',
@@ -978,8 +978,10 @@ describe('First-tier shared base types', () => {
       'project_memory',
       'world_memory',
       'case_library',
+      'app_source',
+      'kernel_source',
     ];
-    expect(sources).toHaveLength(6);
+    expect(sources).toHaveLength(8);
     // Compile-time check: each value is assignable to RagSourceKind.
     sources.forEach(s => expect(typeof s).toBe('string'));
   });
@@ -1163,6 +1165,8 @@ describe('Plan 55 — AndroidperformanceAospRagContract', () => {
         project_memory: {chunkCount: 256},
         world_memory: {chunkCount: 32},
         case_library: {chunkCount: 12},
+        app_source: {chunkCount: 0},
+        kernel_source: {chunkCount: 0},
       },
       coverage: [
         {sparkId: 181, planId: '55', status: 'scaffolded'},
@@ -1508,9 +1512,15 @@ describe('Plan 54 — CaseGraphLibraryContract', () => {
 });
 
 describe('Plan 41 — McpPublicApiContract', () => {
-  it('McpToolExposure covers public / internal / deprecated', () => {
-    const levels: McpToolExposure[] = ['public', 'internal', 'deprecated'];
-    expect(levels).toHaveLength(3);
+  it('McpToolExposure covers public / scoped / internal / deprecated', () => {
+    const levels: McpToolExposure[] = [
+      'public',
+      'public-readonly',
+      'requires_codebase_permission',
+      'internal',
+      'deprecated',
+    ];
+    expect(levels).toHaveLength(5);
   });
 
   it('public read-only tool ACI carries short name + qualified name', () => {

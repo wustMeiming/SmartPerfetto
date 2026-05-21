@@ -33,6 +33,7 @@ import type { AdbCollaborationConfig, AdbContext } from '../../services/adb';
 import type { IncrementalScope } from './incrementalAnalyzer';
 import type { EnhancedSessionContext } from '../context/enhancedSessionContext';
 import type { ConclusionContract } from './conclusionContract';
+import type { CodeAwareMode } from '../../services/codebase/codeAwareFeature';
 
 // =============================================================================
 // Agent ID Constants
@@ -306,6 +307,16 @@ export interface AnalysisOptions {
   /** Provider override for this analysis session. When set, env vars are sourced
    *  from this provider instead of the global active provider. */
   providerId?: string | null;
+
+  /**
+   * Code-aware analysis mode for registered local/app source.
+   * - off: do not expose codebase MCP tools
+   * - metadata_only: expose CodeRef metadata, never snippets
+   * - provider_send: snippets may be sent only when the codebase consent also permits it
+   */
+  codeAwareMode?: CodeAwareMode;
+  /** Explicit codebase allowlist for this analysis session. */
+  codebaseIds?: string[];
 
   /**
    * Enterprise persistence scope supplied by the route layer.

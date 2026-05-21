@@ -4,6 +4,19 @@
 
 For local source runs, SmartPerfetto can use Claude Code's local authentication and configuration directly. If `claude` already works in the same terminal, you do not need to create `.env`. Use env files when you need explicit API keys, compatible proxies, or Docker runtime credentials.
 
+## First Answer: Do I Configure Both Claude Code and the OpenAI SDK?
+
+No. Claude Code and the OpenAI Agents SDK are alternative runtime paths, not two required setup steps. Pick one source for your first setup:
+
+| What you have | Recommended path | What to configure |
+|---|---|---|
+| You do not want to edit env files, or you use Docker/portable packages | UI Provider Manager | Add the provider key on the `Providers` tab, test it, then activate it |
+| Local source run where `claude` already works in the same terminal | Local Claude Code config | No `.env`, no `OPENAI_*` variables |
+| Anthropic API key or a Claude/Anthropic-compatible provider | Claude Agent SDK | `ANTHROPIC_*` + `CLAUDE_*` |
+| OpenAI API key, Ollama, or an OpenAI-compatible provider | OpenAI Agents SDK | `SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk` + `OPENAI_*` |
+
+If a third-party provider exposes both Claude-compatible and OpenAI-compatible endpoints, the UI can store both endpoints and one shared key, but only one side is active at runtime. With `.env` only, uncomment either the Claude-compatible block or the OpenAI-compatible block; do not enable both just to be "complete."
+
 The AI Assistant settings panel in Perfetto UI has two configuration areas: the `Connection` tab configures the SmartPerfetto backend URL, and the `Providers` tab configures model-provider profiles. The advanced backend auth token on the `Connection` tab is optional; fill it only when the backend was started with `SMARTPERFETTO_API_KEY`. It is not a model-provider key field. Model-provider credentials can come from Claude Code local config, from the backend/Docker env files below, or from Provider Manager profiles created in the frontend.
 
 For beginners, the UI path is the least ambiguous:
@@ -19,17 +32,25 @@ An active Provider Manager profile overrides `.env`. To make `.env` changes take
 
 The preset Base URLs come from public provider information and public documentation. They are not guaranteed to be correct for every account, plan, region, or future provider change. If connection, streaming, or tool/function calling fails, first verify the Base URL, model ID, and protocol in your provider console.
 
-For local source runs, backend configuration lives in `backend/.env`. Start from the template:
+If you choose the local source env-file path, the backend reads `backend/.env`. Start from the template:
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-Docker runs always read the repository-root `.env`, including both Docker Hub images and local source Docker builds:
+If you choose the Docker env-file path, both Docker Hub images and local source Docker builds read the repository-root `.env`:
 
 ```bash
 cp .env.example .env
 ```
+
+npm CLI does not use the Web UI `Connection` settings. For first-time CLI setup, run:
+
+```bash
+smp config init
+```
+
+It creates `~/.smartperfetto/env`. When `--env-file` is not passed, the CLI loads package/source `backend/.env` first, then `~/.smartperfetto/env`, with the user file taking priority. If you pass `--env-file /path/to/env`, the CLI reads only that file. CLI configuration follows the same rule: choose either a Claude-compatible env block or an OpenAI-compatible env block.
 
 ## LLM Configuration
 
@@ -38,7 +59,9 @@ SmartPerfetto has two first-class SDK runtimes:
 - `claude-agent-sdk`: the default runtime. Use it for Anthropic, Claude Code local auth, Bedrock, Vertex, and Anthropic/Claude Code-compatible providers.
 - `openai-agents-sdk`: the OpenAI runtime. Use it for OpenAI Responses API, Ollama, and OpenAI-compatible gateways that support streaming function/tool calling.
 
-Runtime selection priority is: request/session `providerId`, active Provider Manager profile, `SMARTPERFETTO_AGENT_RUNTIME`, then the default `claude-agent-sdk`. If `.env` contains both `ANTHROPIC_*` and `OPENAI_*` without `SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk`, analysis still uses Claude Agent SDK. An active Provider Manager profile overrides `.env` fallback; confirm the current source with `aiEngine.credentialSource` and `aiEngine.providerOverridesEnv` from `/health`.
+These runtimes are mutually selected backend orchestration SDKs. OpenAI runtime setup does not require installing or logging in to Claude Code; local Claude Code setup does not require an OpenAI key.
+
+Runtime selection priority is: request/session `providerId`, active Provider Manager profile, `SMARTPERFETTO_AGENT_RUNTIME`, then the default `claude-agent-sdk`. Do not enable both `ANTHROPIC_*` and `OPENAI_*` for first setup; if an advanced deployment does contain both without `SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk`, analysis still uses Claude Agent SDK. An active Provider Manager profile overrides `.env` fallback; confirm the current source with `aiEngine.credentialSource` and `aiEngine.providerOverridesEnv` from `/health`.
 
 Perfetto UI Provider Management can store both endpoint families for the same provider: `claudeBaseUrl` / `claudeApiKey` / `claudeAuthToken` for Claude Code SDK, and `openaiBaseUrl` / `openaiApiKey` / `openaiProtocol` for OpenAI SDK. The provider switcher beside the AI input shows the active SDK runtime.
 
@@ -61,7 +84,7 @@ CLAUDE_MODEL=deepseek-v4-pro
 CLAUDE_LIGHT_MODEL=deepseek-v4-flash
 ```
 
-Xiaomi MiMo Token Plan example:
+Xiaomi MiMo Token Plan example. The two blocks below are alternatives; do not paste both into the same env file.
 
 ```bash
 # Anthropic-compatible / Claude SDK
@@ -69,7 +92,9 @@ ANTHROPIC_BASE_URL=https://token-plan-sgp.xiaomimimo.com/anthropic
 ANTHROPIC_API_KEY=your_xiaomi_mimo_api_key_here
 CLAUDE_MODEL=mimo-v2.5-pro
 CLAUDE_LIGHT_MODEL=mimo-v2.5-pro
+```
 
+```bash
 # OpenAI-compatible / OpenAI Agents SDK
 SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk
 OPENAI_BASE_URL=https://token-plan-sgp.xiaomimimo.com/v1
@@ -80,6 +105,8 @@ OPENAI_LIGHT_MODEL=mimo-v2.5-pro
 ```
 
 Provider model catalogs, Base URLs, and plan permissions can change; if your account console lists a different model ID or dedicated domain, replace the corresponding fields.
+
+The table below is a manual-env and troubleshooting reference, not a checklist you must fully configure.
 
 | Provider | Claude / Anthropic-compatible Base URL | OpenAI-compatible Base URL | Recommended main model | Recommended light model |
 |---|---|---|---|---|
@@ -132,7 +159,7 @@ If a third-party provider exposes both endpoint families, fill both in Provider 
 
 SmartPerfetto does not read Codex CLI, Gemini CLI, or OpenCode login state; those tools manage their own config files.
 
-Restart the backend after changing `.env`. Verify explicit env/proxy credentials with:
+Restart the backend after changing `.env`. Saving or activating a Provider Manager profile in the UI usually does not require a backend restart, but existing analysis sessions keep the provider source they were created with. Verify explicit env/proxy credentials with:
 
 ```bash
 curl http://localhost:3000/health

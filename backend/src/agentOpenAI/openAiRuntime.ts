@@ -68,6 +68,7 @@ import {
   applyCapturedEntities,
 } from '../agent/core/entityCapture';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from '../agentv3/outputLanguage';
+import {sanitizeCodeAwareText} from '../services/security/codeAwareOutputRegistry';
 import { formatToolCallNarration } from '../agentv3/toolNarration';
 import { loadOpenAIConfig, type OpenAIAgentConfig } from './openAiConfig';
 import {
@@ -723,6 +724,9 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         }
 
         clearTimeout(timeout);
+        if (options.codeAwareMode && options.codeAwareMode !== 'off') {
+          conclusion = sanitizeCodeAwareText(sessionId, conclusion);
+        }
         const findings = extractFindingsFromText(conclusion);
         const confidence = partial
           ? Math.min(0.55, this.estimateConfidence(findings, conclusion))
@@ -1057,6 +1061,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       ? new SkillNotesBudget({ mode: 'full' })
       : undefined;
     const { allowedTools, toolDefinitions } = createClaudeMcpServer({
+      sessionId,
       traceId,
       traceProcessorService: this.traceProcessorService,
       skillExecutor,
@@ -1083,6 +1088,8 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       skillNotesBudget,
       outputLanguage: config.outputLanguage,
       knowledgeScope: knowledgeScopeFromOptions(options),
+      codeAwareMode: options.codeAwareMode,
+      codebaseIds: options.codebaseIds,
     });
 
     const tools = createOpenAIToolsFromMcpDefinitions(toolDefinitions);
@@ -1136,6 +1143,8 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           comparison: comparisonContext,
           traceCompleteness,
           outputLanguage: config.outputLanguage,
+          codeAwareMode: options.codeAwareMode,
+          codebaseIds: options.codebaseIds,
         } satisfies ClaudeAnalysisContext);
 
     const sessionMapKey = this.buildSessionMapKey(sessionId, options.referenceTraceId);
@@ -1440,9 +1449,10 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     }
 
     const message = formatOpenAIError(params.error);
-    const conclusion = planStatus.complete
+    let conclusion = planStatus.complete
       ? conclusionBase
       : this.withIncompletePlanWarning(conclusionBase, planStatus, params.outputLanguage);
+    conclusion = sanitizeCodeAwareText(params.sessionId, conclusion);
     const findings = extractFindingsFromText(conclusion);
     const confidence = Math.min(0.55, this.estimateConfidence(findings, conclusion));
     const terminationReason: AnalysisTerminationReason = planStatus.complete ? 'timeout' : 'plan_incomplete';

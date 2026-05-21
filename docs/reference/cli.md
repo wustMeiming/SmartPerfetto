@@ -35,7 +35,7 @@ Options:
   -p, --prompt <question>   analysis prompt (shortcut for --query)
   -q, --query <question>    analysis question (alias for --prompt)
   --session-dir <path>      override session storage root (default: ~/.smartperfetto)
-  --env-file <path>         path to .env file (default: backend/.env)
+  --env-file <path>         path to explicit .env file (skips default env chain)
   --verbose                 show verbose event stream
   --no-color                disable ANSI colors
   --resume <sessionId>      start the REPL with this session already loaded
@@ -83,6 +83,17 @@ smp provider test system
 smp provider test <providerId> --format json
 ```
 
+CLI 配置文件和 Web UI 配置不是同一个入口。第一次使用 CLI 时，推荐先运行
+`smp config init`，然后编辑输出路径里的 env 文件，通常是
+`~/.smartperfetto/env`。没有显式传 `--env-file` 时，CLI 读取顺序是：
+
+1. 包内或源码目录的 `backend/.env`。
+2. `~/.smartperfetto/env`，覆盖前面的值。
+
+如果传了 `--env-file /path/to/env`，CLI 只读取这个文件。和 Web/Docker 一样，
+首次配置只启用一个 provider 来源：本机 Claude 登录态、一个
+Claude-compatible env block，或一个 OpenAI-compatible env block。
+
 Runtime 判断按实际选择的 provider/runtime 执行：
 
 - Claude Agent SDK：允许 API key、Anthropic-compatible proxy、Bedrock、
@@ -91,7 +102,7 @@ Runtime 判断按实际选择的 provider/runtime 执行：
   `localhost` / `127.0.0.1` / `0.0.0.0` OpenAI-compatible endpoint。
 - Ollama provider 默认走 OpenAI-compatible runtime。
 
-第一轮 CLI 不提供 `provider add/edit`，涉及密钥写入的交互配置仍由正式配置文件
+第一轮 CLI 不提供 `provider add/edit`，涉及密钥写入的交互配置仍由 env 文件
 或后续安全交互设计处理。
 
 ## Trace 查询与 Skill
@@ -106,6 +117,30 @@ smp skill trace.perfetto-trace startup_slow_reasons --params '{"package":"com.ex
 
 `query` 和 `skill` 不需要启动 Web UI。`skill` 会加载 SmartPerfetto 内置
 YAML Skills 和 SQL fragments。
+
+## Code-Aware Analysis
+
+先注册并索引本机代码库，再在分析 session 中显式选择 code-aware 模式：
+
+```bash
+smp codebase preview /path/to/app
+smp codebase register /path/to/app --kind app_source --name MyApp --path-filter app/src/main/ --dry-run
+smp codebase register /path/to/app --kind app_source --name MyApp --path-filter app/src/main/
+smp codebase list
+smp codebase reindex cb_xxx
+smp codebase symbols MainActivity --codebase-id cb_xxx
+
+smp run trace.perfetto-trace \
+  --code-aware metadata_only \
+  --codebase-id cb_xxx \
+  "结合源码定位启动慢原因"
+```
+
+`metadata_only` 只把 `CodeRef` 元数据暴露给模型；源码正文不会进入 session、
+报告或导出。`provider_send` 只有在注册 codebase 时使用 `--send-to-provider`
+并且本次分析也选择 `--code-aware provider_send` 时才允许发送片段。不传
+`--codebase-id` 时，即使本机已有注册代码库，本次分析也按 trace-only 路径运行。
+完整说明见 [Code-Aware Analysis](../getting-started/code-aware-analysis.md)。
 
 ## 双 Trace 对比
 

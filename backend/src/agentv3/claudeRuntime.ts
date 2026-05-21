@@ -69,6 +69,7 @@ import {
   buildPatternContextSection,
   buildNegativePatternSection,
 } from './analysisPatternMemory';
+import {sanitizeCodeAwareText} from '../services/security/codeAwareOutputRegistry';
 import { SkillNotesBudget } from './selfImprove/skillNotesInjector';
 import { runSnapshots } from './selfImprove/strategyFingerprint';
 import { verifyConclusion, generateCorrectionPrompt, isConclusionIncomplete } from './claudeVerifier';
@@ -1683,6 +1684,11 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
         });
       }
 
+      if (options.codeAwareMode && options.codeAwareMode !== 'off') {
+        conclusionText = sanitizeCodeAwareText(sessionId, conclusionText);
+        mergedFindings = mergeFindings([extractFindingsFromText(conclusionText)]);
+      }
+
       const baseConfidence = this.estimateConfidence(mergedFindings);
       const turnConfidence = isPartialResult
         ? capPartialConfidence(baseConfidence, mergedFindings.length > 0)
@@ -1953,6 +1959,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
           })
         : undefined;
       const { server: mcpServer, allowedTools } = createClaudeMcpServer({
+        sessionId,
         traceId,
         traceProcessorService: this.traceProcessorService,
         skillExecutor,
@@ -1964,6 +1971,8 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
         skillNotesBudget: quickNotesBudget,
         outputLanguage: this.config.outputLanguage,
         knowledgeScope: knowledgeScopeFromOptions(options),
+        codeAwareMode: options.codeAwareMode,
+        codebaseIds: options.codebaseIds,
       });
 
       const systemPrompt = buildQuickSystemPrompt({
@@ -2128,6 +2137,10 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
           },
           timestamp: Date.now(),
         });
+      }
+      if (options.codeAwareMode && options.codeAwareMode !== 'off') {
+        conclusionText = sanitizeCodeAwareText(sessionId, conclusionText);
+        mergedFindings = mergeFindings([extractFindingsFromText(conclusionText)]);
       }
       const quickConfidenceBase = mergedFindings.length > 0 ? 0.8 : 0.5;
       const quickConfidence = isPartialResult
@@ -2800,6 +2813,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
       ? new SkillNotesBudget({ mode: 'full' })
       : undefined;
     const { server: mcpServer, allowedTools } = createClaudeMcpServer({
+      sessionId,
       traceId,
       traceProcessorService: this.traceProcessorService,
       skillExecutor,
@@ -2825,6 +2839,8 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
       skillNotesBudget: fullNotesBudget,
       outputLanguage: this.config.outputLanguage,
       knowledgeScope: knowledgeScopeFromOptions(options),
+      codeAwareMode: options.codeAwareMode,
+      codebaseIds: options.codebaseIds,
     });
 
     // Phase 9: (removed — skillCatalog was populated but never used in prompt;
@@ -2882,6 +2898,8 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
       traceOs: traceInfo?.traceOs,
       traceFormat: traceInfo?.traceFormat,
       outputLanguage: this.config.outputLanguage,
+      codeAwareMode: options.codeAwareMode,
+      codebaseIds: options.codebaseIds,
     };
     const systemPrompt = buildSystemPrompt(analysisContextForRebuild);
 

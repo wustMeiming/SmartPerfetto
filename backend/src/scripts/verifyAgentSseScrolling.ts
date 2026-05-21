@@ -23,6 +23,8 @@ import {
 } from '../middleware/auth';
 import { writeTraceMetadata } from '../services/traceMetadataStore';
 
+type CodeAwareMode = 'off' | 'metadata_only' | 'provider_send';
+
 interface VerifyOptions {
   tracePath: string;
   query: string;
@@ -35,6 +37,20 @@ interface VerifyOptions {
   requireConclusionEvidence: boolean;
   /** Analysis mode override forwarded as options.analysisMode to the backend. */
   analysisMode?: 'fast' | 'full' | 'auto';
+  /** Code-aware mode forwarded as options.codeAwareMode to the backend. */
+  codeAwareMode?: CodeAwareMode;
+  /** Registered codebases exposed to this verification run. */
+  codebaseIds: string[];
+  /** Require semantic source-level code references in the final conclusion. */
+  requireCodeRef: boolean;
+  /** Literal text that must appear in a conclusion/analysis_completed event. */
+  requiredText: string[];
+  /** Literal text that must not appear in a conclusion/analysis_completed event. */
+  forbiddenText: string[];
+  /** Allow full-mode source/tool checks that intentionally do not emit data envelopes. */
+  allowNoDataEnvelopes: boolean;
+  /** Tool names that must be dispatched during the run. */
+  requiredTools: string[];
 }
 
 interface SseSummary {
@@ -62,13 +78,18 @@ interface SseSummary {
   analysisCompletedConclusionChars: number;
   analysisCompletedHasConcreteEvidenceRefs: boolean;
   analysisCompletedHasEvidenceIndex: boolean;
+  conclusionHasConcreteCodeRefs: boolean;
+  analysisCompletedHasConcreteCodeRefs: boolean;
   analysisCompletedReportUrl?: string;
+  requiredTextMatches: Record<string, boolean>;
+  forbiddenTextMatches: Record<string, boolean>;
   /** Older SSE fields that may still appear in archived sessions/logs. */
   stageNames: string[];
   stageTransitionCount: number;
   directSkillProgressCount: number;
   directSkillCompletedCount: number;
   directSkillFindingCount: number;
+  toolCallCounts: Record<string, number>;
 }
 
 const DEFAULT_TRACE = '../test-traces/scroll-demo-customer-scroll.pftrace';
@@ -84,6 +105,14 @@ function printUsage(): void {
   console.log('  --max-rounds <number>             Analysis max rounds (default: 3)');
   console.log('  --confidence-threshold <number>   Analysis confidence threshold (default: 0.5)');
   console.log('  --mode <fast|full|auto>           Override analysisMode sent to backend (default: unset → classifier)');
+  console.log('  --code-aware <off|metadata_only|provider_send>');
+  console.log('                                      Forward codeAwareMode to the backend');
+  console.log('  --codebase-id <id>                 Registered codebase id to expose; repeatable');
+  console.log('  --require-code-ref                 Require source-level code refs in conclusion/analysis_completed text');
+  console.log('  --require-text <text>              Require literal text in conclusion/analysis_completed; repeatable');
+  console.log('  --forbid-text <text>               Forbid literal text in conclusion/analysis_completed; repeatable');
+  console.log('  --require-tool <name>              Require an agent_task_dispatched tool call; repeatable');
+  console.log('  --allow-no-data-envelopes          Do not require data envelopes in full mode');
   console.log('  --output <path>                   JSON report output path');
   console.log('  --require-conclusion-evidence     Fail unless analysis_completed conclusion has concrete evidence refs');
   console.log('  --keep-session                    Do not delete session after verification');
@@ -101,6 +130,12 @@ function parseArgs(argv: string[]): VerifyOptions {
     keepSession: false,
     keepTrace: false,
     requireConclusionEvidence: false,
+    codebaseIds: [],
+    requireCodeRef: false,
+    requiredText: [],
+    forbiddenText: [],
+    allowNoDataEnvelopes: false,
+    requiredTools: [],
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -124,6 +159,16 @@ function parseArgs(argv: string[]): VerifyOptions {
 
     if (arg === '--require-conclusion-evidence') {
       options.requireConclusionEvidence = true;
+      continue;
+    }
+
+    if (arg === '--require-code-ref') {
+      options.requireCodeRef = true;
+      continue;
+    }
+
+    if (arg === '--allow-no-data-envelopes') {
+      options.allowNoDataEnvelopes = true;
       continue;
     }
 
@@ -196,6 +241,54 @@ function parseArgs(argv: string[]): VerifyOptions {
       continue;
     }
 
+    if (arg === '--code-aware') {
+      if (!next) {
+        throw new Error('--code-aware requires a value');
+      }
+      if (next !== 'off' && next !== 'metadata_only' && next !== 'provider_send') {
+        throw new Error(`Invalid --code-aware value: ${next} (expected off|metadata_only|provider_send)`);
+      }
+      options.codeAwareMode = next;
+      i += 1;
+      continue;
+    }
+
+    if (arg === '--codebase-id') {
+      if (!next) {
+        throw new Error('--codebase-id requires a value');
+      }
+      options.codebaseIds.push(next);
+      i += 1;
+      continue;
+    }
+
+    if (arg === '--require-text') {
+      if (!next) {
+        throw new Error('--require-text requires a value');
+      }
+      options.requiredText.push(next);
+      i += 1;
+      continue;
+    }
+
+    if (arg === '--forbid-text') {
+      if (!next) {
+        throw new Error('--forbid-text requires a value');
+      }
+      options.forbiddenText.push(next);
+      i += 1;
+      continue;
+    }
+
+    if (arg === '--require-tool') {
+      if (!next) {
+        throw new Error('--require-tool requires a value');
+      }
+      options.requiredTools.push(next);
+      i += 1;
+      continue;
+    }
+
     if (arg === '--output') {
       if (!next) {
         throw new Error('--output requires a value');
@@ -252,6 +345,31 @@ function hasEvidenceIndex(text: string): boolean {
   return text.includes('证据表索引');
 }
 
+function hasConcreteCodeReferences(text: string): boolean {
+  return /\b(?:chunkId|evidence_ref_id|source_ref)\b/i.test(text)
+    || /\b(?:resolve_symbol|lookup_app_source)\s*\(/i.test(text)
+    || (/\bfilePath\b/i.test(text) && /\blineRange\b/i.test(text))
+    || /\b[\w.-]+(?:\/[\w.-]+)+\.(?:kt|java|kts|xml|cpp|cc|c|h|hpp|m|mm|swift|rs|go|py|ts|tsx|js|jsx|sql|md)(?::(?:L)?\d+(?:-\d+)?|\s+L\d+(?:-\d+)?)\b/i.test(text);
+}
+
+interface TextChecks {
+  requiredText: string[];
+  forbiddenText: string[];
+}
+
+function recordTextChecks(summary: SseSummary, text: string, checks: TextChecks): void {
+  for (const required of checks.requiredText) {
+    if (!summary.requiredTextMatches[required] && text.includes(required)) {
+      summary.requiredTextMatches[required] = true;
+    }
+  }
+  for (const forbidden of checks.forbiddenText) {
+    if (!summary.forbiddenTextMatches[forbidden] && text.includes(forbidden)) {
+      summary.forbiddenTextMatches[forbidden] = true;
+    }
+  }
+}
+
 function extractDataEnvelopes(parsed: unknown, parsedRecord: Record<string, unknown> | null): Array<Record<string, unknown>> {
   const candidates = [
     parsedRecord?.envelope,
@@ -288,6 +406,7 @@ function recordConclusionEvidence(
     summary.conclusionChars = Math.max(summary.conclusionChars, text.length);
     summary.conclusionHasConcreteEvidenceRefs ||= hasConcreteEvidenceReferences(text);
     summary.conclusionHasEvidenceIndex ||= hasEvidenceIndex(text);
+    summary.conclusionHasConcreteCodeRefs ||= hasConcreteCodeReferences(text);
     return;
   }
 
@@ -297,9 +416,15 @@ function recordConclusionEvidence(
   );
   summary.analysisCompletedHasConcreteEvidenceRefs ||= hasConcreteEvidenceReferences(text);
   summary.analysisCompletedHasEvidenceIndex ||= hasEvidenceIndex(text);
+  summary.analysisCompletedHasConcreteCodeRefs ||= hasConcreteCodeReferences(text);
 }
 
-async function collectSseSummary(baseUrl: string, sessionId: string, timeoutMs: number): Promise<SseSummary> {
+async function collectSseSummary(
+  baseUrl: string,
+  sessionId: string,
+  timeoutMs: number,
+  textChecks: TextChecks,
+): Promise<SseSummary> {
   const summary: SseSummary = {
     totalEvents: 0,
     progressCount: 0,
@@ -322,11 +447,16 @@ async function collectSseSummary(baseUrl: string, sessionId: string, timeoutMs: 
     analysisCompletedConclusionChars: 0,
     analysisCompletedHasConcreteEvidenceRefs: false,
     analysisCompletedHasEvidenceIndex: false,
+    conclusionHasConcreteCodeRefs: false,
+    analysisCompletedHasConcreteCodeRefs: false,
+    requiredTextMatches: Object.fromEntries(textChecks.requiredText.map((text) => [text, false])),
+    forbiddenTextMatches: Object.fromEntries(textChecks.forbiddenText.map((text) => [text, false])),
     stageNames: [],
     stageTransitionCount: 0,
     directSkillProgressCount: 0,
     directSkillCompletedCount: 0,
     directSkillFindingCount: 0,
+    toolCallCounts: {},
   };
 
   const stageNameSet = new Set<string>();
@@ -397,6 +527,9 @@ async function collectSseSummary(baseUrl: string, sessionId: string, timeoutMs: 
               break;
             case 'agent_task_dispatched':
               summary.agentTaskDispatchedCount += 1;
+              if (typeof payload?.toolName === 'string') {
+                summary.toolCallCounts[payload.toolName] = (summary.toolCallCounts[payload.toolName] ?? 0) + 1;
+              }
               break;
             case 'agent_response':
               summary.agentResponseCount += 1;
@@ -407,6 +540,7 @@ async function collectSseSummary(baseUrl: string, sessionId: string, timeoutMs: 
             case 'conclusion':
               summary.conclusionCount += 1;
               if (typeof payload?.conclusion === 'string') {
+                recordTextChecks(summary, payload.conclusion, textChecks);
                 recordConclusionEvidence(summary, payload.conclusion, 'conclusion');
               }
               break;
@@ -438,6 +572,7 @@ async function collectSseSummary(baseUrl: string, sessionId: string, timeoutMs: 
 
           if (event === 'analysis_completed') {
             if (typeof payload?.conclusion === 'string') {
+              recordTextChecks(summary, payload.conclusion, textChecks);
               recordConclusionEvidence(summary, payload.conclusion, 'analysis_completed');
             }
             if (typeof payload?.reportUrl === 'string') {
@@ -576,6 +711,8 @@ async function main(): Promise<void> {
           maxRounds: options.maxRounds,
           confidenceThreshold: options.confidenceThreshold,
           ...(options.analysisMode ? { analysisMode: options.analysisMode } : {}),
+          ...(options.codeAwareMode ? { codeAwareMode: options.codeAwareMode } : {}),
+          ...(options.codebaseIds.length > 0 ? { codebaseIds: options.codebaseIds } : {}),
         },
       }),
     });
@@ -586,7 +723,10 @@ async function main(): Promise<void> {
     }
     sessionId = startJson.sessionId;
 
-    const sse = await collectSseSummary(baseUrl, sessionId, options.timeoutMs);
+    const sse = await collectSseSummary(baseUrl, sessionId, options.timeoutMs, {
+      requiredText: options.requiredText,
+      forbiddenText: options.forbiddenText,
+    });
 
     // Quick-mode analyses skip plan submission. Architecture detection can still
     // be emitted by the deterministic prepass before the lightweight agent path.
@@ -603,7 +743,7 @@ async function main(): Promise<void> {
     };
 
     const fullModeChecks = {
-      hasDataEnvelopes: sse.dataEnvelopeCount > 0,
+      ...(options.allowNoDataEnvelopes ? {} : { hasDataEnvelopes: sse.dataEnvelopeCount > 0 }),
       hasPlanSubmitted: sse.planSubmittedCount > 0,
       hasArchitectureDetected: sse.architectureDetectedCount > 0,
     };
@@ -622,15 +762,38 @@ async function main(): Promise<void> {
         hasAnalysisCompletedConclusionEvidence: sse.analysisCompletedHasConcreteEvidenceRefs,
       }
       : {};
+    const codeReferenceChecks = options.requireCodeRef
+      ? {
+        hasConcreteCodeReferences:
+          sse.conclusionHasConcreteCodeRefs || sse.analysisCompletedHasConcreteCodeRefs,
+      }
+      : {};
+    const requiredTextChecks = Object.fromEntries(
+      options.requiredText.map((text) => [`requiresText:${text}`, sse.requiredTextMatches[text] === true]),
+    );
+    const forbiddenTextChecks = Object.fromEntries(
+      options.forbiddenText.map((text) => [`forbidsText:${text}`, sse.forbiddenTextMatches[text] !== true]),
+    );
+    const requiredToolChecks = Object.fromEntries(
+      options.requiredTools.map((toolName) => [`requiresTool:${toolName}`, (sse.toolCallCounts[toolName] ?? 0) > 0]),
+    );
     const checks = {
       ...requiredChecks,
       ...fullModeChecks,
       ...modeExpectationChecks,
       ...conclusionEvidenceChecks,
+      ...codeReferenceChecks,
+      ...requiredTextChecks,
+      ...forbiddenTextChecks,
+      ...requiredToolChecks,
     };
     const passed = Object.values(requiredChecks).every(Boolean)
       && Object.values(modeExpectationChecks).every(Boolean)
       && Object.values(conclusionEvidenceChecks).every(Boolean)
+      && Object.values(codeReferenceChecks).every(Boolean)
+      && Object.values(requiredTextChecks).every(Boolean)
+      && Object.values(forbiddenTextChecks).every(Boolean)
+      && Object.values(requiredToolChecks).every(Boolean)
       && (isQuickMode || Object.values(fullModeChecks).every(Boolean));
     const sessionLogFile = findSessionLogFile(sessionId);
 

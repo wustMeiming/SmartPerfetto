@@ -26,6 +26,21 @@
 import type { AnalyzeManagedSession } from '../assistant/application/agentAnalyzeSessionService';
 import { SessionPersistenceService } from './sessionPersistenceService';
 import { sessionContextManager } from '../agent/context/enhancedSessionContext';
+import { getDefaultCodebaseRegistry } from './codebase/defaultCodebaseServices';
+import { CodeLookupLedger } from './codebase/codeLookupLedger';
+
+function buildCodebaseSnapshot(codebaseIds: string[] | undefined) {
+  if (!codebaseIds || codebaseIds.length === 0) return undefined;
+  const registry = getDefaultCodebaseRegistry();
+  return codebaseIds
+    .map(id => registry.get(id))
+    .filter(Boolean)
+    .map(ref => ({
+      codebaseId: ref!.codebaseId,
+      indexGeneration: ref!.indexGeneration,
+      consentHash: ref!.consent.consentHash,
+    }));
+}
 
 export interface PersistAgentTurnInput {
   session: AnalyzeManagedSession;
@@ -53,8 +68,8 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
   try {
     const sessionContext = sessionContextManager.get(sessionId, traceId);
 
-    const snapshot = typeof session.orchestrator.takeSnapshot === 'function'
-      ? session.orchestrator.takeSnapshot(sessionId, traceId, {
+	    const snapshot = typeof session.orchestrator.takeSnapshot === 'function'
+	      ? session.orchestrator.takeSnapshot(sessionId, traceId, {
           referenceTraceId: session.referenceTraceId,
           comparisonSource: session.comparisonSource,
           comparisonReportSection: session.comparisonReportSection,
@@ -65,9 +80,13 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
           agentResponses: session.agentResponses || [],
           dataEnvelopes: session.dataEnvelopes || [],
           hypotheses: session.hypotheses || [],
-          agentRuntimeProviderId: session.providerId,
-          agentRuntimeProviderSnapshotHash: session.providerSnapshotHash,
-          runSequence: session.runSequence || 0,
+	          agentRuntimeProviderId: session.providerId,
+	          agentRuntimeProviderSnapshotHash: session.providerSnapshotHash,
+	          codeAwareMode: (session as {codeAwareMode?: unknown}).codeAwareMode as any,
+	          codebaseIds: (session as {codebaseIds?: string[]}).codebaseIds,
+	          codebaseSnapshot: buildCodebaseSnapshot((session as {codebaseIds?: string[]}).codebaseIds),
+	          codeLookupSummary: CodeLookupLedger.restore(sessionId, 12_000, 2).toSnapshotSummary(),
+	          runSequence: session.runSequence || 0,
           conversationOrdinal: session.conversationOrdinal || 0,
         })
       : null;

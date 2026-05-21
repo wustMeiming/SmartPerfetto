@@ -4,6 +4,19 @@
 
 SmartPerfetto 本地源码运行时可以直接使用 Claude Code 的本地认证/配置；如果这个终端里的 `claude` 已经能正常写代码，可以不创建 `.env`。这既包括 Claude Code 官方订阅，也包括 Claude Code 已经配置好的第三方 base URL + API key。需要显式配置 API key、代理或 Docker 运行时，再使用 env 文件。
 
+## 先回答：Claude Code 和 OpenAI SDK 都要配置吗？
+
+不用。Claude Code 和 OpenAI Agents SDK 是两条可选运行路径，不是两个都要完成的配置步骤。第一次配置只选一个来源：
+
+| 你现在有什么 | 推荐选择 | 需要配置 |
+|---|---|---|
+| 不想碰 env、正在用 Docker 或免安装包 | UI Provider Manager | 在 `Providers` 页填写 provider key，测试后激活 |
+| 本地源码运行，且同一终端里的 `claude` 已经可用 | Claude Code 本地配置 | 不需要 `.env`，也不需要 `OPENAI_*` |
+| Anthropic API key 或 Claude/Anthropic-compatible provider | Claude Agent SDK | `ANTHROPIC_*` + `CLAUDE_*` |
+| OpenAI API key、Ollama 或 OpenAI-compatible provider | OpenAI Agents SDK | `SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk` + `OPENAI_*` |
+
+如果一个第三方 provider 同时给了 Claude-compatible 和 OpenAI-compatible 两组 endpoint，UI 里可以保存两组地址和同一个共享 key，但运行时仍只会激活其中一侧。只用 `.env` 时，解注释 Claude-compatible block 或 OpenAI-compatible block 其中一个；不要为了“更完整”把两边都打开。
+
 Perfetto UI 的 AI Assistant 设置面板分为两类配置：`Connection` 页配置 SmartPerfetto 后端地址，`Providers` 页配置模型 provider profile。`Connection` 页里的高级 backend auth token 是可选项，只在后端启动时设置了 `SMARTPERFETTO_API_KEY` 才需要填写；它不是第三方大模型 provider key。模型 provider 凭证可以来自 Claude Code 本地配置、下面的后端/Docker env 文件，也可以通过前端 `Providers` 页写入后端 Provider Manager。
 
 初学者优先走 UI，最不容易混淆：
@@ -19,17 +32,25 @@ active Provider Manager profile 会覆盖 `.env`。如果希望 `.env` 修改重
 
 预置的 Base URL 来自 provider 公开信息和公开文档，不保证对所有账号、套餐、地区长期正确。很多 provider 的入口会按地区、申请国家、套餐或专属控制台域名变化，例如新加坡区、国内区、国际区可能不同。如果连接、流式输出或 tool/function calling 出错，先到 provider 控制台核对 Base URL、模型 ID 和协议类型；确认是公开 preset 错误后，建议提交 issue 或 PR 修正。
 
-本地源码运行的后端配置位于 `backend/.env`。推荐从模板开始：
+如果选择本地源码的 env 文件路径，后端读取 `backend/.env`。推荐从模板开始：
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-Docker 运行统一读取仓库根目录 `.env`，包括 Docker Hub 镜像和本地 source Docker build：
+如果选择 Docker 的 env 文件路径，Docker Hub 镜像和本地 source Docker build 都读取仓库根目录 `.env`：
 
 ```bash
 cp .env.example .env
 ```
+
+npm CLI 不使用 Web UI 的 `Connection` 配置。第一次用 CLI 时，推荐运行：
+
+```bash
+smp config init
+```
+
+它会创建 `~/.smartperfetto/env`。没有显式传 `--env-file` 时，CLI 先读取包内/源码目录的 `backend/.env`，再读取 `~/.smartperfetto/env`，后者覆盖前者；如果传了 `--env-file /path/to/env`，CLI 只读取这个文件。CLI 配置方式仍然遵守同一条规则：Claude-compatible 和 OpenAI-compatible env block 二选一。
 
 ## LLM 配置
 
@@ -38,7 +59,9 @@ SmartPerfetto 后端支持两个一等 SDK runtime：
 - `claude-agent-sdk`：默认 runtime。适合 Anthropic、Claude Code 本地认证、Bedrock、Vertex，以及 Anthropic/Claude Code-compatible provider。
 - `openai-agents-sdk`：OpenAI runtime。适合 OpenAI Responses API、Ollama 和支持流式 function/tool calling 的 OpenAI-compatible gateway。
 
-运行时选择不会根据“哪个 key 存在”自动猜。优先级是：请求/会话里的 `providerId`、Provider Manager 当前 active provider、`SMARTPERFETTO_AGENT_RUNTIME`、最后默认 `claude-agent-sdk`。因此如果 `.env` 里同时写了 `ANTHROPIC_*` 和 `OPENAI_*`，但没有设置 `SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk`，实际仍会走 Claude Agent SDK。active Provider Manager profile 会覆盖 `.env` fallback；当前来源可通过 `/health` 的 `aiEngine.credentialSource` 和 `aiEngine.providerOverridesEnv` 确认。
+这两个 runtime 是二选一的后端编排 SDK。配置 OpenAI runtime 时不需要先安装或登录 Claude Code；使用本机 Claude Code 时也不需要配置 OpenAI key。
+
+运行时选择不会根据“哪个 key 存在”自动猜。优先级是：请求/会话里的 `providerId`、Provider Manager 当前 active provider、`SMARTPERFETTO_AGENT_RUNTIME`、最后默认 `claude-agent-sdk`。首次配置不要同时启用 `ANTHROPIC_*` 和 `OPENAI_*`；如果高级部署确实同时写了两类 env，但没有设置 `SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk`，实际仍会走 Claude Agent SDK。active Provider Manager profile 会覆盖 `.env` fallback；当前来源可通过 `/health` 的 `aiEngine.credentialSource` 和 `aiEngine.providerOverridesEnv` 确认。
 
 Perfetto UI 的 Provider Management 支持把同一个 provider 的两组端点一起保存：`claudeBaseUrl` / `claudeApiKey` / `claudeAuthToken` 对应 Claude Code SDK，`openaiBaseUrl` / `openaiApiKey` / `openaiProtocol` 对应 OpenAI SDK。AI 输入框旁的 provider switcher 会显示当前 SDK runtime；对 DeepSeek、Qwen、Kimi、MiMo、TokenHub 或 custom 这类双端点 provider，可以在同一个下拉菜单里显式切换 Claude SDK / OpenAI SDK。切换 provider 或 SDK runtime 会开启新的 SDK session。
 
@@ -61,7 +84,7 @@ CLAUDE_MODEL=deepseek-v4-pro
 CLAUDE_LIGHT_MODEL=deepseek-v4-flash
 ```
 
-小米 MiMo Token Plan 示例：
+小米 MiMo Token Plan 示例。下面两段是二选一，不要同时复制到同一个 env 文件里。
 
 ```bash
 # Anthropic-compatible / Claude SDK
@@ -69,7 +92,9 @@ ANTHROPIC_BASE_URL=https://token-plan-sgp.xiaomimimo.com/anthropic
 ANTHROPIC_API_KEY=your_xiaomi_mimo_api_key_here
 CLAUDE_MODEL=mimo-v2.5-pro
 CLAUDE_LIGHT_MODEL=mimo-v2.5-pro
+```
 
+```bash
 # OpenAI-compatible / OpenAI Agents SDK
 SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk
 OPENAI_BASE_URL=https://token-plan-sgp.xiaomimimo.com/v1
@@ -80,7 +105,8 @@ OPENAI_LIGHT_MODEL=mimo-v2.5-pro
 ```
 
 当前模板内置的国内主流 Anthropic-compatible / Claude Code-compatible 和 OpenAI-compatible 入口只是公共信息 preset。Provider 模型目录、Base URL 和套餐权限会变化；如果你的账号控制台列出的模型 ID 或专属域名不同，以控制台为准替换对应字段。
-Provider Manager 中建议把同一个 provider 的 Anthropic-compatible URL、OpenAI-compatible URL 和共享 API key 一起预置；用户运行时通过界面选择 SDK Runtime，选择 Claude SDK 就使用 Anthropic-compatible URL，选择 OpenAI Agents SDK 就使用 OpenAI-compatible URL。
+
+下面的表是手动 env 配置和排障参考，不是需要逐项配置的清单。Provider Manager 中可以把同一个 provider 的 Anthropic-compatible URL、OpenAI-compatible URL 和共享 API key 一起预置；用户运行时通过界面选择 SDK Runtime，选择 Claude SDK 就使用 Anthropic-compatible URL，选择 OpenAI Agents SDK 就使用 OpenAI-compatible URL。
 
 | Provider | Claude / Anthropic-compatible Base URL | OpenAI-compatible Base URL | 推荐主模型 | 推荐轻模型 |
 |---|---|---|---|---|
@@ -143,7 +169,7 @@ CLAUDE_MODEL=your-provider-main-model
 CLAUDE_LIGHT_MODEL=your-provider-light-model
 ```
 
-修改 `.env` 后需要重启后端。显式 env/proxy 凭证可通过健康检查确认当前配置：
+修改 `.env` 后需要重启后端；在 UI 里保存或激活 Provider Manager profile 通常不需要重启，但已有分析 session 会继续使用创建时固定的 provider 来源。显式 env/proxy 凭证可通过健康检查确认当前配置：
 
 ```bash
 curl http://localhost:3000/health

@@ -394,6 +394,16 @@ export function buildSystemPromptParts(
       : `## 分析方法论\n\n${sceneStrategy}`,
   );
 
+  if (context.codeAwareMode && context.codeAwareMode !== 'off' && context.codebaseIds && context.codebaseIds.length > 0) {
+    const codeAwareTemplate = loadPromptTemplate('code-aware');
+    if (codeAwareTemplate) {
+      push(3, 'code_aware', renderTemplate(codeAwareTemplate, {
+        codeAwareMode: context.codeAwareMode,
+        codebaseIds: context.codebaseIds.join(', '),
+      }));
+    }
+  }
+
   if (context.sceneType === 'multi_trace_result_comparison') {
     const comparisonResultMethodology = loadPromptTemplate('comparison-result-methodology');
     if (comparisonResultMethodology) {

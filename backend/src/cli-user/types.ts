@@ -10,6 +10,7 @@
  */
 
 import type { BackendAgentRuntimeKind } from '../agentRuntime/runtimeSelection';
+import type { CodeAwareMode } from '../services/codebase/codeAwareFeature';
 
 /** Written to `<sessionDir>/config.json`. Source of truth for resume. */
 export interface CliSessionConfig {
@@ -35,6 +36,10 @@ export interface CliSessionConfig {
   sdkSessionId?: string;
   /** Claude model actually used — preserved for consistency across resumes. */
   model?: string;
+  /** Code-aware mode selected for this analysis turn, if any. */
+  codeAwareMode?: CodeAwareMode;
+  /** Registered codebase ids exposed to this analysis turn. */
+  codebaseIds?: string[];
   /** Unix ms when session was created. */
   createdAt: number;
   /** Unix ms of most recent turn completion. */

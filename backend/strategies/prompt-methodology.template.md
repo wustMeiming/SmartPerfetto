@@ -31,6 +31,8 @@ successCriteria: "确定掉帧根因并提供可操作的优化建议"
 3. **execute_sql** — 仅在没有匹配 Skill 或需要自定义查询时使用。**写 SQL 前务必先 lookup_sql_schema**
 4. **list_skills** — 不确定用哪个 Skill 时，先列出可用选项
 5. **detect_architecture** — 分析开始时调用，了解渲染管线类型
+6. **resolve_symbol / lookup_app_source / lookup_aosp_source / lookup_kernel_source** — 只有当 session 启用 codebase-aware 且 trace 证据已经指向具体代码域时使用；先定位 symbol，再查源码，最终只引用 CodeRef
+7. **propose_patch** — 只有在已有 successful code lookup 的 chunkId 后使用；未 verified 的 patch 只能作为 sketch，不能输出 copyable diff
 
 ### 参数说明
 - 调用 invoke_skill 时使用 `process_name` 参数（系统会自动映射为 YAML skill 中的 `package`）

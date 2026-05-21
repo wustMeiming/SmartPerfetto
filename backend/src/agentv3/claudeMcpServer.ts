@@ -67,8 +67,16 @@ import {
 import {
   McpToolRegistry,
   MCP_NAME_PREFIX as REGISTRY_MCP_NAME_PREFIX,
+  type ToolRequestScope,
 } from './mcpToolRegistry';
 import { backendLogPath } from '../runtimePaths';
+import {CodebaseRegistry} from '../services/codebase/codebaseRegistry';
+import {getDefaultCodebaseRegistry} from '../services/codebase/defaultCodebaseServices';
+import {CodeLookupLedger} from '../services/codebase/codeLookupLedger';
+import {PatchProposer} from '../services/codebase/patchProposer';
+import {normalizeCodeAwareMode, type CodeAwareMode} from '../services/codebase/codeAwareFeature';
+import {filterRagLookup} from '../services/rag/lookupResponseFilter';
+import {SymbolResolver} from '../services/symbol/symbolResolver';
 
 /**
  * Process-wide RagStore singleton, lazily initialized on first MCP tool
@@ -202,6 +210,17 @@ function parseOptionalToolArrayInput<T>(value: unknown): T[] | null {
     if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return [];
   }
   return parseToolArrayInput<T>(value);
+}
+
+export function normalizeOptionalToolString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const normalized = trimmed.toLowerCase();
+  if (normalized === 'null' || normalized === 'undefined' || normalized === 'none') {
+    return undefined;
+  }
+  return trimmed;
 }
 
 function parseToolStringArrayInput(value: unknown): string[] {
@@ -699,6 +718,16 @@ export interface ClaudeMcpServerOptions {
   outputLanguage?: OutputLanguage;
   /** Enterprise tenant/workspace scope for knowledge, memory, case, and baseline tools. */
   knowledgeScope?: KnowledgeScope;
+  /** SmartPerfetto session id, used for code lookup ledger sidecars. */
+  sessionId?: string;
+  /** Code-aware analysis mode. `metadata_only` never sends source snippets to the provider. */
+  codeAwareMode?: CodeAwareMode;
+  /** Codebase ids whitelisted for this analysis session. */
+  codebaseIds?: string[];
+  /** Test hook / alternate registry. */
+  codebaseRegistry?: CodebaseRegistry;
+  /** Test hook / alternate code lookup ledger. */
+  codeLookupLedger?: CodeLookupLedger;
 }
 
 /**
@@ -714,6 +743,16 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
   const skillNotesBudget = options.skillNotesBudget;
   const outputLanguage = options.outputLanguage ?? DEFAULT_OUTPUT_LANGUAGE;
   const knowledgeScope = options.knowledgeScope;
+  const codeAwareMode = normalizeCodeAwareMode(options.codeAwareMode);
+  const codebaseIds = Array.from(new Set(options.codebaseIds ?? [])).filter(Boolean);
+  const codebaseRegistry = options.codebaseRegistry ?? getDefaultCodebaseRegistry();
+  const codeLookupLedger = options.codeLookupLedger ?? (
+    options.sessionId ? CodeLookupLedger.restore(options.sessionId, 12_000, 2) : undefined
+  );
+  const toolRequestScope: ToolRequestScope = {
+    sessionId: options.sessionId ?? traceId,
+    hasCodebaseAccess: codeAwareMode !== 'off' && codebaseIds.length > 0,
+  };
 
   /** Normalize skill params: ensure process_name ↔ package are both set. */
   function normalizeSkillParams(params: Record<string, any> | undefined, defaultPackage?: string): Record<string, any> {
@@ -2740,14 +2779,52 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     {
       query: z.string().describe('Search query — typically a function or class name, or a behavior description.'),
       top_k: z.number().int().min(1).max(20).optional().describe('Maximum hits returned (1-20, default 5).'),
+      codebase_id: z.string().optional().describe('Optional whitelisted registered AOSP codebase id.'),
+      build_id: z.string().optional().describe('Optional native build id filter.'),
+      symbol: z.string().optional().describe('Exact symbol filter when known.'),
+      path_prefix: z.string().optional().describe('Optional relative source path prefix.'),
     },
-    async ({ query, top_k }) => {
+    async ({ query, top_k, codebase_id, build_id, symbol, path_prefix }) => {
+      const codebaseId = normalizeOptionalToolString(codebase_id);
+      const buildId = normalizeOptionalToolString(build_id);
+      const symbolExact = normalizeOptionalToolString(symbol);
+      const pathPrefix = normalizeOptionalToolString(path_prefix);
+      if (codebaseId && !codebaseIds.includes(codebaseId)) {
+        return {
+          content: [{type: 'text' as const, text: JSON.stringify({success: false, error: 'Requested codebase is not whitelisted for this session'})}],
+          isError: true,
+        };
+      }
       const store = getRagStore();
       const result = store.search(query, {
         topK: top_k ?? 5,
         kinds: ['aosp'],
+        ...(codebaseId ? {codebaseIds: [codebaseId]} : {}),
+        ...(buildId ? {buildId} : {}),
+        ...(symbolExact ? {symbolExact} : {}),
+        ...(pathPrefix ? {pathPrefix} : {}),
         scope: knowledgeScope,
       });
+      if (result.results.some(hit => hit.chunk?.registryOrigin === 'codebase_registry')) {
+        const scopedResult = {
+          ...result,
+          results: result.results.filter(hit =>
+            hit.chunk?.registryOrigin !== 'codebase_registry' ||
+            (hit.chunk.codebaseId && codebaseIds.includes(hit.chunk.codebaseId))),
+        };
+        const filtered = await filterRagLookup(scopedResult, {
+          toolName: 'lookup_aosp_source',
+          turn: 0,
+          codebaseRegistry,
+          ledger: codeLookupLedger,
+          allowProviderSend: codeAwareMode === 'provider_send',
+          sessionId: options.sessionId,
+        });
+        await codeLookupLedger?.flush();
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({success: true, result: filtered}) }],
+        };
+      }
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
       };
@@ -2766,19 +2843,292 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     {
       query: z.string().describe('Search query — typically a tuning concept or vendor-specific knob.'),
       top_k: z.number().int().min(1).max(20).optional().describe('Maximum hits returned (1-20, default 5).'),
+      codebase_id: z.string().optional().describe('Optional whitelisted registered OEM codebase id.'),
+      vendor: z.string().optional().describe('Optional vendor filter.'),
     },
-    async ({ query, top_k }) => {
+    async ({ query, top_k, codebase_id, vendor }) => {
+      const codebaseId = normalizeOptionalToolString(codebase_id);
+      const vendorId = normalizeOptionalToolString(vendor);
+      if (codebaseId && !codebaseIds.includes(codebaseId)) {
+        return {
+          content: [{type: 'text' as const, text: JSON.stringify({success: false, error: 'Requested codebase is not whitelisted for this session'})}],
+          isError: true,
+        };
+      }
       const store = getRagStore();
       const result = store.search(query, {
         topK: top_k ?? 5,
         kinds: ['oem_sdk'],
+        ...(codebaseId ? {codebaseIds: [codebaseId]} : {}),
+        ...(vendorId ? {vendor: vendorId} : {}),
         scope: knowledgeScope,
       });
+      if (result.results.some(hit => hit.chunk?.registryOrigin === 'codebase_registry')) {
+        const scopedResult = {
+          ...result,
+          results: result.results.filter(hit =>
+            hit.chunk?.registryOrigin !== 'codebase_registry' ||
+            (hit.chunk.codebaseId && codebaseIds.includes(hit.chunk.codebaseId))),
+        };
+        const filtered = await filterRagLookup(scopedResult, {
+          toolName: 'lookup_oem_sdk',
+          turn: 0,
+          codebaseRegistry,
+          ledger: codeLookupLedger,
+          allowProviderSend: codeAwareMode === 'provider_send',
+          sessionId: options.sessionId,
+        });
+        await codeLookupLedger?.flush();
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({success: true, result: filtered}) }],
+        };
+      }
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
       };
     },
     { annotations: { readOnlyHint: true } },
+  );
+
+  const listCodebases = tool(
+    'list_codebases',
+    'List the app/AOSP/kernel/OEM codebases explicitly whitelisted for this analysis session. ' +
+    'Returns metadata only; it never exposes local root paths.',
+    {},
+    async () => {
+      const allowed = new Set(codebaseIds);
+      const codebases = codebaseRegistry.list()
+        .filter(ref => allowed.has(ref.codebaseId))
+        .map(ref => ({
+          codebaseId: ref.codebaseId,
+          kind: ref.kind,
+          displayName: ref.displayName,
+          indexGeneration: ref.indexGeneration,
+          chunkCount: ref.chunkCount,
+          eligibleForSendToProvider: ref.eligibleForSendToProvider,
+        }));
+      return {
+        content: [{type: 'text' as const, text: JSON.stringify({success: true, codebases})}],
+      };
+    },
+    {annotations: {readOnlyHint: true}},
+  );
+
+  const lookupAppSource = tool(
+    'lookup_app_source',
+    'Look up registered app source chunks for this analysis session. ' +
+    'Only whitelisted codebase IDs are accepted. In metadata_only mode the result carries file/symbol references without snippets.',
+    {
+      query: z.string().describe('Natural-language query, symbol, class, method, or file term.'),
+      top_k: z.number().int().min(1).max(20).optional().describe('Maximum hits returned (1-20, default 5).'),
+      codebase_id: z.string().optional().describe('Restrict to one whitelisted codebase id. Defaults to all session codebases.'),
+      symbol: z.string().optional().describe('Exact symbol filter when known.'),
+      file_path: z.string().optional().describe('Exact source file path relative to the registered root.'),
+      path_prefix: z.string().optional().describe('Restrict lookup to a relative path prefix.'),
+    },
+    async ({query, top_k, codebase_id, symbol, file_path, path_prefix}) => {
+      const codebaseId = normalizeOptionalToolString(codebase_id);
+      const symbolExact = normalizeOptionalToolString(symbol);
+      const filePath = normalizeOptionalToolString(file_path);
+      const pathPrefix = normalizeOptionalToolString(path_prefix);
+      const requestedIds = codebaseId ? [codebaseId] : codebaseIds;
+      const allowed = requestedIds.filter(id => codebaseIds.includes(id));
+      if (allowed.length === 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({success: false, error: 'No requested codebase is whitelisted for this session'}),
+          }],
+          isError: true,
+        };
+      }
+      const raw = getRagStore().search(query, {
+        topK: top_k ?? 5,
+        kinds: ['app_source'],
+        codebaseIds: allowed,
+        ...(symbolExact ? {symbolExact} : {}),
+        ...(filePath ? {filePathExact: filePath} : {}),
+        ...(pathPrefix ? {pathPrefix} : {}),
+        scope: knowledgeScope,
+      });
+      const filtered = await filterRagLookup(raw, {
+        toolName: 'lookup_app_source',
+        turn: 0,
+        codebaseRegistry,
+        ledger: codeLookupLedger,
+        allowProviderSend: codeAwareMode === 'provider_send',
+        sessionId: options.sessionId,
+      });
+      await codeLookupLedger?.flush();
+      return {
+        content: [{type: 'text' as const, text: JSON.stringify({success: true, result: filtered})}],
+      };
+    },
+    {annotations: {readOnlyHint: true}},
+  );
+
+  const lookupKernelSource = tool(
+    'lookup_kernel_source',
+    'Use when kernel/vendor source evidence is needed after trace evidence points at binder, scheduler, mm, io, or a kernel symbol. ' +
+    'Do NOT use for app or AOSP framework code. Prerequisites: a whitelisted kernel_source codebase, vendor or codebase_id, and a path_prefix/subsys. ' +
+    'Budget: top_k is capped at 20 and metadata_only sessions return CodeRef metadata without snippets. Outcomes: source hits, metadata-only hits, or an explicit unsupportedReason.',
+    {
+      query: z.string().describe('Kernel symbol, subsystem, or behavior query.'),
+      top_k: z.number().int().min(1).max(20).optional().describe('Maximum hits returned (1-20, default 5).'),
+      codebase_id: z.string().optional().describe('Restrict to one whitelisted kernel codebase id.'),
+      vendor: z.string().optional().describe('Vendor id. Required when multiple kernel codebases are available and codebase_id is omitted.'),
+      symbol: z.string().optional().describe('Exact symbol filter when known.'),
+      path_prefix: z.string().optional().describe('Required subsystem path prefix, for example drivers/android/binder.'),
+    },
+    async ({query, top_k, codebase_id, vendor, symbol, path_prefix}) => {
+      const codebaseId = normalizeOptionalToolString(codebase_id);
+      const vendorId = normalizeOptionalToolString(vendor);
+      const symbolExact = normalizeOptionalToolString(symbol);
+      const pathPrefix = normalizeOptionalToolString(path_prefix);
+      const requestedIds = codebaseId ? [codebaseId] : codebaseIds;
+      const allowed = requestedIds.filter(id => codebaseIds.includes(id));
+      if (allowed.length === 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({success: false, error: 'No requested codebase is whitelisted for this session'}),
+          }],
+          isError: true,
+        };
+      }
+      const kernelRefs = allowed
+        .map(id => codebaseRegistry.get(id))
+        .filter(ref => ref?.kind === 'kernel_source');
+      const vendors = new Set(kernelRefs.map(ref => ref!.vendor).filter(Boolean));
+      if (!codebaseId && !vendorId && vendors.size > 1) {
+        return {
+          content: [{type: 'text' as const, text: JSON.stringify({
+            success: false,
+            unsupportedReason: 'vendor_required_for_multi_vendor_kernel_lookup',
+            vendors: Array.from(vendors).sort(),
+          })}],
+          isError: true,
+        };
+      }
+      const raw = getRagStore().search(query, {
+        topK: top_k ?? 5,
+        kinds: ['kernel_source'],
+        codebaseIds: kernelRefs.map(ref => ref!.codebaseId),
+        ...(vendorId ? {vendor: vendorId} : {}),
+        ...(symbolExact ? {symbolExact} : {}),
+        ...(pathPrefix ? {pathPrefix} : {}),
+        scope: knowledgeScope,
+      });
+      const filtered = await filterRagLookup(raw, {
+        toolName: 'lookup_kernel_source',
+        turn: 0,
+        codebaseRegistry,
+        ledger: codeLookupLedger,
+        allowProviderSend: codeAwareMode === 'provider_send',
+        sessionId: options.sessionId,
+      });
+      await codeLookupLedger?.flush();
+      return {
+        content: [{type: 'text' as const, text: JSON.stringify({success: true, result: filtered})}],
+      };
+    },
+    {annotations: {readOnlyHint: true}},
+  );
+
+  const resolveSymbol = tool(
+    'resolve_symbol',
+    'Use when trace frames or obfuscated names must be resolved to CodeRef metadata before source lookup. ' +
+    'Do NOT use to guess file:line when build_id is missing; return the degraded result instead. ' +
+    'Prerequisites: whitelisted codebase ids and indexed source/symbol metadata. Budget: top_k capped at 20. Outcomes: app, native/AOSP, or kernel candidates with degradation reasons.',
+    {
+      symbol: z.string().describe('Class, function, or method name to resolve.'),
+      kind: z.enum(['app', 'native', 'kernel']).optional().describe('Resolution domain; default app.'),
+      codebase_id: z.string().optional().describe('Restrict to one whitelisted codebase id. Defaults to all session codebases.'),
+      file_path: z.string().optional().describe('Optional relative source file path for fallback matching.'),
+      build_id: z.string().optional().describe('Optional build id. Missing build id returns a degraded result.'),
+      vendor: z.string().optional().describe('Vendor id for kernel lookup.'),
+      top_k: z.number().int().min(1).max(20).optional().describe('Maximum candidates returned.'),
+    },
+    async ({symbol, kind, codebase_id, file_path, build_id, vendor, top_k}) => {
+      const codebaseId = normalizeOptionalToolString(codebase_id);
+      const filePath = normalizeOptionalToolString(file_path);
+      const buildId = normalizeOptionalToolString(build_id);
+      const vendorId = normalizeOptionalToolString(vendor);
+      const requestedIds = codebaseId ? [codebaseId] : codebaseIds;
+      const allowed = requestedIds.filter(id => codebaseIds.includes(id));
+      if (allowed.length === 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({success: false, error: 'No requested codebase is whitelisted for this session'}),
+          }],
+          isError: true,
+        };
+      }
+      const resolver = new SymbolResolver(getRagStore());
+      const results = allowed.map(id => {
+        const ref = codebaseRegistry.get(id);
+        if (kind === 'kernel' || ref?.kind === 'kernel_source') {
+          return resolver.resolveKernel({
+            symbol,
+            codebaseId: id,
+            vendor: vendorId ?? ref?.vendor,
+            ...(buildId ? {buildId} : {}),
+            topK: top_k ?? 5,
+          });
+        }
+        if (kind === 'native' || ref?.kind === 'aosp') {
+          return resolver.resolveNative({
+            symbol,
+            codebaseId: id,
+            ...(buildId ? {buildId} : {}),
+            topK: top_k ?? 5,
+          });
+        }
+        return resolver.resolveApp({
+          symbol,
+          codebaseId: id,
+          ...(filePath ? {filePath} : {}),
+          ...(buildId ? {buildId} : {}),
+          topK: top_k ?? 5,
+        });
+      });
+      return {
+        content: [{type: 'text' as const, text: JSON.stringify({
+          success: results.some(result => result.success),
+          results,
+        })}],
+      };
+    },
+    {annotations: {readOnlyHint: true}},
+  );
+
+  const proposePatch = tool(
+    'propose_patch',
+    'Use when the user asks for a concrete fix after successful code lookup. Do NOT use before lookup_app_source/lookup_kernel_source/lookup_aosp_source has returned prior contextChunkIds. ' +
+    'Prerequisites: all contextChunkIds must belong to one whitelisted codebase and provider_send consent must be enabled. Budget: patch attempts are capped by the session ledger. Outcomes: verified diff, non-copyable sketch, or unverified rejection.',
+    {
+      context_chunk_ids: z.array(z.string()).min(1).describe('Chunk ids previously returned by a successful source lookup in this session.'),
+      problem: z.string().describe('Performance problem the patch should address.'),
+      proposed_diff: z.string().optional().describe('Optional unified diff to validate. Only returned to the user if git apply --check passes.'),
+      patch_sketch: z.string().optional().describe('Optional high-level sketch when no verified diff is available.'),
+    },
+    async ({context_chunk_ids, problem, proposed_diff, patch_sketch}) => {
+      const proposer = new PatchProposer(getRagStore(), codebaseRegistry, codeLookupLedger);
+      const result = proposer.propose({
+        contextChunkIds: context_chunk_ids,
+        problem,
+        ...(proposed_diff ? {proposedDiff: proposed_diff} : {}),
+        ...(patch_sketch ? {patchSketch: patch_sketch} : {}),
+        turn: 0,
+      });
+      await codeLookupLedger?.flush();
+      return {
+        content: [{type: 'text' as const, text: JSON.stringify({success: result.patchStatus !== 'unverified', result})}],
+        ...(result.patchStatus === 'unverified' ? {isError: true} : {}),
+      };
+    },
+    {annotations: {readOnlyHint: false}},
   );
 
   // recall_project_memory (Plan 44): pure-read recall over project +
@@ -4221,6 +4571,11 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     registry.registerSdk(lookupBlogKnowledge, 'lookup_blog_knowledge', 'public');
     registry.registerSdk(lookupAospSource, 'lookup_aosp_source', 'public');
     registry.registerSdk(lookupOemSdk, 'lookup_oem_sdk', 'public');
+    registry.registerSdk(listCodebases, 'list_codebases', 'requires_codebase_permission');
+    registry.registerSdk(lookupAppSource, 'lookup_app_source', 'requires_codebase_permission');
+    registry.registerSdk(lookupKernelSource, 'lookup_kernel_source', 'requires_codebase_permission');
+    registry.registerSdk(resolveSymbol, 'resolve_symbol', 'requires_codebase_permission');
+    registry.registerSdk(proposePatch, 'propose_patch', 'requires_codebase_permission');
     registry.registerSdk(lookupBaseline, 'lookup_baseline', 'public');
     registry.registerSdk(compareBaselines, 'compare_baselines', 'public');
     registry.registerSdk(recallProjectMemory, 'recall_project_memory', 'public');
@@ -4247,9 +4602,9 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
   }
 
   return {
-    server: registry.buildSdkServer(),
-    allowedTools: registry.buildAllowedTools(),
-    toolDefinitions: registry.list(),
+    server: registry.buildSdkServer({scope: toolRequestScope}),
+    allowedTools: registry.buildAllowedTools(toolRequestScope),
+    toolDefinitions: registry.listForRequest(toolRequestScope),
   };
 }
 

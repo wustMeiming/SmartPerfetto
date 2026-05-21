@@ -136,7 +136,25 @@ Output:
 
 See [Multi-Trace Analysis Result Comparison](multi-trace-result-comparison.en.md) for the full workflow.
 
-## 8. Provider Management And Runtime Switching
+## 8. Code-Aware Local Source Analysis
+
+Code-Aware Analysis lets users register local App, AOSP, kernel, or OEM SDK source trees with SmartPerfetto. By default, the model sees only `CodeRef` metadata, not raw source text.
+
+Entry points:
+
+- `Codebases` tab in AI Assistant settings: preview, register, reindex, and audit.
+- CLI: `smp codebase preview/register/reindex/symbols`.
+- During analysis, explicitly pass `--code-aware metadata_only` and `--codebase-id <id>`, or choose a registered codebase in the UI.
+
+Output:
+
+- Maps call stacks, native frames, or kernel symbols to relative file paths, line ranges, and symbols.
+- Reports show `CodeRef` metadata; raw source text is fetched only through the controlled excerpt endpoint.
+- If no codebase is configured for the session, the normal trace-only analysis path is unchanged.
+
+See [Code-Aware Analysis](code-aware-analysis.en.md) for the full workflow.
+
+## 9. Provider Management And Runtime Switching
 
 SmartPerfetto supports UI-managed model providers and `.env` configuration.
 
@@ -154,7 +172,7 @@ Output:
 
 See [Configuration Guide](configuration.en.md) for setup details.
 
-## 9. Automation, API, And CLI
+## 10. Automation, API, And CLI
 
 SmartPerfetto also provides backend API, CLI, and MCP tool documentation for automation.
 
@@ -169,7 +187,7 @@ Output:
 - Integrate trace analysis into scripts, CI, batch jobs, or internal platforms.
 - Reuse the same Skills, strategies, reports, and evidence-backed output flow.
 
-## 10. Runtime And Distribution Options
+## 11. Runtime And Distribution Options
 
 SmartPerfetto supports multiple runtime paths:
 
@@ -192,4 +210,5 @@ Runtime setup is in [Quick Start](quick-start.en.md). Packaging and release deta
 | Produce a shareable conclusion | HTML report |
 | Temporarily compare a reference trace in this conversation | `compare_arrows` live trace comparison |
 | Compare completed results across windows or users | `fact_check` multi-trace result comparison |
+| Map findings to local source files and line ranges | Code-Aware Analysis |
 | Integrate with scripts or platforms | API / CLI / MCP tools |

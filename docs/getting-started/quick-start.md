@@ -16,6 +16,8 @@
 
 ## 2. 准备模型配置
 
+Claude Code 和 OpenAI SDK 不需要都配置。第一次只选一个入口：本机 `claude`、UI Provider Manager、一个 Claude-compatible env block，或一个 OpenAI-compatible env block。
+
 本地源码运行时，如果这个终端里的 Claude Code 已经能正常写代码，可以不配置 API key；这也包括 Claude Code 自己已经接入第三方模型的情况。先运行 `claude` 验证。
 
 显式 API key/proxy 场景再创建 env 文件：
@@ -26,9 +28,9 @@
 
 `backend/.env.example` 已经内置 DeepSeek、GLM、Qwen、Kimi、Doubao、MiniMax 等常见 Claude Code 兼容 Base URL 和推荐主/轻模型。Docker 使用仓库根目录 `.env`，包括 Docker Hub 镜像和本地 source Docker build：
 
-步骤 1：运行 `cp backend/.env.example .env`。
+步骤 1：运行 `cp .env.example .env`。
 
-步骤 2：编辑 `.env` 并解注释一个 provider block。只做 health/UI smoke check 可以跳过；真正执行 AI 分析必须配置 provider。
+步骤 2：编辑 `.env` 并解注释一个 provider block。如果准备在 UI Provider Manager 里配置 provider，或只做 health/UI smoke check，可以跳过；真正执行 AI 分析必须有一个 provider 来源。
 
 如果 UI 里已经激活了 Provider Manager profile，它会覆盖 `.env` fallback。当前来源可以在容器启动日志或 `http://localhost:3000/health` 的 `aiEngine.credentialSource` 里确认。
 

@@ -16,6 +16,8 @@ Initialize the submodule only when you need to modify the AI Assistant frontend 
 
 ## 2. Prepare Model Configuration
 
+You do not need to configure both Claude Code and the OpenAI SDK. For first setup, pick one entry point: local `claude`, UI Provider Manager, one Claude-compatible env block, or one OpenAI-compatible env block.
+
 For local source runs, if Claude Code already works in the same terminal, you can skip API key configuration. Run `claude` first to verify that path.
 
 Create an env file only when you need an explicit API key, a compatible proxy, or Docker runtime credentials:
@@ -26,9 +28,9 @@ Step 2: edit `backend/.env`. Uncomment `ANTHROPIC_API_KEY` for direct Anthropic 
 
 `backend/.env.example` includes presets for common Claude-compatible and OpenAI-compatible providers such as DeepSeek, GLM, Qwen, Kimi, Doubao, MiniMax, MiMo, and TokenHub. Docker reads the repository-root `.env` file, including both Docker Hub images and local source Docker builds:
 
-Step 1: run `cp backend/.env.example .env`.
+Step 1: run `cp .env.example .env`.
 
-Step 2: edit `.env` and uncomment one provider block. You can skip this for a health/UI smoke check; real AI analysis requires a provider.
+Step 2: edit `.env` and uncomment one provider block. Skip this if you will configure the provider in UI Provider Manager, or if you only need a health/UI smoke check; real AI analysis requires one provider source.
 
 If a Provider Manager profile is active in the UI, it overrides `.env` fallback. Confirm the active source in the container startup log or `aiEngine.credentialSource` from `http://localhost:3000/health`.
 
