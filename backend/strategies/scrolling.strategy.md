@@ -52,6 +52,28 @@ keywords:
   - nativeactivity
   - drawfunctor
 
+final_report_contract:
+  required_sections:
+    - id: root_cause_distribution
+      label: 全帧根因分布
+      description: '按 reason_code / 责任方聚合，列出帧数、占比、关键四象限或频率特征。'
+      pattern_groups:
+        - ['全帧根因分布', '根因分布', 'root[-\s]?cause distribution', 'reason_code']
+        - ['帧数', '占比', 'frame count', 'percentage', '\|\s*根因\s*\|', '\|\s*reason']
+    - id: representative_frames
+      label: 代表帧分析
+      description: '每个 CRITICAL/HIGH 根因至少给出 1 个代表样本，包含帧耗时、超预算倍数、vsync_missed、关键 slice/阻塞点和因果链。'
+      pattern_groups:
+        - ['代表帧', 'representative\s+frame']
+        - ['frame_id', 'guilty[_ ]?frame', '帧耗时', 'frame duration']
+        - ['vsync_missed', '超预算', 'budget overrun', 'missed[-\s]?vsync']
+    - id: peak_and_semantic_metrics
+      label: 峰值/口径指标
+      description: '说明总帧数、真实掉帧、假阳性/Buffer Stuffing、最长帧和最长连续丢帧等口径。'
+      pattern_groups:
+        - ['真实掉帧', 'real[_\s-]?jank']
+        - ['最长帧', 'longest frame', '峰值']
+
 phase_hints:
   - id: overview
     keywords: ['概览', 'overview', '帧', 'frame', 'jank', '卡顿', 'scrolling_analysis', '统计']

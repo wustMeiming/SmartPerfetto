@@ -3,13 +3,15 @@
 // This file is part of SmartPerfetto. See LICENSE for details.
 
 import type { AgentRuntimeAnalysisResult } from '../agent/core/orchestratorTypes';
+import { assessFinalReportContractCompleteness } from './finalReportContractGate';
 
 export type FinalResultQualityIssueCode =
   | 'empty_conclusion'
   | 'plan_summary_fallback'
   | 'process_narration_conclusion'
   | 'missing_final_report_heading'
-  | 'sparse_unverified_conclusion';
+  | 'sparse_unverified_conclusion'
+  | 'scene_contract_incomplete';
 
 export interface FinalResultQualityIssue {
   code: FinalResultQualityIssueCode;
@@ -279,8 +281,9 @@ function hasEvidenceBackedArtifacts(result: AgentRuntimeAnalysisResult): boolean
 export function assessFinalResultQuality(input: {
   result: AgentRuntimeAnalysisResult;
   query?: string;
+  sceneType?: string;
 }): FinalResultQualityIssue | undefined {
-  const { result, query } = input;
+  const { result, query, sceneType } = input;
   if (!result.success || result.partial === true) return undefined;
 
   const conclusion = result.conclusion.trim();
@@ -330,12 +333,30 @@ export function assessFinalResultQuality(input: {
     };
   }
 
+  if (looksLikeAnalysisQuery(query)) {
+    const contractIssue = assessFinalReportContractCompleteness({
+      conclusion,
+      query,
+      sceneType,
+      contractSceneId: result.conclusionContract?.metadata?.sceneId,
+    });
+    if (contractIssue) {
+      const missingText = contractIssue.missingLabels.join('、');
+      return {
+        code: 'scene_contract_incomplete',
+        message: `${FINAL_RESULT_QUALITY_GATE_MESSAGE} ` +
+          `缺失 ${contractIssue.sceneType} 场景 Final Report Contract 要求的结构：${missingText}。`,
+      };
+    }
+  }
+
   return undefined;
 }
 
 export function applyFinalResultQualityGate(input: {
   result: AgentRuntimeAnalysisResult;
   query?: string;
+  sceneType?: string;
 }): FinalResultQualityIssue | undefined {
   const issue = assessFinalResultQuality(input);
   if (!issue) return undefined;

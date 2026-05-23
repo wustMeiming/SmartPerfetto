@@ -25,6 +25,7 @@ import { expectedToolNames } from './types';
 import type { SceneType } from './sceneClassifier';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from './outputLanguage';
 import { backendLogPath } from '../runtimePaths';
+import { getFinalReportContract } from './strategyLoader';
 
 /** Hardcoded known misdiagnosis patterns — common false positives in performance analysis. */
 const HARDCODED_MISDIAGNOSIS_PATTERNS: Array<{
@@ -899,6 +900,41 @@ export function isConclusionIncomplete(conclusion: string): boolean {
   return false;
 }
 
+function renderFinalReportContractGuidance(
+  sceneType?: SceneType,
+  outputLanguage: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE,
+): string {
+  const contract = sceneType ? getFinalReportContract(sceneType) : null;
+  const requiredSections = contract?.requiredSections.filter(section => section.required) ?? [];
+
+  if (requiredSections.length > 0) {
+    return requiredSections
+      .map((section, idx) => {
+        const description = section.description ? `: ${section.description}` : '';
+        return `   ${idx + 1}. ${section.label}${description}`;
+      })
+      .join('\n');
+  }
+
+  if (outputLanguage === 'en') {
+    return [
+      '   1. Executive overview with key metrics and severity/rating',
+      '   2. Root-cause breakdown with concrete evidence and representative examples',
+      '   3. Ruled-out factors and remaining uncertainty',
+      '   4. Optimization suggestions sorted by priority and expected impact',
+      '   5. Confidence, limitations, and evidence/source references',
+    ].join('\n');
+  }
+
+  return [
+    '   1. 综合概览：关键指标、严重程度和评级',
+    '   2. 根因拆解：用具体证据和代表样本说明主要原因',
+    '   3. 已排除因素与剩余不确定性',
+    '   4. 优化建议：按优先级和预期收益排序',
+    '   5. 置信度、限制条件和证据/source 引用',
+  ].join('\n');
+}
+
 /**
  * Generate a correction prompt for reflection-driven retry.
  * Called when verification finds ERROR-level issues.
@@ -911,9 +947,11 @@ export function generateCorrectionPrompt(
   issues: VerificationIssue[],
   originalConclusion: string,
   outputLanguage: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE,
+  sceneType?: SceneType,
 ): string {
   const errorIssues = issues.filter(i => i.severity === 'error');
   const warningIssues = issues.filter(i => i.severity === 'warning');
+  const finalReportContractGuidance = renderFinalReportContractGuidance(sceneType, outputLanguage);
 
   const issueList = errorIssues
     .map((i, idx) => `${idx + 1}. **[ERROR]** ${i.message}`)
@@ -940,11 +978,8 @@ ${issueList ? `Issues to resolve:\n${issueList}\n` : ''}${warningList}
 
 ### Requirements
 1. Resolve all unfinished bookkeeping first: unresolved hypotheses must call resolve_hypothesis, and unfinished phases must call update_plan_phase.
-2. Then output a complete structured analysis report in English, following the system prompt output template:
-   - Overview (frame count, jank count, FPS, rating)
-   - Full-frame root-cause distribution table aggregated by reason_code
-   - Representative-frame analysis for each major root-cause category, including quadrant state, frequency, and causal reasoning chain
-   - Optimization suggestions sorted by priority
+2. Then output a complete structured analysis report in English. It must satisfy the active scene's Final Report Contract:
+${finalReportContractGuidance}
 3. Use the data already collected. Do not rerun invoke_skill just to fetch overview data again.
 
 ### Existing Reasoning Context
@@ -961,11 +996,8 @@ ${issueList ? `待解决问题：\n${issueList}\n` : ''}${warningList}
 
 ### 要求
 1. **先解决所有未完成事项**（未解决的假设请调用 resolve_hypothesis，未完成的阶段请 update_plan_phase）
-2. **然后直接输出完整的结构化分析报告**，格式遵循 system prompt 中的输出模板：
-   - 概览（帧数、掉帧数、帧率、评级）
-   - 全帧根因分布表（按 reason_code 聚合）
-   - 代表帧分析（每个根因类别的最严重帧，含四象限+频率+根因推理链）
-   - 优化建议（按优先级排序）
+2. **然后直接输出完整的结构化分析报告**，必须满足当前场景的 Final Report Contract：
+${finalReportContractGuidance}
 3. **使用已收集的数据**，不需要重新调用 invoke_skill 获取概览数据
 4. 报告必须完整但压缩，目标不超过约 6000 中文字符；不要逐行复制已展示的大表，只引用关键行和 evidence/source
 
@@ -989,7 +1021,8 @@ ${issueList}${warningList}
    - **plan_deviation**: Execute unfinished plan phases or explicitly explain why they were skipped.
    - **missing_reasoning**: Produce a complete analysis conclusion.
    - **unresolved_hypothesis**: Call resolve_hypothesis and mark every unresolved hypothesis as confirmed or rejected.
-3. Output the corrected complete conclusion in English.
+3. Output the corrected complete conclusion in English and satisfy the active scene's Final Report Contract:
+${finalReportContractGuidance}
 
 ### Original Conclusion To Fix
 ${originalConclusion.substring(0, 2000)}
@@ -1010,7 +1043,8 @@ ${issueList}${warningList}
    - **plan_deviation**: 执行未完成的计划阶段，或明确说明跳过原因
    - **missing_reasoning**: 补充完整的分析结论
    - **unresolved_hypothesis**: 调用 resolve_hypothesis 将所有未解决假设标记为 confirmed 或 rejected
-3. 输出修正后的完整结论
+3. 输出修正后的完整结论，并满足当前场景的 Final Report Contract：
+${finalReportContractGuidance}
 4. 结论必须完整但压缩，目标不超过约 6000 中文字符；不要逐行复制已展示的大表，只引用关键行和 evidence/source
 
 ### 原始结论（需修正）

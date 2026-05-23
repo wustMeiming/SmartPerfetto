@@ -50,6 +50,26 @@ export interface PlanTemplate {
   mandatoryAspects: PlanMandatoryAspect[];
 }
 
+/**
+ * Scene-owned final report contract. Strategies declare these as data so
+ * runtime quality gates can enforce scene completeness without adding
+ * TypeScript branches for every analysis scenario.
+ */
+export interface FinalReportContractRequirement {
+  id: string;
+  label: string;
+  description?: string;
+  patterns: string[];
+  /** AND-of-OR groups. Each inner group must match at least one pattern. */
+  patternGroups: string[][];
+  /** Defaults to true. Optional entries document nice-to-have structure. */
+  required: boolean;
+}
+
+export interface FinalReportContract {
+  requiredSections: FinalReportContractRequirement[];
+}
+
 export interface StrategyDefinition {
   scene: string;
   priority: number;
@@ -68,6 +88,11 @@ export interface StrategyDefinition {
    * scene has deliberately opted out of plan-template validation.
    */
   planTemplate: PlanTemplate | null;
+  /**
+   * Data-only contract for final answer completeness. Runtime code must
+   * execute this contract generically instead of hardcoding scene checks.
+   */
+  finalReportContract: FinalReportContract | null;
   content: string;
   /**
    * Absolute path to the source `*.strategy.md` file. Required because the
@@ -120,6 +145,37 @@ function parseStrategyFile(filePath: string): StrategyDefinition | null {
     };
   }
 
+  const rawFinalReportContract = frontmatter.final_report_contract as Record<string, unknown> | undefined;
+  let finalReportContract: FinalReportContract | null = null;
+  if (rawFinalReportContract) {
+    const requiredSections = (
+      rawFinalReportContract.required_sections as Array<Record<string, unknown>> | undefined
+    ) || [];
+    finalReportContract = {
+      requiredSections: requiredSections
+        .map(section => {
+          const patterns = (section.patterns as string[]) || [];
+          const patternGroups = Array.isArray(section.pattern_groups)
+            ? (section.pattern_groups as unknown[])
+              .filter(group => Array.isArray(group))
+              .map(group => (group as unknown[]).filter(item => typeof item === 'string') as string[])
+              .filter(group => group.length > 0)
+            : [];
+          return {
+            id: (section.id as string) || '',
+            label: (section.label as string) || (section.id as string) || '',
+            description: (section.description as string | undefined) || undefined,
+            patterns,
+            patternGroups,
+            required: (section.required as boolean | undefined) ?? true,
+          };
+        })
+        .filter(section => section.id && section.label && (
+          section.patterns.length > 0 || section.patternGroups.length > 0
+        )),
+    };
+  }
+
   return {
     scene: frontmatter.scene as string,
     priority: (frontmatter.priority as number) ?? 99,
@@ -130,6 +186,7 @@ function parseStrategyFile(filePath: string): StrategyDefinition | null {
     optionalCapabilities: (frontmatter.optional_capabilities as string[]) || [],
     phaseHints,
     planTemplate,
+    finalReportContract,
     content,
     sourcePath: filePath,
   };
@@ -177,6 +234,14 @@ export function getPhaseHints(scene: string): PhaseHint[] {
  */
 export function getPlanTemplate(scene: string): PlanTemplate | null {
   return loadStrategies().get(scene)?.planTemplate ?? null;
+}
+
+/**
+ * Get the scene-owned final report completeness contract. Returns null for
+ * scenes that have no declarative contract yet.
+ */
+export function getFinalReportContract(scene: string): FinalReportContract | null {
+  return loadStrategies().get(scene)?.finalReportContract ?? null;
 }
 
 /**

@@ -19,6 +19,27 @@ import type { ClaudeAnalysisContext } from '../types';
 
 // Mock strategyLoader — return minimal templates
 jest.mock('../strategyLoader', () => ({
+  getFinalReportContract: jest.fn((scene: string) => {
+    if (scene !== 'scrolling') return null;
+    return {
+      requiredSections: [
+        {
+          id: 'root_cause_distribution',
+          label: '全帧根因分布',
+          description: '按 reason_code / 责任方聚合。',
+          patterns: ['全帧根因分布'],
+          required: true,
+        },
+        {
+          id: 'representative_frames',
+          label: '代表帧分析',
+          description: '给出 CRITICAL/HIGH 根因的代表样本。',
+          patterns: ['代表帧'],
+          required: true,
+        },
+      ],
+    };
+  }),
   getStrategyContent: jest.fn((scene: string) => {
     if (scene === 'scrolling') return '滑动分析：检查 frame_timeline 表，关注掉帧根因';
     if (scene === 'startup') return '启动分析：检查 android.startup.startups 表';
@@ -150,6 +171,13 @@ describe('buildSystemPrompt', () => {
       const prompt = buildSystemPrompt(makeContext({ sceneType: 'scrolling' }));
       expect(prompt).toContain('frame_timeline');
       expect(prompt).toContain('掉帧根因');
+    });
+
+    it('should inject declarative final report contract for scenes that define one', () => {
+      const prompt = buildSystemPrompt(makeContext({ sceneType: 'scrolling' }));
+      expect(prompt).toContain('Final Report Contract');
+      expect(prompt).toContain('全帧根因分布');
+      expect(prompt).toContain('代表帧分析');
     });
 
     it('should inject startup strategy for startup scene', () => {

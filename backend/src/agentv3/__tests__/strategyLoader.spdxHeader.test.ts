@@ -19,7 +19,14 @@
  */
 
 import { describe, it, expect, beforeAll } from '@jest/globals';
-import { getRegisteredScenes, getStrategyContent, getPhaseHints, invalidateStrategyCache, loadPromptTemplate } from '../strategyLoader';
+import {
+  getFinalReportContract,
+  getRegisteredScenes,
+  getStrategyContent,
+  getPhaseHints,
+  invalidateStrategyCache,
+  loadPromptTemplate,
+} from '../strategyLoader';
 
 describe('strategyLoader tolerates leading SPDX HTML comments', () => {
   beforeAll(() => {
@@ -45,6 +52,25 @@ describe('strategyLoader tolerates leading SPDX HTML comments', () => {
     expect(getPhaseHints('scrolling').length).toBeGreaterThan(0);
     expect(getPhaseHints('startup').length).toBeGreaterThan(0);
     expect(getPhaseHints('anr').length).toBeGreaterThan(0);
+  });
+
+  it('loads declarative final report contracts from strategy frontmatter', () => {
+    const contract = getFinalReportContract('scrolling');
+    expect(contract?.requiredSections.map(section => section.id)).toEqual(expect.arrayContaining([
+      'root_cause_distribution',
+      'representative_frames',
+      'peak_and_semantic_metrics',
+    ]));
+    expect(contract?.requiredSections.find(section =>
+      section.id === 'representative_frames',
+    )?.patternGroups.length).toBeGreaterThan(1);
+
+    expect(getFinalReportContract('startup')?.requiredSections.map(section => section.id)).toEqual(expect.arrayContaining([
+      'startup_type_and_metrics',
+      'phase_breakdown',
+      'root_cause_references',
+      'audience_recommendations',
+    ]));
   });
 
   it('returns empty phase_hints array for scenes without hints', () => {

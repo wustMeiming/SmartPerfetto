@@ -17,7 +17,26 @@ function result(overrides: Partial<AnalysisResult>): AnalysisResult {
     success: true,
     findings: [],
     hypotheses: [],
-    conclusion: '# 启动性能分析报告\n\n## 综合结论\n\n启动耗时正常。\n\n## 关键证据链\n\n- startup_detail 已验证。\n\n## 优化建议\n\n无需处理。',
+    conclusion: [
+      '# 启动性能分析报告',
+      '',
+      '## 综合结论',
+      '',
+      '启动类型为冷启动，TTID=1912ms，TTFD=2200ms。',
+      '',
+      '## 阶段耗时分解',
+      '',
+      '- startup_detail 显示 bindApplication self_ms=120ms。',
+      '',
+      '## 关键证据链',
+      '',
+      '- 根因编号 A5 对应 DEX/类加载开销。',
+      '',
+      '## 优化建议',
+      '',
+      '- [App层] 延后非首屏初始化。',
+      '- [系统/平台层] 无需处理。',
+    ].join('\n'),
     confidence: 0.8,
     rounds: 1,
     totalDurationMs: 1000,
@@ -125,21 +144,23 @@ describe('final result quality gate', () => {
       '',
       '## 综合结论',
       '',
-      '冷启动 TTID=1912ms，主因是主线程模拟负载。ChaosTask self=456ms，LoadSimulator_ActivityInit self=249.8ms。',
+      '启动类型为冷启动，TTID=1912ms，TTFD=2200ms，主因是主线程模拟负载。ChaosTask self=456ms，LoadSimulator_ActivityInit self=249.8ms。',
       '',
-      '## 分阶段证据摘要',
+      '## 阶段耗时分解',
       '',
       '- 启动概览采集: 获取启动概览，TTID=1912ms。',
-      '- 启动详情分析: 四象限 Q1=62.8%、Q4b=35.1%。',
+      '- startup_detail 启动详情分析: 四象限 Q1=62.8%、Q4b=35.1%，关键 self_ms=456ms。',
       '',
       '## 关键证据链',
       '',
+      '- 根因编号 A5：主线程类加载/模拟负载开销。',
       '- startup_detail 对应证据 ID art-10。',
       '- hot_slice_states 对应 data:sql_table:current:abc。',
       '',
       '## 优化建议',
       '',
-      '降低启动期主线程模拟负载。',
+      '- [App层] 降低启动期主线程模拟负载。',
+      '- [系统/平台层] 当前无系统侧阻塞证据。',
     ].join('\n');
 
     expect(looksLikePhaseSummaryFallback(report)).toBe(false);
@@ -150,17 +171,19 @@ describe('final result quality gate', () => {
 
     const plainReport = [
       '综合结论：',
-      '冷启动 TTID=1912ms，主因是主线程模拟负载。',
+      '启动类型为冷启动，TTID=1912ms，TTFD=2200ms，主因是主线程模拟负载。',
       '',
-      '分阶段证据摘要：',
-      '启动概览采集: 获取启动概览，TTID=1912ms。',
+      '阶段耗时分解：',
+      'startup_detail 启动概览采集: 获取启动概览，TTID=1912ms，self_ms=456ms。',
       '',
       '关键证据链：',
+      '根因编号 A5：主线程类加载/模拟负载开销。',
       'startup_detail 对应证据 ID art-10。',
       'hot_slice_states 对应 data:sql_table:current:abc。',
       '',
       '优化建议：',
-      '降低启动期主线程模拟负载。',
+      '[App层] 降低启动期主线程模拟负载。',
+      '[系统/平台层] 当前无系统侧阻塞证据。',
     ].join('\n');
 
     expect(looksLikePhaseSummaryFallback(plainReport)).toBe(false);
@@ -220,7 +243,7 @@ describe('final result quality gate', () => {
     })?.code).toBe('missing_final_report_heading');
   });
 
-  it('flags sparse unverified analysis conclusions but leaves concise verified answers alone', () => {
+  it('flags sparse unverified analysis conclusions and keeps concise factual answers alone', () => {
     expect(assessFinalResultQuality({
       result: result({
         conclusion: 'TTID=1912ms，主要是主线程模拟负载。',
@@ -298,7 +321,7 @@ describe('final result quality gate', () => {
         },
       }),
       query: '分析这个启动 trace',
-    })).toBeUndefined();
+    })?.code).toBe('scene_contract_incomplete');
 
     expect(assessFinalResultQuality({
       result: result({
@@ -321,6 +344,149 @@ describe('final result quality gate', () => {
       }),
       query: '分析这个启动 trace',
     })?.code).toBe('sparse_unverified_conclusion');
+  });
+
+  it('flags jank reports that pass evidence checks but omit scene-required sections', () => {
+    const shortJankReport = [
+      '## 综合结论',
+      '',
+      'com.example.demo 滑动性能一般：347帧中7帧真实掉帧（2.02%），最长帧62.73ms。',
+      '',
+      '### 根因拆解',
+      '',
+      '**[CRITICAL] animation 回调同步执行 CustomScroll_longFrameLoad（6帧，85.7%）**',
+      '- 每次57-59ms纯CPU操作，CPU效率98.4%，无IO/锁/Binder参与。',
+      '',
+      '### 优化建议',
+      '',
+      '- 将 CustomScroll_longFrameLoad 异步化或分帧执行。',
+    ].join('\n');
+
+    expect(assessFinalResultQuality({
+      result: result({
+        conclusion: shortJankReport,
+        findings: [{
+          severity: 'critical',
+          title: 'animation 回调同步执行长任务',
+          description: 'CustomScroll_longFrameLoad 造成掉帧',
+          evidence: ['CPU效率98.4%'],
+        } as any],
+        claimVerificationResult: {
+          schemaVersion: 'claim_verifier@1',
+          status: 'passed',
+          policy: 'record_only',
+          passed: true,
+          checkedClaimCount: 3,
+          unsupportedClaimCount: 0,
+          claimResults: [{ claimId: 'claim-jank', status: 'verified' }],
+          issues: [],
+        },
+      }),
+      query: '分析滑动性能',
+    })?.code).toBe('scene_contract_incomplete');
+  });
+
+  it('does not apply scene final-report contracts to factual scrolling questions', () => {
+    expect(assessFinalResultQuality({
+      result: result({
+        conclusion: '应用包名是 com.example.demo。',
+        findings: [],
+        conclusionContract: undefined,
+      }),
+      query: '这个滑动 trace 的应用包名是什么？',
+      sceneType: 'scrolling',
+    })).toBeUndefined();
+  });
+
+  it('does not accept empty mentions as satisfying scene-required sections', () => {
+    const hollowReport = [
+      '## 综合结论',
+      '',
+      'com.example.demo 滑动性能一般：347帧中7帧真实掉帧，最长帧62.73ms。',
+      '',
+      '## 根因拆解',
+      '',
+      '- 已知需要补充全帧根因分布和代表帧分析，但当前结论没有展开。',
+      '',
+      '## 关键证据链',
+      '',
+      '- process_slice_cpu_hotspots 显示 CPU效率98.4%。',
+    ].join('\n');
+
+    const issue = assessFinalResultQuality({
+      result: result({
+        conclusion: hollowReport,
+        findings: [{ severity: 'critical', title: '长任务', description: 'CPU heavy', evidence: ['98.4%'] } as any],
+      }),
+      query: '分析滑动性能',
+    });
+
+    expect(issue?.code).toBe('scene_contract_incomplete');
+    expect(issue?.message).toContain('全帧根因分布');
+    expect(issue?.message).toContain('代表帧分析');
+  });
+
+  it('uses conclusion contract scene metadata when the query is generic', () => {
+    const issue = assessFinalResultQuality({
+      result: result({
+        conclusion: [
+          '## 综合结论',
+          '',
+          '347帧中7帧真实掉帧，最长帧62.73ms，主因是 CustomScroll_longFrameLoad。',
+          '',
+          '## 根因拆解',
+          '',
+          '- CPU效率98.4%。',
+        ].join('\n'),
+        findings: [{ severity: 'critical', title: '长任务', description: 'CPU heavy', evidence: ['98.4%'] } as any],
+        conclusionContract: {
+          schemaVersion: 'conclusion_contract_v1',
+          mode: 'initial_report',
+          conclusions: [],
+          clusters: [],
+          evidenceChain: [],
+          uncertainties: [],
+          nextSteps: [],
+          metadata: { sceneId: 'jank' },
+        },
+      }),
+      query: '分析这个 trace',
+    });
+
+    expect(issue?.code).toBe('scene_contract_incomplete');
+  });
+
+  it('accepts jank reports that keep root-cause distribution and representative-frame sections', () => {
+    const richJankReport = [
+      '## 综合结论',
+      '',
+      'com.example.demo 滑动性能一般：347帧中7帧真实掉帧（2.02%），最长帧62.73ms，最长连续丢帧 vsync_missed=7。',
+      '',
+      '## 全帧根因分布',
+      '',
+      '| 根因 | 帧数 | 占比 | 四象限/频率特征 |',
+      '| --- | ---: | ---: | --- |',
+      '| workload_heavy | 6 | 85.7% | MainThread Running，CPU效率98.4% |',
+      '| freq_ramp_slow | 1 | 14.3% | 960MHz -> 2400MHz |',
+      '',
+      '## 代表帧分析',
+      '',
+      '- 代表帧 frame_id=59665234：帧耗时62.73ms，超预算7.5x，vsync_missed=7，关键slice为 CustomScroll_longFrameLoad。',
+      '- 代表帧 frame_id=59665037：帧耗时18.66ms，频率爬升慢。',
+      '',
+      '## 关键证据链',
+      '',
+      '- process_slice_cpu_hotspots 显示 CustomScroll_longFrameLoad count=6，avg_cpu_ms=55.10。',
+      '',
+      '## 优化建议',
+      '',
+      '- 将主线程 animation 回调里的长任务异步化或分帧。',
+    ].join('\n');
+
+    expect(assessFinalResultQuality({
+      result: result({ conclusion: richJankReport }),
+      query: '分析滑动性能',
+    })).toBeUndefined();
   });
 
   it('does not override runtime results that are already marked partial', () => {

@@ -74,6 +74,7 @@ interface VendorOverrideDefinition {
 
 const SKILLS_DIR = path.join(__dirname, '../../../skills');
 const STRATEGIES_DIR = path.join(__dirname, '../../../strategies');
+const STRATEGY_FRONTMATTER_RE = /^(?:\s*<!--[\s\S]*?-->\s*)*---\n([\s\S]*?)\n---\n?/;
 
 /**
  * Tier + stdlib lint rules (rules 1, 2, 3 from docs/skills-audit-2026-05.md §7).
@@ -804,11 +805,123 @@ function findSkillFiles(dir: string, pattern: string | RegExp): string[] {
   return files;
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function validateRegexPattern(
+  pattern: unknown,
+  errors: string[],
+  fieldPath: string,
+): void {
+  if (!isNonEmptyString(pattern)) {
+    errors.push(`${fieldPath} must be a non-empty string`);
+    return;
+  }
+  try {
+    // Final report contracts use JavaScript regex syntax, matching the runtime gate.
+    new RegExp(pattern, 'i');
+  } catch (error: any) {
+    errors.push(`${fieldPath} is not a valid JavaScript regex: ${error.message}`);
+  }
+}
+
+function validateFinalReportContractFrontmatter(frontmatter: Record<string, unknown>, file: string): string[] {
+  const errors: string[] = [];
+  const contract = frontmatter.final_report_contract;
+  if (contract === undefined) return errors;
+  if (!contract || typeof contract !== 'object' || Array.isArray(contract)) {
+    return ['final_report_contract must be an object'];
+  }
+
+  const requiredSections = (contract as Record<string, unknown>).required_sections;
+  if (!Array.isArray(requiredSections)) {
+    return ['final_report_contract.required_sections must be an array'];
+  }
+
+  for (let i = 0; i < requiredSections.length; i++) {
+    const section = requiredSections[i];
+    const prefix = `final_report_contract.required_sections[${i}]`;
+    if (!section || typeof section !== 'object' || Array.isArray(section)) {
+      errors.push(`${prefix} must be an object`);
+      continue;
+    }
+
+    const record = section as Record<string, unknown>;
+    if (!isNonEmptyString(record.id)) {
+      errors.push(`${prefix}.id must be a non-empty string`);
+    }
+    if (!isNonEmptyString(record.label)) {
+      errors.push(`${prefix}.label must be a non-empty string`);
+    }
+    if (record.description !== undefined && typeof record.description !== 'string') {
+      errors.push(`${prefix}.description must be a string when present`);
+    }
+    if (record.required !== undefined && typeof record.required !== 'boolean') {
+      errors.push(`${prefix}.required must be a boolean when present`);
+    }
+
+    const patterns = record.patterns;
+    const patternGroups = record.pattern_groups;
+    const hasPatterns = Array.isArray(patterns) && patterns.length > 0;
+    const hasPatternGroups = Array.isArray(patternGroups) && patternGroups.length > 0;
+    if (!hasPatterns && !hasPatternGroups) {
+      errors.push(`${prefix} must define non-empty patterns or pattern_groups`);
+    }
+
+    if (patterns !== undefined) {
+      if (!Array.isArray(patterns)) {
+        errors.push(`${prefix}.patterns must be an array when present`);
+      } else {
+        patterns.forEach((pattern, patternIndex) => {
+          validateRegexPattern(pattern, errors, `${prefix}.patterns[${patternIndex}]`);
+        });
+      }
+    }
+
+    if (patternGroups !== undefined) {
+      if (!Array.isArray(patternGroups)) {
+        errors.push(`${prefix}.pattern_groups must be an array when present`);
+      } else {
+        patternGroups.forEach((group, groupIndex) => {
+          const groupPath = `${prefix}.pattern_groups[${groupIndex}]`;
+          if (!Array.isArray(group) || group.length === 0) {
+            errors.push(`${groupPath} must be a non-empty array`);
+            return;
+          }
+          group.forEach((pattern, patternIndex) => {
+            validateRegexPattern(pattern, errors, `${groupPath}[${patternIndex}]`);
+          });
+        });
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    return errors.map(error => `${file}: ${error}`);
+  }
+  return errors;
+}
+
+function validateStrategyFrontmatter(content: string, file: string): string[] {
+  const match = content.match(STRATEGY_FRONTMATTER_RE);
+  if (!match) return [`${file}: missing or invalid YAML frontmatter`];
+  try {
+    const frontmatter = yaml.load(match[1]);
+    if (!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) {
+      return [`${file}: YAML frontmatter must be an object`];
+    }
+    return validateFinalReportContractFrontmatter(frontmatter as Record<string, unknown>, file);
+  } catch (error: any) {
+    return [`${file}: failed to parse YAML frontmatter: ${error.message}`];
+  }
+}
+
 /**
  * Validate strategy files: check that all invoke_skill("xxx") references
  * point to skills that exist in the skill registry.
  *
- * Returns the number of missing skill references (0 = all good).
+ * Returns the number of strategy validation errors (0 = all good).
  */
 function validateStrategySkillReferences(): number {
   if (!fs.existsSync(STRATEGIES_DIR)) {
@@ -845,10 +958,12 @@ function validateStrategySkillReferences(): number {
   }
 
   let totalMissing = 0;
+  let totalContractErrors = 0;
 
   for (const file of strategyFiles) {
     const filePath = path.join(STRATEGIES_DIR, file);
     const content = fs.readFileSync(filePath, 'utf-8');
+    const frontmatterErrors = validateStrategyFrontmatter(content, file);
 
     // Extract all unique skill names referenced
     const referencedSkills = new Set<string>();
@@ -858,28 +973,34 @@ function validateStrategySkillReferences(): number {
       referencedSkills.add(match[1]);
     }
 
+    const missing = [...referencedSkills].filter(name => !skillNames.has(name));
+    if (missing.length > 0 || frontmatterErrors.length > 0) {
+      console.log(`${colors.red('FAIL')} ${file}`);
+      for (const name of missing) {
+        console.log(`  ${colors.red('ERROR:')} invoke_skill("${name}") — skill not found in registry`);
+      }
+      for (const error of frontmatterErrors) {
+        console.log(`  ${colors.red('ERROR:')} ${error}`);
+      }
+      totalMissing += missing.length;
+      totalContractErrors += frontmatterErrors.length;
+      continue;
+    }
+
     if (referencedSkills.size === 0) {
       console.log(`${colors.gray('SKIP')} ${file} (no invoke_skill references)`);
       continue;
     }
 
-    const missing = [...referencedSkills].filter(name => !skillNames.has(name));
-    if (missing.length === 0) {
-      console.log(`${colors.green('PASS')} ${file} (${referencedSkills.size} skill refs OK)`);
-    } else {
-      console.log(`${colors.red('FAIL')} ${file}`);
-      for (const name of missing) {
-        console.log(`  ${colors.red('ERROR:')} invoke_skill("${name}") — skill not found in registry`);
-      }
-      totalMissing += missing.length;
-    }
+    console.log(`${colors.green('PASS')} ${file} (${referencedSkills.size} skill refs OK)`);
   }
 
   console.log(colors.bold('\nStrategy Validation Summary:'));
   console.log(`  Strategy files: ${strategyFiles.length}`);
   console.log(`  Missing skills: ${totalMissing > 0 ? colors.red(String(totalMissing)) : colors.green('0')}`);
+  console.log(`  Contract/frontmatter errors: ${totalContractErrors > 0 ? colors.red(String(totalContractErrors)) : colors.green('0')}`);
 
-  return totalMissing;
+  return totalMissing + totalContractErrors;
 }
 
 /**

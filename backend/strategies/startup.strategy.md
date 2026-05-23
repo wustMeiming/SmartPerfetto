@@ -38,6 +38,32 @@ compound_patterns:
   - "打开.*(应用|app|软件)"
   - "打开.*(速度|时间|耗时)"
 
+final_report_contract:
+  required_sections:
+    - id: startup_type_and_metrics
+      label: 启动类型与 TTID/TTFD
+      description: '明确 cold/warm/hot 判定，并给出 TTID/TTFD 或对应不可用原因。'
+      pattern_groups:
+        - ['启动类型', '冷启动', '温启动', '热启动', 'cold\s*start', 'warm\s*start', 'hot\s*start']
+        - ['TTID', 'TTFD', 'Time\s+to\s+initial\s+display', 'Time\s+to\s+full\s+display']
+    - id: phase_breakdown
+      label: 阶段耗时分解
+      description: '包含 startup_detail / phase breakdown 口径，并优先使用 self_ms 解释阶段贡献。'
+      pattern_groups:
+        - ['阶段耗时', '阶段分解', 'phase\s+breakdown', 'startup_detail']
+        - ['self_ms', 'dur_ms', '耗时', '\d+(?:\.\d+)?\s*ms']
+    - id: root_cause_references
+      label: 根因编号引用
+      description: '关键根因需要引用 A1-A18、B1-B12 或 SRxx 编号，便于和启动知识库交叉核对。'
+      pattern_groups:
+        - ['\bA(?:1[0-8]?|[2-9])\b', '\bB(?:1[0-2]?|[2-9])\b', 'SR(?:09|1[0-9]|20)(?!\d)']
+    - id: audience_recommendations
+      label: App/系统分层建议
+      description: '优化建议必须区分 App 层和系统/平台/ROM 层。'
+      pattern_groups:
+        - ['App层', '应用层', 'App\s+layer']
+        - ['系统/平台层', '系统层', '平台层', 'ROM层', 'System/Platform', 'platform\s+layer']
+
 phase_hints:
   - id: detail_breakdown
     keywords: ['detail', '详情', '分解', 'breakdown', '阶段', 'startup_detail', '耗时']

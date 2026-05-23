@@ -330,7 +330,7 @@ describe('OpenAIRuntime plan completion guard', () => {
     })).toBe('## 累计报告\n\n只有当前 run 为空时才使用累计文本。');
   });
 
-  it('requests one final-report continuation when a completed plan only has summary fallback', () => {
+  it('requests bounded final-report continuations when a completed plan only has summary fallback', () => {
     const runtime = new OpenAIRuntime({} as any) as any;
     const planStatus = { complete: true, hasPlan: true, pendingPhases: [] };
     const fallback = '## 综合结论\n\n阶段摘要。\n\n## 分阶段证据摘要\n\n- p1: 采集摘要。';
@@ -414,6 +414,16 @@ describe('OpenAIRuntime plan completion guard', () => {
       completedByPlanIdle: false,
       timedOut: false,
       finalReportContinuations: 1,
+    })).toBe(true);
+
+    expect(runtime.shouldRequestFinalReportAfterPlanComplete({
+      quickMode: false,
+      planStatus,
+      conclusion: fallback,
+      fallbackConclusion: fallback,
+      completedByPlanIdle: false,
+      timedOut: false,
+      finalReportContinuations: 2,
     })).toBe(false);
 
     expect(runtime.shouldRequestFinalReportAfterPlanComplete({
@@ -425,6 +435,53 @@ describe('OpenAIRuntime plan completion guard', () => {
       timedOut: false,
       finalReportContinuations: 0,
     })).toBe(false);
+  });
+
+  it('requests final-report continuation when the scene contract is incomplete', () => {
+    const runtime = new OpenAIRuntime({} as any) as any;
+    const planStatus = {
+      complete: true,
+      hasPlan: true,
+      pendingPhases: [],
+    };
+
+    expect(runtime.shouldRequestFinalReportAfterPlanComplete({
+      quickMode: false,
+      planStatus,
+      conclusion: [
+        '## 综合结论',
+        '',
+        'com.example.demo 滑动性能一般：347帧中7帧真实掉帧，最长帧62.73ms。',
+        '',
+        '## 根因拆解',
+        '',
+        '- animation 回调同步执行 CustomScroll_longFrameLoad。',
+      ].join('\n'),
+      fallbackConclusion: undefined,
+      completedByPlanIdle: false,
+      timedOut: false,
+      finalReportContinuations: 0,
+      query: '分析滑动性能',
+      sceneType: 'scrolling',
+    })).toBe(true);
+  });
+
+  it('uses a full-report continuation prompt that preserves scene-specific sections', () => {
+    const runtime = new OpenAIRuntime({} as any) as any;
+
+    const zhPrompt = runtime.buildFinalReportAfterPlanCompletePrompt('zh-CN');
+    expect(zhPrompt).toContain('继续遵守本轮场景策略');
+    expect(zhPrompt).toContain('Final Report Contract');
+    expect(zhPrompt).toContain('场景契约要求的结构');
+    expect(zhPrompt).toContain('约 2500-3500');
+    expect(zhPrompt).not.toContain('最多 1200');
+
+    const enPrompt = runtime.buildFinalReportAfterPlanCompletePrompt('en');
+    expect(enPrompt).toContain('scene strategy');
+    expect(enPrompt).toContain('Final Report Contract');
+    expect(enPrompt).toContain('structures required by the scene contract');
+    expect(enPrompt).toContain('1,200-1,800');
+    expect(enPrompt).not.toContain('at most 700');
   });
 
   it('builds a user-facing structured fallback when a completed plan has no final answer text', () => {

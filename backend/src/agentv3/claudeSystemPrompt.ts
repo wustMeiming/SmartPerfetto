@@ -7,7 +7,13 @@ import type { SceneType } from './sceneClassifier';
 import type { ArchitectureInfo } from '../agent/detectors/types';
 import type { DetectedFocusApp } from './focusAppDetector';
 import { formatDurationNs } from './focusAppDetector';
-import { getStrategyContent, loadPromptTemplate, loadSelectionTemplate, renderTemplate } from './strategyLoader';
+import {
+  getFinalReportContract,
+  getStrategyContent,
+  loadPromptTemplate,
+  loadSelectionTemplate,
+  renderTemplate,
+} from './strategyLoader';
 import { DEFAULT_OUTPUT_LANGUAGE, type OutputLanguage } from './outputLanguage';
 
 /**
@@ -100,9 +106,23 @@ function buildSceneStrategySection(sceneType: SceneType | undefined): string {
     || '';
   if (!content) return '';
 
+  const contract = getFinalReportContract(sceneType || 'general');
+  const contractSection = contract && contract.requiredSections.length > 0
+    ? '\n\n### Final Report Contract（最终报告必检项）\n\n' +
+      '最终报告必须满足以下场景交付结构；这些要求会在运行结束时由系统质量闸门统一校验：\n' +
+      contract.requiredSections
+        .filter(requirement => requirement.required !== false)
+        .map((requirement, index) => {
+          const description = requirement.description ? `：${requirement.description}` : '';
+          return `${index + 1}. ${requirement.label}${description}`;
+        })
+        .join('\n')
+    : '';
+
   return '### 场景策略（必须严格遵循）\n\n' +
     '对于以下常见场景，已有验证过的分析流水线。**必须完整执行所有阶段**，不可跳过。\n\n---\n\n' +
-    content;
+    content +
+    contractSection;
 }
 
 /**

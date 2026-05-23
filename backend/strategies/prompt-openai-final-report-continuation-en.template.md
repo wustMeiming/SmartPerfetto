@@ -7,6 +7,8 @@ Now output only the final report body. The first line must be `## Final Conclusi
 
 The report must include: final conclusion, key evidence chain, root-cause breakdown, ruled-out factors, recommendations, and confidence/limitations.
 
+Continue to obey the scene strategy, Final Report Contract, and latest next_phase_reminder constraints from this run. If the scene strategy or contract requires root-cause distributions, representative samples, phase-duration breakdowns, dual-audience recommendations, architecture branch judgments, or any other scene-specific structure, keep that structure in the final report instead of compressing it into a short summary.
+
 Do not merely restate phase summaries; synthesize the collected concrete values and evidence into a readable conclusion.
 
-Length requirement: at most 700 English words. Use 2-3 bullets per section; do not expand into a phase-by-phase log, do not copy artifact tables, do not output the evidence table index, and do not repeat raw SQL. If the evidence is sufficient, conclude directly.
+Length target: about 1,200-1,800 English words. Use compact aggregation tables where helpful; do not expand into a phase-by-phase log, do not copy raw artifact tables, do not output the data-source/evidence-table index because the system will generate it, and do not repeat raw SQL. When evidence is abundant, prioritize the key evidence chain, structures required by the scene contract, and the highest-priority root causes.

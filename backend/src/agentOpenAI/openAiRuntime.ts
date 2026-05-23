@@ -82,6 +82,7 @@ import {
   hasDeliverableFinalReportHeading,
   looksLikePhaseSummaryFallback,
 } from '../services/finalResultQualityGate';
+import { assessFinalReportContractCompleteness } from '../services/finalReportContractGate';
 import type { ProviderScope } from '../services/providerManager';
 import type { KnowledgeScope } from '../services/scopedKnowledgeStore';
 
@@ -94,7 +95,7 @@ interface OpenAISessionEntry {
 
 const OPENAI_SESSION_FRESHNESS_MS = 4 * 60 * 60 * 1000;
 const OPENAI_MAX_PLAN_CONTINUATIONS = 3;
-const OPENAI_MAX_FINAL_REPORT_CONTINUATIONS = 1;
+const OPENAI_MAX_FINAL_REPORT_CONTINUATIONS = 2;
 const OPENAI_PLAN_COMPLETE_IDLE_ABORT_MS = 8_000;
 
 interface PlanCompletionStatus {
@@ -779,6 +780,8 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
               completedByPlanIdle,
               timedOut,
               finalReportContinuations,
+              query,
+              sceneType,
             }) && streamHistory.length > 0) {
               finalReportContinuations++;
               this.emitUpdate({
@@ -884,7 +887,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           terminationReason,
           terminationMessage,
         };
-        const gateIssue = applyFinalResultQualityGate({ result, query });
+        const gateIssue = applyFinalResultQualityGate({ result, query, sceneType });
         if (gateIssue) {
           this.emitUpdate({
             type: 'degraded',
@@ -1516,6 +1519,8 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     completedByPlanIdle: boolean;
     timedOut: boolean;
     finalReportContinuations: number;
+    query?: string;
+    sceneType?: SceneType;
   }): boolean {
     if (
       input.quickMode ||
@@ -1528,12 +1533,18 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
 
     const conclusion = input.conclusion.trim();
     const fallback = input.fallbackConclusion?.trim();
-    if (!fallback) return false;
     if (!conclusion) return true;
-    if (isSameConclusionText(conclusion, fallback)) return true;
+    if (fallback && isSameConclusionText(conclusion, fallback)) return true;
     if (looksLikePhaseSummaryFallback(conclusion)) return true;
     if (!hasDeliverableFinalReportHeading(conclusion)) return true;
     if (looksLikeProcessNarrationParagraph(conclusion)) return true;
+    if (assessFinalReportContractCompleteness({
+      conclusion,
+      query: input.query,
+      sceneType: input.sceneType,
+    })) {
+      return true;
+    }
     return looksLikeProcessNarrationParagraph(conclusion.split(/\n{2,}/)[0] || '');
   }
 

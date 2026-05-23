@@ -1540,6 +1540,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
                 allIssues,
                 conclusionText,
                 this.config.outputLanguage,
+                ctx.sceneType,
               );
               // When the conclusion is incomplete (just reasoning notes, no structured report),
               // the agent ran out of turns before generating a report. Give substantially more
@@ -1768,7 +1769,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
         terminationReason,
         terminationMessage,
       };
-      const gateIssue = applyFinalResultQualityGate({ result: finalAnalysisResult, query });
+      const gateIssue = applyFinalResultQualityGate({ result: finalAnalysisResult, query, sceneType });
       if (gateIssue) {
         this.emitUpdate({
           type: 'degraded',
@@ -2233,7 +2234,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
         terminationReason,
         terminationMessage,
       };
-      const quickGateIssue = applyFinalResultQualityGate({ result: quickResult, query });
+      const quickGateIssue = applyFinalResultQualityGate({ result: quickResult, query, sceneType });
       if (quickGateIssue) {
         this.emitUpdate({
           type: 'degraded',

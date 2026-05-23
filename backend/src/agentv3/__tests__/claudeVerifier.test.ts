@@ -451,6 +451,30 @@ describe('generateCorrectionPrompt', () => {
     expect(prompt).toContain('完整的结构化分析报告');
   });
 
+  it('should inject scrolling final report contract for incomplete scrolling conclusions', () => {
+    const issues = [
+      { type: 'missing_reasoning' as const, severity: 'error' as const, message: '结论不完整' },
+    ];
+    const prompt = generateCorrectionPrompt(issues, '正在分析滑动帧。', 'zh-CN', 'scrolling');
+    expect(prompt).toContain('Final Report Contract');
+    expect(prompt).toContain('全帧根因分布');
+    expect(prompt).toContain('代表帧分析');
+    expect(prompt).toContain('峰值/口径指标');
+  });
+
+  it('should inject startup final report contract instead of scrolling-specific requirements', () => {
+    const issues = [
+      { type: 'missing_reasoning' as const, severity: 'error' as const, message: '结论不完整' },
+    ];
+    const prompt = generateCorrectionPrompt(issues, '正在分析启动耗时。', 'zh-CN', 'startup');
+    expect(prompt).toContain('Final Report Contract');
+    expect(prompt).toContain('启动类型与 TTID/TTFD');
+    expect(prompt).toContain('阶段耗时分解');
+    expect(prompt).toContain('App/系统分层建议');
+    expect(prompt).not.toContain('全帧根因分布');
+    expect(prompt).not.toContain('代表帧分析');
+  });
+
   it('should use normal correction prompt when conclusion is complete', () => {
     const issues = [
       { type: 'missing_evidence' as const, severity: 'error' as const, message: 'CRITICAL 缺少证据' },
