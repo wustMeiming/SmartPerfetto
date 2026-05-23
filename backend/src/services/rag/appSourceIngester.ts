@@ -3,7 +3,7 @@
 // This file is part of SmartPerfetto. See LICENSE for details.
 
 import {createHash} from 'crypto';
-import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 
 import type {RagStore} from '../ragStore';
@@ -66,7 +66,7 @@ export class AppSourceIngester {
     private readonly gate: PathSecurityGate = new PathSecurityGate(),
   ) {}
 
-  ingest(codebaseId: string, opts: AppSourceIngestOptions = {}): AppSourceIngestResult {
+  async ingest(codebaseId: string, opts: AppSourceIngestOptions = {}): Promise<AppSourceIngestResult> {
     const ref = this.registry.get(codebaseId);
     if (!ref) {
       throw new Error(`Codebase '${codebaseId}' not found`);
@@ -75,7 +75,7 @@ export class AppSourceIngester {
       throw new Error(`Codebase '${codebaseId}' is kind=${ref.kind}; app source ingestion requires app_source`);
     }
 
-    const preview = this.gate.preview(ref.rootRealpath);
+    const preview = await this.gate.preview(ref.rootRealpath);
     if (preview.blocked) {
       this.registry.updateIngestStatus(codebaseId, {
         lastIngestStatus: 'blocked_by_security',
@@ -107,9 +107,10 @@ export class AppSourceIngester {
 
     for (const file of filterPreviewFiles(preview, ref, opts)) {
       result.filesProcessed++;
+      await new Promise<void>(r => setImmediate(r));
       try {
         const absolutePath = path.join(ref.rootRealpath, file.relativePath);
-        const content = fs.readFileSync(absolutePath, 'utf-8');
+        const content = await fsPromises.readFile(absolutePath, 'utf-8');
         const chunks = chunkSource(content, maxChars);
         if (chunks.length === 0) {
           result.chunksSkipped++;
@@ -147,6 +148,7 @@ export class AppSourceIngester {
       }
     }
 
+    this.store.flush();
     this.registry.updateIngestStatus(codebaseId, {
       lastIngestStatus: result.errors.length > 0 ? 'partial' : 'ok',
       lastIngestAt: Date.now(),

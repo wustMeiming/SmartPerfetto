@@ -3,10 +3,13 @@
 // This file is part of SmartPerfetto. See LICENSE for details.
 
 import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 
 const DEFAULT_EXCLUDES = [
   '.git',
+  '.gradle',
+  '.idea',
   'node_modules',
   'build',
   'out',
@@ -86,6 +89,14 @@ function safeRealpath(target: string): string | null {
   }
 }
 
+async function safeRealpathAsync(target: string): Promise<string | null> {
+  try {
+    return await fsPromises.realpath(target);
+  } catch {
+    return null;
+  }
+}
+
 export function isWithinAllowlist(target: string, allowlist: string[]): boolean {
   const realTarget = safeRealpath(target);
   if (!realTarget) return false;
@@ -121,11 +132,11 @@ export class PathSecurityGate {
     this.maxFiles = options.maxFiles ?? 50_000;
   }
 
-  preview(rootPath: string): PathPreviewResult {
+  async preview(rootPath: string): Promise<PathPreviewResult> {
     // Read env lazily so SMARTPERFETTO_CODEBASE_ROOTS set via dotenv (loaded after
     // module init in ESM) is visible on the first real request.
     const allowlistRoots = this.allowlistRootsOverride ?? configuredAllowlistRoots();
-    const rootRealpath = safeRealpath(rootPath);
+    const rootRealpath = await safeRealpathAsync(rootPath);
     if (!rootRealpath) {
       return {
         rootPath,
@@ -153,18 +164,28 @@ export class PathSecurityGate {
 
     while (stack.length > 0) {
       const current = stack.pop()!;
-      const entries = fs.readdirSync(current, {withFileTypes: true});
+      const entries = await fsPromises.readdir(current, {withFileTypes: true});
       for (const entry of entries) {
         const fullPath = path.join(current, entry.name);
-        const realPath = safeRealpath(fullPath);
-        if (!realPath || !isWithinAllowlist(realPath, [rootRealpath])) {
+        const realPath = await safeRealpathAsync(fullPath);
+        // Detect symlinks that escape the root without calling isWithinAllowlist
+        // (realPath is already resolved, so a simple relative-path check suffices).
+        if (!realPath) {
           skippedFiles.push({
             relativePath: path.relative(rootRealpath, fullPath),
             reason: 'symlink_outside_root',
           });
           continue;
         }
-        const relativePath = path.relative(rootRealpath, realPath);
+        const rel = path.relative(rootRealpath, realPath);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+          skippedFiles.push({
+            relativePath: path.relative(rootRealpath, fullPath),
+            reason: 'symlink_outside_root',
+          });
+          continue;
+        }
+        const relativePath = rel;
         if (shouldExclude(relativePath, entry.name, this.excludeNames)) {
           if (entry.isFile()) skippedFiles.push({relativePath, reason: 'excluded'});
           continue;
@@ -179,7 +200,7 @@ export class PathSecurityGate {
           skippedFiles.push({relativePath, reason: 'extension_not_allowed'});
           continue;
         }
-        const stat = fs.statSync(realPath);
+        const stat = await fsPromises.stat(realPath);
         if (stat.size > this.maxFileBytes) {
           skippedFiles.push({relativePath, reason: 'file_too_large'});
           continue;
