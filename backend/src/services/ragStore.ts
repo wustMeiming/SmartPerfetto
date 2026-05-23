@@ -219,7 +219,6 @@ export class RagStore {
     }
     if (legacyKnowledgeFilesystemWritesEnabled()) {
       this.chunks.set(normalized.chunkId, normalized);
-      this.persist();
     }
     if (enterpriseKnowledgeDbWritesEnabled()) {
       upsertScopedKnowledgeRecord(
@@ -378,6 +377,13 @@ export class RagStore {
       probed,
       retrievedAt: Date.now(),
     };
+  }
+
+  /** Flush in-memory chunks to disk. Call once after a bulk ingest loop. */
+  flush(): void {
+    if (legacyKnowledgeFilesystemWritesEnabled()) {
+      this.persist();
+    }
   }
 
   /** Atomic write: temp file + rename so a crashed process leaves the

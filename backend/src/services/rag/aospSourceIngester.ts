@@ -2,7 +2,7 @@
 // Copyright (C) 2024-2026 Gracker (Chris)
 // This file is part of SmartPerfetto. See LICENSE for details.
 
-import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 
 import type {RagStore} from '../ragStore';
@@ -49,7 +49,7 @@ export class AospSourceIngester {
     private readonly gate: PathSecurityGate = new PathSecurityGate(),
   ) {}
 
-  ingest(codebaseId: string, opts: AospSourceIngestOptions = {}): AospSourceIngestResult {
+  async ingest(codebaseId: string, opts: AospSourceIngestOptions = {}): Promise<AospSourceIngestResult> {
     const ref = this.registry.get(codebaseId);
     if (!ref) throw new Error(`Codebase '${codebaseId}' not found`);
     if (ref.kind !== 'aosp') {
@@ -58,7 +58,7 @@ export class AospSourceIngester {
     if (!ref.licenseTag) {
       throw new Error(`AOSP codebase '${codebaseId}' requires licenseTag`);
     }
-    const preview = this.gate.preview(ref.rootRealpath);
+    const preview = await this.gate.preview(ref.rootRealpath);
     if (preview.blocked) {
       this.registry.updateIngestStatus(codebaseId, {
         lastIngestStatus: 'blocked_by_security',
@@ -86,8 +86,9 @@ export class AospSourceIngester {
     const maxChars = opts.maxChunkChars ?? DEFAULT_MAX_CHUNK_CHARS;
     for (const file of filterPreviewFiles(preview, ref, opts)) {
       result.filesProcessed++;
+      await new Promise<void>(r => setImmediate(r));
       try {
-        const content = fs.readFileSync(path.join(ref.rootRealpath, file.relativePath), 'utf-8');
+        const content = await fsPromises.readFile(path.join(ref.rootRealpath, file.relativePath), 'utf-8');
         const chunks = chunkSourceBySymbols(content, maxChars);
         if (chunks.length === 0) {
           result.chunksSkipped++;
@@ -119,6 +120,7 @@ export class AospSourceIngester {
         result.errors.push({filePath: file.relativePath, reason: error instanceof Error ? error.message : String(error)});
       }
     }
+    this.store.flush();
     this.registry.updateIngestStatus(codebaseId, {
       lastIngestStatus: result.errors.length > 0 ? 'partial' : 'ok',
       lastIngestAt: Date.now(),

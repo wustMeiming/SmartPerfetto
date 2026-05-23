@@ -2,7 +2,7 @@
 // Copyright (C) 2024-2026 Gracker (Chris)
 // This file is part of SmartPerfetto. See LICENSE for details.
 
-import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 
 import type {RagStore} from '../ragStore';
@@ -63,7 +63,7 @@ export class KernelSourceIngester {
     private readonly gate: PathSecurityGate = new PathSecurityGate(),
   ) {}
 
-  ingest(codebaseId: string, opts: KernelSourceIngestOptions = {}): KernelSourceIngestResult {
+  async ingest(codebaseId: string, opts: KernelSourceIngestOptions = {}): Promise<KernelSourceIngestResult> {
     const ref = this.registry.get(codebaseId);
     if (!ref) {
       throw new Error(`Codebase '${codebaseId}' not found`);
@@ -78,7 +78,7 @@ export class KernelSourceIngester {
       throw new Error(`Kernel codebase '${codebaseId}' requires pathFilters or pathPrefix`);
     }
 
-    const preview = this.gate.preview(ref.rootRealpath);
+    const preview = await this.gate.preview(ref.rootRealpath);
     if (preview.blocked) {
       this.registry.updateIngestStatus(codebaseId, {
         lastIngestStatus: 'blocked_by_security',
@@ -110,9 +110,10 @@ export class KernelSourceIngester {
 
     for (const file of filterPreviewFiles(preview, ref, opts)) {
       result.filesProcessed++;
+      await new Promise<void>(r => setImmediate(r));
       try {
         const absolutePath = path.join(ref.rootRealpath, file.relativePath);
-        const content = fs.readFileSync(absolutePath, 'utf-8');
+        const content = await fsPromises.readFile(absolutePath, 'utf-8');
         const license = ref.licenseTag ?? spdxLicense(content);
         const chunks = chunkSourceBySymbols(content, maxChars);
         if (chunks.length === 0) {
@@ -153,6 +154,7 @@ export class KernelSourceIngester {
       }
     }
 
+    this.store.flush();
     this.registry.updateIngestStatus(codebaseId, {
       lastIngestStatus: result.errors.length > 0 ? 'partial' : 'ok',
       lastIngestAt: Date.now(),
