@@ -3419,7 +3419,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         expectedCalls: z.array(z.object({
           tool: z.string().describe('Short tool name without prefix (e.g. "invoke_skill")'),
           skillId: z.string().optional().describe('For invoke_skill, the required skillId'),
-        })).optional().describe('Optional structured matchers — preferred over expectedTools when set. Use to require a specific skillId, e.g. [{tool:"invoke_skill", skillId:"startup_slow_reasons"}].'),
+        })).optional().describe('Optional structured matchers for calls that need a specific skillId. They narrow matching for that same tool, while expectedTools can still list generic support tools such as execute_sql/fetch_artifact. Example: [{tool:"invoke_skill", skillId:"startup_slow_reasons"}].'),
       })).min(1).describe('Ordered list of analysis phases (at least 1 phase required)'),
       successCriteria: z.string().describe('What constitutes a successful analysis (e.g. "Identify root cause of jank frames with evidence")'),
       waivers: z.array(z.object({

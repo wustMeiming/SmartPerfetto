@@ -280,6 +280,117 @@ describe('verifyPlanAdherence', () => {
     )).toBe(true);
   });
 
+  it('does not let support tools satisfy a structured expectedCalls phase', () => {
+    const plan = makePlan({
+      phases: [{
+        id: 'p1',
+        name: 'Root Cause',
+        goal: 'Run the specific root-cause skill and supporting SQL',
+        expectedTools: ['invoke_skill', 'execute_sql'],
+        expectedCalls: [{ tool: 'invoke_skill', skillId: 'jank_frame_detail' }],
+        status: 'completed',
+        summary: 'Completed root-cause analysis with supporting SQL',
+      }],
+      toolCallLog: [
+        { toolName: 'execute_sql', timestamp: Date.now(), matchedPhaseId: 'p1' },
+      ],
+    });
+
+    const issues = verifyPlanAdherence(plan);
+    expect(issues.some(i =>
+      i.type === 'plan_deviation' &&
+      i.severity === 'error' &&
+      i.message.includes('未执行全部结构化预期调用'),
+    )).toBe(true);
+  });
+
+  it('does not let attribution-only resolver satisfy a structured expectedCalls phase', () => {
+    const plan = makePlan({
+      phases: [{
+        id: 'p1',
+        name: 'Flutter pipeline',
+        goal: 'Run the Flutter skill and resolve process identity if needed',
+        expectedTools: ['invoke_skill'],
+        expectedCalls: [{ tool: 'invoke_skill', skillId: 'flutter_scrolling_analysis' }],
+        status: 'completed',
+        summary: 'Completed identity resolution only',
+      }],
+      toolCallLog: [
+        {
+          toolName: 'invoke_skill',
+          timestamp: Date.now(),
+          skillId: 'process_identity_resolver',
+          matchedPhaseId: 'p1',
+        },
+      ],
+    });
+
+    const issues = verifyPlanAdherence(plan);
+    expect(issues.some(i =>
+      i.type === 'plan_deviation' &&
+      i.severity === 'error' &&
+      i.message.includes('未执行全部结构化预期调用'),
+    )).toBe(true);
+  });
+
+  it('requires every structured expectedCalls entry before completing a phase', () => {
+    const plan = makePlan({
+      phases: [{
+        id: 'p1',
+        name: 'Multi-skill root cause',
+        goal: 'Run every required root-cause skill',
+        expectedTools: ['invoke_skill'],
+        expectedCalls: [
+          { tool: 'invoke_skill', skillId: 'scrolling_analysis' },
+          { tool: 'invoke_skill', skillId: 'jank_frame_detail' },
+        ],
+        status: 'completed',
+        summary: 'Only the overview skill ran',
+      }],
+      toolCallLog: [
+        {
+          toolName: 'invoke_skill',
+          timestamp: Date.now(),
+          skillId: 'scrolling_analysis',
+          matchedPhaseId: 'p1',
+        },
+      ],
+    });
+
+    const issues = verifyPlanAdherence(plan);
+    expect(issues.some(i =>
+      i.type === 'plan_deviation' &&
+      i.severity === 'error' &&
+      i.message.includes('缺失: invoke_skill(jank_frame_detail)'),
+    )).toBe(true);
+  });
+
+  it('accepts a completed structured expectedCalls phase after the required skill runs', () => {
+    const plan = makePlan({
+      phases: [{
+        id: 'p1',
+        name: 'Root Cause',
+        goal: 'Run the specific root-cause skill and supporting SQL',
+        expectedTools: ['invoke_skill', 'execute_sql'],
+        expectedCalls: [{ tool: 'invoke_skill', skillId: 'jank_frame_detail' }],
+        status: 'completed',
+        summary: 'Completed root-cause analysis with supporting SQL',
+      }],
+      toolCallLog: [
+        { toolName: 'execute_sql', timestamp: Date.now(), matchedPhaseId: 'p1' },
+        {
+          toolName: 'invoke_skill',
+          timestamp: Date.now(),
+          skillId: 'jank_frame_detail',
+          matchedPhaseId: 'p1',
+        },
+      ],
+    });
+
+    const issues = verifyPlanAdherence(plan);
+    expect(issues.some(i => i.type === 'plan_deviation' && i.severity === 'error')).toBe(false);
+  });
+
   it('should warn when completed phases lack reasoning summary', () => {
     const plan = makePlan({
       phases: [

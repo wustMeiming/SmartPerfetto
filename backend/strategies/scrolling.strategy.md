@@ -220,6 +220,12 @@ invoke_skill("scrolling_analysis", { start_ts: "<trace_start>", end_ts: "<trace_
 | **标准 HWUI** | 使用标准 `scrolling_analysis` |
 | **Compose** | 使用标准 `scrolling_analysis`。如果检测到 Compose 架构，注意 Recomposition* slices 可能是卡顿主因。LazyColumn/LazyRow 的 prefetch 和 compose 阶段如果超时会导致掉帧。可调用 `compose_recomposition_hotspot` 检测过度重组；新版会在 FrameTimeline 可用时输出 recomposition→frame 重叠证据 |
 
+**滑动场景计划契约（submit_plan 时提前声明）：**
+- 概览/数据收集阶段通常应声明 `expectedCalls: [{ tool: "invoke_skill", skillId: "scrolling_analysis" }]`，并在 `expectedTools` 中同时包含可能用到的 `execute_sql`、`fetch_artifact`、`lookup_sql_schema`。
+- Flutter、TextureView、SurfaceView、WebView、RN、GL/Game 等混合管线阶段，应把对应架构 Skill 写进 `expectedCalls`；如果要用 FrameTimeline、`thread_slice`、BufferQueue、VSYNC 或 SF 表做兜底 SQL 交叉验证，`expectedTools` 必须包含 `execute_sql`，并先包含/调用 `lookup_sql_schema`。
+- 缺帧/producer gap 阶段若会检查 Flutter TextureView、SurfaceTexture 或多 layer 生产端，`expectedCalls` 至少包含 `frame_production_gap`，按架构再追加 `textureview_producer_frame_timing`、`flutter_scrolling_analysis` 或其他 producer Skill。
+- 进程身份来自自动焦点检测、Skill 返回空但线程/layer 有目标信号、或身份准入提示 ambiguous/blocked 时，单独设置身份确认阶段，并声明 `expectedCalls: [{ tool: "invoke_skill", skillId: "process_identity_resolver" }]`；执行中才发现时先 `revise_plan` 再调用。
+
 **Phase 1.6 — 进程身份交叉确认（当 process_name 可能不可靠时）：**
 
 系统会在进程级 Skill 执行前自动做身份准入。满足任一条件时，若准入返回 ambiguous/blocked，调用 `invoke_skill("process_identity_resolver", { process_name, start_ts, end_ts })` 查看候选进程，再继续深钻：

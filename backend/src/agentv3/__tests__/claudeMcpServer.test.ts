@@ -1326,6 +1326,67 @@ describe('createClaudeMcpServer', () => {
       expect(envelope?.meta?.planPhaseWarning).toBeUndefined();
     });
 
+    it('allows active-phase support SQL when expectedCalls narrow the skill call', async () => {
+      const { tools, emittedUpdates } = createTestServer();
+      await callTool(tools, 'submit_plan', {
+        phases: [
+          {
+            id: 'p1',
+            name: '概览采集',
+            goal: '调用 scrolling_analysis 采集概览，并用 SQL 补充验证帧时间范围',
+            expectedTools: ['invoke_skill', 'execute_sql'],
+            expectedCalls: [{ tool: 'invoke_skill', skillId: 'scrolling_analysis' }],
+          },
+        ],
+        successCriteria: 'Support SQL should stay attributable without weakening skill matching',
+      });
+      await callTool(tools, 'update_plan_phase', { phaseId: 'p1', status: 'in_progress' });
+
+      const result = await callTool(tools, 'execute_sql', {
+        sql: "SELECT printf('%d', MIN(ts)) as start_ts, printf('%d', MAX(ts + dur)) as end_ts FROM actual_frame_timeline_slice",
+      });
+      const envelope = emittedUpdates
+        .filter((u: any) => u.type === 'data')
+        .flatMap((u: any) => u.content ?? [])
+        .find((env: any) => env.display?.format === 'table');
+
+      expect(result.success).toBe(true);
+      expect(envelope?.meta?.planPhaseId).toBe('p1');
+      expect(envelope?.meta?.planPhaseAttribution).toBe('active');
+      expect(envelope?.meta?.planPhaseWarning).toBeUndefined();
+    });
+
+    it('allows attribution-only process identity resolver when expectedCalls narrow the phase skill', async () => {
+      const { tools, emittedUpdates } = createTestServer();
+      await callTool(tools, 'submit_plan', {
+        phases: [
+          {
+            id: 'p1',
+            name: 'Flutter 专属管线分析',
+            goal: '调用 flutter_scrolling_analysis 获取 1.ui/1.raster 线程帧级数据',
+            expectedTools: ['invoke_skill'],
+            expectedCalls: [{ tool: 'invoke_skill', skillId: 'flutter_scrolling_analysis' }],
+          },
+        ],
+        successCriteria: 'Identity resolver should be attributable without replacing the Flutter skill',
+      });
+      await callTool(tools, 'update_plan_phase', { phaseId: 'p1', status: 'in_progress' });
+
+      const result = await callTool(tools, 'invoke_skill', {
+        skillId: 'process_identity_resolver',
+        params: { process_name: 'com.tencent.mm' },
+      });
+      const envelope = emittedUpdates
+        .filter((u: any) => u.type === 'data')
+        .flatMap((u: any) => u.content ?? [])
+        .find((env: any) => env.meta?.skillId === 'process_identity_resolver');
+
+      expect(result.success).toBe(true);
+      expect(envelope?.meta?.planPhaseId).toBe('p1');
+      expect(envelope?.meta?.planPhaseAttribution).toBe('active');
+      expect(envelope?.meta?.planPhaseWarning).toBeUndefined();
+    });
+
     it('binds late root-cause SQL to the semantic phase even when the plan did not declare raw SQL', async () => {
       const { tools, emittedUpdates } = createTestServer();
       await callTool(tools, 'submit_plan', {

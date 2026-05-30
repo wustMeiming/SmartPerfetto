@@ -267,11 +267,10 @@ export interface PlanPhase {
   /** Expected tool names this phase will use (for adherence tracking) */
   expectedTools: string[];
   /**
-   * Optional structured matchers — preferred over `expectedTools` when set.
-   * Lets a phase require a specific skillId for `invoke_skill` rather than
-   * accepting any invocation. Phase 0.6 of the v2.1 refactor introduces
-   * this; existing strategies continue to use `expectedTools` until they
-   * opt in.
+   * Optional structured matchers for calls that need a specific skillId.
+   * These narrow matching for the same tool name (for example, only
+   * `invoke_skill(startup_slow_reasons)`), while `expectedTools` can still
+   * declare generic support tools such as `execute_sql` or `fetch_artifact`.
    */
   expectedCalls?: ExpectedCall[];
   status: 'pending' | 'in_progress' | 'completed' | 'skipped';
@@ -323,31 +322,67 @@ export interface PlanRevision {
 
 /**
  * Predicate testing whether a logged tool call satisfies a phase's
- * expectations. `expectedCalls` (when set) trumps `expectedTools`; otherwise
- * the legacy "any call with the right tool name" semantics apply. Tool
- * names are normalised by stripping the MCP prefix on both sides.
+ * expectations. `expectedCalls` narrows matching for the same tool name,
+ * while `expectedTools` can still declare generic support tools such as
+ * `execute_sql` or `fetch_artifact`. Tool names are normalised by stripping
+ * the MCP prefix on both sides.
  */
-export function phaseMatchesCall(phase: PlanPhase, record: ToolCallRecord): boolean {
+function shortToolName(toolName: string): string {
   const MCP_PREFIX = 'mcp__smartperfetto__';
-  const shortTool = record.toolName.startsWith(MCP_PREFIX)
-    ? record.toolName.slice(MCP_PREFIX.length)
-    : record.toolName;
-  if (phase.expectedCalls && phase.expectedCalls.length > 0) {
-    return phase.expectedCalls.some(call => {
-      if (call.tool !== shortTool) return false;
+  return toolName.startsWith(MCP_PREFIX) ? toolName.slice(MCP_PREFIX.length) : toolName;
+}
+
+const ATTRIBUTION_SUPPORT_SKILL_IDS = new Set([
+  // Identity resolution supports the current phase after the process gate reports
+  // ambiguous/blocked identity, but it must not satisfy the phase's key skill.
+  'process_identity_resolver',
+]);
+
+export function formatExpectedCall(call: ExpectedCall): string {
+  const tool = shortToolName(call.tool);
+  return call.skillId ? `${tool}(${call.skillId})` : tool;
+}
+
+export function expectedCallMatchesRecord(call: ExpectedCall, record: ToolCallRecord): boolean {
+  const shortTool = shortToolName(record.toolName);
+  if (shortToolName(call.tool) !== shortTool) return false;
+  if (call.skillId && call.skillId !== record.skillId) return false;
+  return true;
+}
+
+export function phaseMatchesExpectedCall(phase: PlanPhase, record: ToolCallRecord): boolean {
+  return (phase.expectedCalls ?? []).some(call => expectedCallMatchesRecord(call, record));
+}
+
+export function phaseMatchesCall(phase: PlanPhase, record: ToolCallRecord): boolean {
+  const shortTool = shortToolName(record.toolName);
+  const expectedToolSet = new Set(phase.expectedTools.map(shortToolName));
+  const structuredCallsForTool = (phase.expectedCalls ?? [])
+    .filter(call => shortToolName(call.tool) === shortTool);
+  if (structuredCallsForTool.length > 0) {
+    if (shortTool === 'invoke_skill' &&
+      record.skillId &&
+      ATTRIBUTION_SUPPORT_SKILL_IDS.has(record.skillId) &&
+      expectedToolSet.has(shortTool)) {
+      return true;
+    }
+    return structuredCallsForTool.some(call => {
       if (call.skillId && call.skillId !== record.skillId) return false;
       return true;
     });
   }
-  return phase.expectedTools.includes(shortTool);
+  return expectedToolSet.has(shortTool);
 }
 
 /** Flatten a phase's expectations to plain tool names for log/UI rendering. */
 export function expectedToolNames(phase: PlanPhase): string[] {
-  if (phase.expectedCalls && phase.expectedCalls.length > 0) {
-    return phase.expectedCalls.map(c => c.skillId ? `${c.tool}(${c.skillId})` : c.tool);
-  }
-  return phase.expectedTools;
+  const structured = (phase.expectedCalls ?? [])
+    .map(formatExpectedCall);
+  const structuredTools = new Set((phase.expectedCalls ?? []).map(c => shortToolName(c.tool)));
+  const generic = phase.expectedTools
+    .map(shortToolName)
+    .filter(tool => !structuredTools.has(tool));
+  return [...structured, ...generic];
 }
 
 /** Record of a tool call for plan adherence tracking. */

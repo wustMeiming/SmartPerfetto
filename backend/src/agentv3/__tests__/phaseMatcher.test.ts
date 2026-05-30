@@ -8,7 +8,9 @@
  * The legacy `expectedTools: string[]` matcher accepted any call with
  * the right tool name, so a phase declaring "call invoke_skill" passed
  * adherence even when the agent invoked the wrong skill. The new
- * `expectedCalls` field requires both tool and (optional) skillId.
+ * `expectedCalls` field requires both tool and (optional) skillId for the
+ * same tool name, while generic support tools can still be declared through
+ * `expectedTools`.
  */
 
 import { describe, it, expect } from '@jest/globals';
@@ -44,14 +46,36 @@ describe('phaseMatchesCall', () => {
     )).toBe(false);
   });
 
-  it('expectedCalls overrides expectedTools when set', () => {
-    // expectedTools would match `execute_sql` but the structured matcher takes priority
+  it('expectedCalls narrow same-tool skill calls while expectedTools allow support tools', () => {
     const phase: PlanPhase = {
       ...basePhase,
-      expectedTools: ['execute_sql'],
+      expectedTools: ['invoke_skill', 'execute_sql'],
       expectedCalls: [{ tool: 'invoke_skill', skillId: 'foo' }],
     };
-    expect(phaseMatchesCall(phase, { toolName: 'execute_sql', timestamp: 0 })).toBe(false);
+    expect(phaseMatchesCall(phase, { toolName: 'execute_sql', timestamp: 0 })).toBe(true);
+    expect(phaseMatchesCall(phase, {
+      toolName: 'invoke_skill',
+      timestamp: 0,
+      skillId: 'bar',
+    })).toBe(false);
+  });
+
+  it('allows attribution-only support skills without weakening same-tool narrowing', () => {
+    const phase: PlanPhase = {
+      ...basePhase,
+      expectedTools: ['invoke_skill'],
+      expectedCalls: [{ tool: 'invoke_skill', skillId: 'flutter_scrolling_analysis' }],
+    };
+    expect(phaseMatchesCall(phase, {
+      toolName: 'invoke_skill',
+      timestamp: 0,
+      skillId: 'process_identity_resolver',
+    })).toBe(true);
+    expect(phaseMatchesCall(phase, {
+      toolName: 'invoke_skill',
+      timestamp: 0,
+      skillId: 'jank_frame_detail',
+    })).toBe(false);
   });
 
   it('expectedCalls matches by tool + skillId together', () => {
@@ -102,14 +126,14 @@ describe('expectedToolNames', () => {
     })).toEqual(['execute_sql', 'invoke_skill']);
   });
 
-  it('renders tool(skillId) when expectedCalls carries a skillId', () => {
+  it('renders structured calls plus generic support tools without broad duplicate tools', () => {
     expect(expectedToolNames({
       ...basePhase,
-      expectedTools: ['execute_sql'],
+      expectedTools: ['invoke_skill', 'execute_sql', 'fetch_artifact'],
       expectedCalls: [
         { tool: 'invoke_skill', skillId: 'startup_slow_reasons' },
         { tool: 'execute_sql' },
       ],
-    })).toEqual(['invoke_skill(startup_slow_reasons)', 'execute_sql']);
+    })).toEqual(['invoke_skill(startup_slow_reasons)', 'execute_sql', 'fetch_artifact']);
   });
 });

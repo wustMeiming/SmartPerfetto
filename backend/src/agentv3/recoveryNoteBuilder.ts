@@ -27,7 +27,7 @@
  * "what did the agent just do?" signal.
  */
 
-import type { AnalysisPlanV3, ToolCallRecord } from './types';
+import { expectedToolNames, type AnalysisPlanV3, type ToolCallRecord } from './types';
 import type { Finding } from '../agent/types';
 
 export const DEFAULT_MAX_NOTE_CHARS = 800;
@@ -102,8 +102,9 @@ export function buildRecoveryNote(input: RecoveryNoteInput): RecoveryNote {
     // Section 2: next/in-progress phase pointer
     const nextPhase = input.plan.phases.find(p => p.status === 'pending' || p.status === 'in_progress');
     if (nextPhase) {
-      const tools = nextPhase.expectedTools.length > 0
-        ? ` (工具: ${nextPhase.expectedTools.join(', ')})`
+      const expectedTools = expectedToolNames(nextPhase);
+      const tools = expectedTools.length > 0
+        ? ` (工具: ${expectedTools.join(', ')})`
         : '';
       tryAdd('next_phase', `当前/下一阶段: ${nextPhase.name} — ${nextPhase.goal}${tools}`);
     }

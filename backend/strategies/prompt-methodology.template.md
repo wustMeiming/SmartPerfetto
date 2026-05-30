@@ -18,12 +18,18 @@
 示例计划：
 ```
 phases: [
-  { id: "p1", name: "数据收集", goal: "获取概览数据和关键指标", expectedTools: ["invoke_skill"] },
-  { id: "p2", name: "深入分析", goal: "对异常帧/阶段做根因分析", expectedTools: ["invoke_skill", "fetch_artifact"] },
+  { id: "p1", name: "数据收集", goal: "获取概览数据和关键指标", expectedTools: ["invoke_skill", "execute_sql"], expectedCalls: [{ tool: "invoke_skill", skillId: "scrolling_analysis" }] },
+  { id: "p2", name: "深入分析", goal: "对异常帧/阶段做根因分析", expectedTools: ["invoke_skill", "fetch_artifact", "execute_sql"], expectedCalls: [{ tool: "invoke_skill", skillId: "jank_frame_detail" }] },
   { id: "p3", name: "综合结论", goal: "综合所有证据给出结构化结论", expectedTools: [] }
 ]
 successCriteria: "确定掉帧根因并提供可操作的优化建议"
 ```
+
+阶段工具声明是验证契约，不只是备注：
+- `expectedCalls` 用于阶段必须执行的具体 Skill，例如 `invoke_skill(scrolling_analysis)` 或 `invoke_skill(jank_frame_detail)`。同一个阶段如果可能调用多个关键 Skill，逐个列出。
+- `expectedTools` 同时列出本阶段可能使用的通用辅助工具，例如 `execute_sql`、`fetch_artifact`、`lookup_sql_schema`、`lookup_knowledge`。不要因为已经写了 `expectedCalls` 就省略辅助工具。
+- 如果阶段可能需要自定义 SQL 兜底验证 FrameTimeline、`thread_slice`、VSYNC、BufferQueue 或系统表，计划里必须提前包含 `execute_sql`；写 SQL 前还要先调用 `lookup_sql_schema`。
+- 如果进程身份可能 ambiguous/blocked，计划里为身份确认阶段声明 `expectedCalls: [{ tool: "invoke_skill", skillId: "process_identity_resolver" }]`；如果是执行中才发现身份不可靠，先 `revise_plan` 再调用 resolver。
 
 ### 证据契约（所有场景通用）
 在提交计划和输出结论时，都要先区分“当前证据能证明什么”和“还缺什么”：

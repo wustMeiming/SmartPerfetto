@@ -21,7 +21,7 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { createSdkEnv, getSdkBinaryOption } from './claudeConfig';
 import type { Finding, StreamingUpdate } from '../agent/types';
 import type { VerificationResult, VerificationIssue, AnalysisPlanV3, Hypothesis, ToolCallRecord } from './types';
-import { expectedToolNames } from './types';
+import { expectedCallMatchesRecord, expectedToolNames, formatExpectedCall } from './types';
 import type { SceneType } from './sceneClassifier';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from './outputLanguage';
 import { backendLogPath } from '../runtimePaths';
@@ -373,10 +373,21 @@ export function verifyPlanAdherence(plan: AnalysisPlanV3 | null): VerificationIs
   const completedPhases = plan.phases.filter(p => p.status === 'completed');
   for (const phase of completedPhases) {
     const matchedCalls = plan.toolCallLog.filter(t => t.matchedPhaseId === phase.id);
-    const hasExpectations =
-      (phase.expectedCalls?.length ?? 0) > 0 || phase.expectedTools.length > 0;
+    const expected = expectedToolNames(phase).join(', ');
+    const missingExpectedCalls = (phase.expectedCalls ?? [])
+      .filter(call => !matchedCalls.some(record => expectedCallMatchesRecord(call, record)));
+    if (missingExpectedCalls.length > 0) {
+      const missing = missingExpectedCalls.map(formatExpectedCall).join(', ');
+      issues.push({
+        type: 'plan_deviation',
+        severity: 'error',
+        message: `阶段 "${phase.name}" (${phase.id}) 标记为完成但未执行全部结构化预期调用 (缺失: ${missing}; 预期: ${expected})。辅助工具调用不能替代该阶段声明的关键 Skill。`,
+      });
+      continue;
+    }
+
+    const hasExpectations = phase.expectedTools.length > 0;
     if (matchedCalls.length === 0 && hasExpectations) {
-      const expected = expectedToolNames(phase).join(', ');
       issues.push({
         type: 'plan_deviation',
         severity: 'error',
