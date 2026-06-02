@@ -1930,3 +1930,38 @@ Verification:
 Verdict:
 - Release gate is green pending final `git diff --check`, commit/version bump,
   push, publish, and post-publish verification.
+
+## Round 30 - v1.0.28 Publish Self-Check
+
+Reviewer: Codex structured release self-check.
+
+Scope:
+- Final publication chain after the four-agent runtime contract gate.
+
+Findings:
+- The release commit was version-only after the full four-agent gate.
+- The Perfetto submodule commit was pushed to fork before the root gitlink was
+  committed.
+- npm, GitHub Release, and Docker publication all completed successfully.
+
+Action:
+- Pushed `main` with feature commit `a212ca89` and release commit `e275f2b0`.
+- Published `@gracker/smartperfetto@1.0.28`.
+- Built and uploaded Windows x64, macOS arm64, and Linux x64 portable assets.
+- Waited for tag-triggered Docker Build and Publish workflow to complete.
+- Verified Docker Hub `1.0.28` and `latest` manifests.
+
+Verification:
+- Version-state root `npm run verify:pr`: passed.
+- Fresh npm install smoke: passed on Node `v24.15.0`.
+- `smp --version`: `1.0.28`.
+- `smp doctor --format json`: `ok:true`.
+- GitHub Release `v1.0.28`: published, not draft, not prerelease, with three
+  uploaded portable assets.
+- Docker Build and Publish run `26816581871`: success.
+- Docker Hub `1.0.28` and `latest` digests match:
+  `sha256:004c015ee05e47de08ebe66d61fd6cdd770b800aa291ec386b6f7b49f7448276`.
+
+Verdict:
+- v1.0.28 is published and verified. Runtime-engine-contract Draft v2 M1-M14
+  plus the four-agent release gate are complete.

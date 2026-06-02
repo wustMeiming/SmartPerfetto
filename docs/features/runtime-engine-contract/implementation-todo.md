@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-05-31
-Last updated: 2026-06-02 19:05:09 CST
+Last updated: 2026-06-02 19:42:58 CST
 Source of truth: `README.md`, `review-rounds.md`, this file, `progress.md`,
 `decision-log.md`, and `verification-log.md`.
 
@@ -1045,7 +1045,7 @@ Completion evidence:
 
 ## Post-M14 - Release Readiness And Publish Gate
 
-Status: in_progress
+Status: completed
 
 Goal:
 - Before pushing and publishing the four-agent release, rerun the full release
@@ -1091,6 +1091,6 @@ Completion evidence:
 - [x] Browser report render/scroll check passed.
 - [x] Focused Jest, typecheck, scene regression, and root `verify:pr` passed.
 - [x] Pi Agent Core `openai-completions` gateway config finding documented.
-- [ ] `git diff --check` passed after docs/log updates.
-- [ ] Version bump, commit, push, publish, and post-publish verification
+- [x] `git diff --check` passed after docs/log updates.
+- [x] Version bump, commit, push, publish, and post-publish verification
   completed.

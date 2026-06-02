@@ -1438,3 +1438,59 @@ Post-diff self-check:
 
 Allowed to enter next phase:
 - Yes, after `git diff --check` passes on these docs/log updates.
+
+### 2026-06-02 19:41:00 CST - v1.0.28 Publish Verification
+
+Scope:
+- Post-publish verification for npm, GitHub portable assets, Docker workflow,
+  Docker Hub manifests, and repository cleanliness.
+
+Focused unit tests:
+- Covered before publish by release gate and version-state root
+  `npm run verify:pr`.
+
+Integration tests:
+- Version-state root `npm run verify:pr`: passed after the `1.0.28` version
+  bump.
+- Docker workflow `quality-gate`: passed root quality, Rust verify, backend PR
+  verification, Docker runtime image smoke, and Docker Hub compose config.
+
+Scene trace regression:
+- Local version-state root `npm run verify:pr`: passed all 6 canonical traces.
+- Docker workflow `quality-gate`: passed backend PR verification, including
+  scene trace regression.
+
+E2E tests:
+- Four-agent startup/scrolling strict E2E matrix passed before publish; no E2E
+  rerun was needed after the version-only release commit.
+
+Publish checks:
+- `cd backend && npm publish --access public`: succeeded.
+- `npm view @gracker/smartperfetto version --json`: returned `"1.0.28"`.
+- Fresh npm install smoke on Node `v24.15.0`: passed.
+- `smp --version`: returned `1.0.28`.
+- `smp doctor --format json`: returned `ok:true`.
+
+Portable/GitHub checks:
+- `npm run package:portable`: passed for Windows x64, macOS arm64, and Linux
+  x64.
+- `npm run release:portable -- 1.0.28 --skip-build --no-draft`: uploaded all
+  three portable assets.
+- GitHub Release `v1.0.28`: draft false, prerelease false, target commit
+  `e275f2b0af6b9af3e758d9383bbf6dfb9ab1425d`.
+
+Docker checks:
+- Docker Build and Publish run `26816581871`: success.
+- `docker.io/w553000664/smartperfetto:1.0.28`: OCI index digest
+  `sha256:004c015ee05e47de08ebe66d61fd6cdd770b800aa291ec386b6f7b49f7448276`.
+- `docker.io/w553000664/smartperfetto:latest`: same OCI index digest.
+- Manifest includes linux/amd64 and linux/arm64 images.
+
+Post-diff self-check:
+- Pass. Release artifacts match the pushed release commit.
+- Pass. Docker latest and version tag point at the same digest.
+- Pass. npm and portable artifacts are public and verified.
+
+Allowed to enter next phase:
+- Complete. Runtime-engine-contract M1-M14 and the v1.0.28 publish gate are
+  done.
