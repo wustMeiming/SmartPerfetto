@@ -7,7 +7,7 @@ export interface ProviderModels {
   subAgent?: string;
 }
 
-export type AgentRuntimeKind = 'claude-agent-sdk' | 'openai-agents-sdk';
+export type AgentRuntimeKind = 'claude-agent-sdk' | 'openai-agents-sdk' | 'pi-agent-core' | 'opencode';
 export type OpenAIProtocol = 'responses' | 'chat_completions';
 
 export interface ProviderConnection {
@@ -23,6 +23,12 @@ export interface ProviderConnection {
   claudeAuthToken?: string;
   openaiBaseUrl?: string;
   openaiApiKey?: string;
+  piAgentCoreModulePath?: string;
+  piAgentCoreModelJson?: string;
+  piAgentCoreSystemPrompt?: string;
+  openCodeSdkModulePath?: string;
+  openCodeModelJson?: string;
+  openCodeSystemPrompt?: string;
   /**
    * Backend agent runtime used by this provider.
    *
@@ -120,14 +126,18 @@ export interface ModelOption {
   tier: 'primary' | 'light';
 }
 
-export interface OfficialProviderTemplate {
-  type: Exclude<ProviderType, 'custom'>;
+export interface ProviderTemplate {
+  type: ProviderType;
   displayName: string;
   requiredFields: string[];
   defaultModels: { primary: string; light: string };
   availableModels: ModelOption[];
   defaultConnection?: Partial<ProviderConnection>;
 }
+
+export type OfficialProviderTemplate = ProviderTemplate & {
+  type: Exclude<ProviderType, 'custom'>;
+};
 
 export interface TestResult {
   success: boolean;

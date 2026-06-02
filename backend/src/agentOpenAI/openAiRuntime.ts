@@ -57,7 +57,12 @@ import { classifyQueryComplexityLocal } from '../agentv3/queryComplexityClassifi
 import { buildComplexityClassifierInput } from '../agentv3/queryComplexityContext';
 import { classifyQueryWithOpenAILightModel } from './openAiComplexityClassifier';
 import { ArtifactStore } from '../agentv3/artifactStore';
-import type { SessionFieldsForSnapshot, SessionStateSnapshot } from '../agentv3/sessionStateSnapshot';
+import {
+  createOpenAISnapshotEngineState,
+  getOpenAISnapshotEngineState,
+  type SessionFieldsForSnapshot,
+  type SessionStateSnapshot,
+} from '../agentv3/sessionStateSnapshot';
 import {
   extractTraceFeatures,
   buildPatternContextSection,
@@ -87,7 +92,6 @@ import {
   captureSkillDisplayEntities,
   collectRecentFindings,
   createRuntimeSkillNotesBudget,
-  formatTraceContext,
   getLruCacheEntry,
   isFreshRuntimeEntry,
   knowledgeScopeFromAnalysisOptions,
@@ -95,6 +99,11 @@ import {
   setLruCacheEntry,
   toProtocolHypothesis as toRuntimeProtocolHypothesis,
 } from '../agentRuntime/runtimeCommon';
+import {
+  createAnalysisRunSpec,
+  type AnalysisRunSpec,
+} from '../agentRuntime/analysisRunSpec';
+import type { RuntimeSelection } from '../agentRuntime/runtimeSelection';
 
 interface OpenAISessionEntry {
   history?: AgentInputItem[];
@@ -548,9 +557,15 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
   private readonly sessionMap = new Map<string, OpenAISessionEntry>();
   private readonly activeAnalyses = new Set<string>();
 
-  constructor(traceProcessorService: TraceProcessorService) {
+  private readonly runtimeSelection: RuntimeSelection;
+
+  constructor(
+    traceProcessorService: TraceProcessorService,
+    runtimeSelection: RuntimeSelection = { kind: 'openai-agents-sdk', source: 'default' },
+  ) {
     super();
     this.traceProcessorService = traceProcessorService;
+    this.runtimeSelection = runtimeSelection;
   }
 
   private buildSessionMapKey(sessionId: string, referenceTraceId?: string): string {
@@ -654,15 +669,41 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     const config = loadOpenAIConfig(options.providerId, providerScopeFromAnalysisOptions(options));
     const sceneType = classifyScene(query);
     const quickMode = await this.classifyModeForRequest(query, sessionId, traceId, options, sceneType, config);
+    const sessionContext = sessionContextManager.getOrCreate(sessionId, traceId);
+    const previousTurns = sessionContext.getAllTurns?.() || [];
+    const analysisRunSpec = createAnalysisRunSpec({
+      query,
+      sessionId,
+      traceId,
+      options,
+      runtimeSelection: this.runtimeSelection,
+      sceneType,
+      outputLanguage: config.outputLanguage,
+      previousTurns,
+      resolvedMode: quickMode ? 'quick' : 'full',
+      budget: {
+        model: config.model,
+        lightModel: config.lightModel,
+        maxTurns: config.maxTurns,
+        quickMaxTurns: config.quickMaxTurns,
+        maxOutputTokens: config.maxOutputTokens,
+        fullPathPerTurnMs: config.fullPathPerTurnMs,
+        quickPathPerTurnMs: config.quickPathPerTurnMs,
+        classifierTimeoutMs: config.classifierTimeoutMs,
+      },
+    });
 
     try {
       const context = await this.prepareAnalysisContext(query, sessionId, traceId, options, {
         config,
         sceneType,
         lightweight: quickMode,
+        analysisRunSpec,
+        sessionContext,
+        previousTurns,
       });
 
-      const promptPrefix = formatTraceContext(options.traceContext, config.outputLanguage);
+      const promptPrefix = analysisRunSpec.traceContext.promptSection;
       const effectivePrompt = promptPrefix ? `${promptPrefix}\n\n${query}` : query;
       const sessionEntry = this.sessionMap.get(context.sessionMapKey);
       const runInput = resolveOpenAIRunInput({
@@ -1173,6 +1214,13 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       uncertaintyFlags: this.sessionUncertaintyFlags.get(sessionId) || [],
       claudeHypotheses: this.sessionHypotheses.get(sessionId) || undefined,
       architecture: this.architectureCache.get(traceId),
+      engineState: createOpenAISnapshotEngineState({
+        providerId: sessionFields.agentRuntimeProviderId,
+        providerSnapshotHash: sessionFields.agentRuntimeProviderSnapshotHash,
+        history: freshSessionEntry?.history,
+        lastResponseId: freshSessionEntry?.lastResponseId,
+        runState: freshSessionEntry?.runState,
+      }),
       sdkSessionId: freshSessionEntry?.lastResponseId,
       agentRuntimeKind: 'openai-agents-sdk',
       agentRuntimeProviderId: sessionFields.agentRuntimeProviderId,
@@ -1206,11 +1254,12 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     if (snapshot.architecture) {
       this.architectureCache.set(traceId, snapshot.architecture);
     }
-    if (snapshot.openAIHistory || snapshot.openAILastResponseId || snapshot.sdkSessionId) {
+    const openAIEngineState = getOpenAISnapshotEngineState(snapshot);
+    if (openAIEngineState?.history || openAIEngineState?.lastResponseId || openAIEngineState?.runState) {
       this.sessionMap.set(this.buildSessionMapKey(sessionId, snapshot.referenceTraceId), {
-        history: snapshot.openAIHistory as AgentInputItem[] | undefined,
-        lastResponseId: snapshot.openAILastResponseId || snapshot.sdkSessionId,
-        runState: snapshot.openAIRunState,
+        history: openAIEngineState.history as AgentInputItem[] | undefined,
+        lastResponseId: openAIEngineState.lastResponseId,
+        runState: openAIEngineState.runState,
         updatedAt: snapshot.snapshotTimestamp || Date.now(),
       });
     }
@@ -1225,9 +1274,13 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       config: OpenAIAgentConfig;
       sceneType: SceneType;
       lightweight: boolean;
+      analysisRunSpec: AnalysisRunSpec;
+      sessionContext: ReturnType<typeof sessionContextManager.getOrCreate>;
+      previousTurns: any[];
     },
   ) {
-    const { config, sceneType, lightweight } = runtime;
+    const { config, sceneType, lightweight, analysisRunSpec } = runtime;
+    const knowledgeScope = analysisRunSpec.scopes.knowledge;
     let effectivePackageName = options.packageName;
     const focusResult = await detectFocusApps(this.traceProcessorService, traceId);
     if (!effectivePackageName && focusResult.primaryApp) {
@@ -1258,8 +1311,8 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       ? await this.buildComparisonContext(traceId, options.referenceTraceId, config.outputLanguage)
       : undefined;
 
-    const sessionContext = sessionContextManager.getOrCreate(sessionId, traceId);
-    const previousTurns = sessionContext.getAllTurns?.() || [];
+    const sessionContext = runtime.sessionContext;
+    const previousTurns = runtime.previousTurns;
     const previousFindings = this.collectPreviousFindings(sessionContext);
     const conversationSummary = previousTurns.length > 0
       ? sessionContext.generatePromptContext(2000)
@@ -1303,7 +1356,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
 
     let sqlErrors = this.sessionSqlErrors.get(sessionId);
     if (!sqlErrors) {
-      sqlErrors = loadLearnedSqlFixPairs(5, knowledgeScopeFromAnalysisOptions(options));
+      sqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope);
       this.sessionSqlErrors.set(sessionId, sqlErrors);
     }
 
@@ -1335,7 +1388,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       lightweight,
       skillNotesBudget,
       outputLanguage: config.outputLanguage,
-      knowledgeScope: knowledgeScopeFromAnalysisOptions(options),
+      knowledgeScope,
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
     });
@@ -1398,7 +1451,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           codebaseIds: options.codebaseIds,
         } satisfies ClaudeAnalysisContext);
 
-    const sessionMapKey = this.buildSessionMapKey(sessionId, options.referenceTraceId);
+    const sessionMapKey = analysisRunSpec.identity.sessionMapKey;
 
     return {
       systemPrompt,
@@ -2184,6 +2237,9 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
   }
 }
 
-export function createOpenAIRuntime(traceProcessorService: TraceProcessorService): OpenAIRuntime {
-  return new OpenAIRuntime(traceProcessorService);
+export function createOpenAIRuntime(
+  traceProcessorService: TraceProcessorService,
+  runtimeSelection?: RuntimeSelection,
+): OpenAIRuntime {
+  return new OpenAIRuntime(traceProcessorService, runtimeSelection);
 }

@@ -46,6 +46,13 @@ import {
   resolveAgentRuntimeSelection,
   type BackendAgentRuntimeKind,
 } from '../../agentRuntime/runtimeSelection';
+import { isProductionAgentRuntimeKind } from '../../agentRuntime/runtimeCapabilities';
+import {
+  getSnapshotRuntimeKind,
+  getSnapshotRuntimeProviderId,
+  getSnapshotRuntimeProviderSnapshotHash,
+  type SessionStateSnapshot,
+} from '../../agentv3/sessionStateSnapshot';
 import type { StreamingUpdate } from '../../agent/types';
 import type { AnalysisResult } from '../../agent/core/orchestratorTypes';
 import type { QueryResult } from '../../services/traceProcessorService';
@@ -288,17 +295,20 @@ export class CliAnalyzeService {
     });
 
     const persistedSnapshot = (session as unknown as {
-      _lastSnapshot?: {
-        agentRuntimeKind?: BackendAgentRuntimeKind;
-        agentRuntimeProviderId?: string | null;
-        agentRuntimeProviderSnapshotHash?: string | null;
-      };
+      _lastSnapshot?: SessionStateSnapshot;
     })._lastSnapshot;
-    const runtimeSelection = persistedSnapshot?.agentRuntimeKind
+    const persistedRuntimeKind = getSnapshotRuntimeKind(persistedSnapshot);
+    const persistedProviderId = getSnapshotRuntimeProviderId(persistedSnapshot);
+    const persistedProviderSnapshotHash = getSnapshotRuntimeProviderSnapshotHash(persistedSnapshot);
+    const runtimeSelection = persistedRuntimeKind
       ? null
       : resolveAgentRuntimeSelection(session.providerId ?? null);
+    const resolvedRuntimeKind = persistedRuntimeKind ?? runtimeSelection?.kind;
+    const publicRuntimeKind = isProductionAgentRuntimeKind(resolvedRuntimeKind)
+      ? resolvedRuntimeKind
+      : undefined;
 
-    // sdkSessionId is only populated on ClaudeRuntime (agentv3) — guarded call.
+    // SDK/session id is runtime-specific and exposed only through the orchestrator hook.
     const sdkSessionId =
       typeof orchestrator.getSdkSessionId === 'function'
         ? orchestrator.getSdkSessionId(sessionId, effectiveReferenceTraceId)
@@ -317,9 +327,11 @@ export class CliAnalyzeService {
       // exposed via IOrchestrator. Left undefined for PR1; fills in PR2 via
       // CLAUDE_MODEL env read if needed for config.json provenance.
       model: process.env.CLAUDE_MODEL,
-      providerId: persistedSnapshot?.agentRuntimeProviderId ?? session.providerId ?? null,
-      agentRuntimeKind: persistedSnapshot?.agentRuntimeKind ?? runtimeSelection?.kind,
-      providerSnapshotHash: persistedSnapshot?.agentRuntimeProviderSnapshotHash ?? session.providerSnapshotHash ?? null,
+      providerId: persistedProviderId !== undefined ? persistedProviderId : session.providerId ?? null,
+      agentRuntimeKind: publicRuntimeKind,
+      providerSnapshotHash: persistedProviderSnapshotHash !== undefined
+        ? persistedProviderSnapshotHash
+        : session.providerSnapshotHash ?? null,
     };
   }
 

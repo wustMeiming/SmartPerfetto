@@ -58,6 +58,8 @@ const SENSITIVE_CONNECTION_FIELDS: Array<keyof ProviderConnection> = [
   'claudeApiKey',
   'claudeAuthToken',
   'openaiApiKey',
+  'piAgentCoreModelJson',
+  'openCodeModelJson',
   'awsBearerToken',
   'awsAccessKeyId',
   'awsSecretAccessKey',

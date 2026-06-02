@@ -307,7 +307,7 @@ Agent 的能力边界不取决于模型参数量或 benchmark 分数，而取决
 
 **1. 观测能力——Agent 能"看到"什么数据**
 
-同一个模型，给它 `scrolling_analysis` Skill 的 L2 结构化帧数据 vs 让它自己写 SQL 查原始表，分析质量差距非常显著。Agent 的上限由你给它的数据工具决定。SmartPerfetto 用 200+ YAML Skill 封装领域专家的查询逻辑，Agent 通过 `invoke_skill` 拿到的是处理过的、结构化的分析数据，而不是原始的百万行 trace 事件。
+同一个模型，给它 `scrolling_analysis` Skill 的 L2 结构化帧数据 vs 让它自己写 SQL 查原始表，分析质量差距非常显著。Agent 的上限由你给它的数据工具决定。SmartPerfetto 用 registry/file-tree 发现的 YAML Skill 封装领域专家的查询逻辑，Agent 通过 `invoke_skill` 拿到的是处理过的、结构化的分析数据，而不是原始的百万行 trace 事件。
 
 **2. 约束框架——Agent 在什么范围内决策**
 

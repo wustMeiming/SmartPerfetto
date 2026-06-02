@@ -72,6 +72,18 @@ export function collectEnvCredentialSources(
   if (hasConcreteEnvValue(env.OPENAI_BASE_URL)) {
     sources.push(label(style, 'OPENAI_BASE_URL', 'openai_base_url'));
   }
+  if (hasConcreteEnvValue(env.SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON)) {
+    sources.push(label(style, 'SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON', 'pi_agent_core_model_json'));
+  }
+  if (hasConcreteEnvValue(env.SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH)) {
+    sources.push(label(style, 'SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH', 'pi_agent_core_module_path'));
+  }
+  if (hasConcreteEnvValue(env.SMARTPERFETTO_OPENCODE_MODEL_JSON)) {
+    sources.push(label(style, 'SMARTPERFETTO_OPENCODE_MODEL_JSON', 'opencode_model_json'));
+  }
+  if (hasConcreteEnvValue(env.SMARTPERFETTO_OPENCODE_SDK_MODULE_PATH)) {
+    sources.push(label(style, 'SMARTPERFETTO_OPENCODE_SDK_MODULE_PATH', 'opencode_sdk_module_path'));
+  }
 
   if (isEnabledEnvFlag(env.CLAUDE_CODE_USE_BEDROCK)) {
     if (hasConcreteEnvValue(env.AWS_BEARER_TOKEN_BEDROCK)) {

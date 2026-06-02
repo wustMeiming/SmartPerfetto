@@ -24,6 +24,11 @@ const ENV_KEYS = [
   'OPENAI_AGENTS_PROTOCOL',
   'OPENAI_MODEL',
   'OPENAI_LIGHT_MODEL',
+  'SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON',
+  'SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH',
+  'SMARTPERFETTO_PI_AGENT_CORE_FAKE_STREAM',
+  'SMARTPERFETTO_OPENCODE_MODEL_JSON',
+  'SMARTPERFETTO_OPENCODE_SDK_MODULE_PATH',
 ] as const;
 
 const ORIGINAL_ENV = new Map<string, string | undefined>(
@@ -132,5 +137,65 @@ describe('buildRuntimeHealthPayload', () => {
     expect(JSON.stringify(payload)).not.toContain('sk-env-secret');
     expect(JSON.stringify(payload)).not.toContain('user:pass');
     expect(JSON.stringify(payload)).not.toContain('token=secret');
+  });
+
+  it('reports public Pi agent-core runtime diagnostics without leaking model JSON', () => {
+    process.env.SMARTPERFETTO_AGENT_RUNTIME = 'pi-agent-core';
+    process.env.SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON =
+      '{"id":"pi-test","provider":"test","apiKey":"sk-pi-secret"}';
+    process.env.SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH =
+      '/tmp/pi-agent-core/dist/index.js';
+
+    const payload = buildRuntimeHealthPayload(new Date('2026-05-20T00:00:00.000Z'));
+
+    expect(payload.aiEngine).toMatchObject({
+      runtime: 'pi-agent-core',
+      model: 'pi-agent-core',
+      providerMode: 'pi-agent-core',
+      configured: true,
+      source: 'env',
+      credentialSource: 'env-or-default',
+      envCredentialSources: [
+        'pi_agent_core_model_json',
+        'pi_agent_core_module_path',
+      ],
+      providerOverridesEnv: false,
+    });
+    expect(payload.aiEngine.diagnostics).toMatchObject({
+      experimental: false,
+      modelConfigured: true,
+      modulePath: '/tmp/pi-agent-core/dist/index.js',
+    });
+    expect(JSON.stringify(payload)).not.toContain('sk-pi-secret');
+  });
+
+  it('reports public OpenCode runtime diagnostics without leaking model JSON', () => {
+    process.env.SMARTPERFETTO_AGENT_RUNTIME = 'opencode';
+    process.env.SMARTPERFETTO_OPENCODE_MODEL_JSON =
+      '{"providerID":"smartperfetto","modelID":"opencode-test","apiKey":"sk-opencode-secret"}';
+    process.env.SMARTPERFETTO_OPENCODE_SDK_MODULE_PATH =
+      '/tmp/opencode-sdk/dist/index.js';
+
+    const payload = buildRuntimeHealthPayload(new Date('2026-05-20T00:00:00.000Z'));
+
+    expect(payload.aiEngine).toMatchObject({
+      runtime: 'opencode',
+      model: 'opencode',
+      providerMode: 'opencode',
+      configured: true,
+      source: 'env',
+      credentialSource: 'env-or-default',
+      envCredentialSources: [
+        'opencode_model_json',
+        'opencode_sdk_module_path',
+      ],
+      providerOverridesEnv: false,
+    });
+    expect(payload.aiEngine.diagnostics).toMatchObject({
+      experimental: false,
+      modelConfigured: true,
+      modulePath: '/tmp/opencode-sdk/dist/index.js',
+    });
+    expect(JSON.stringify(payload)).not.toContain('sk-opencode-secret');
   });
 });

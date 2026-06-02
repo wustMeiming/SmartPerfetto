@@ -17,6 +17,11 @@ import {
   normalizeResourceOwner,
   sendResourceNotFound,
 } from '../services/resourceOwnership';
+import {
+  getSnapshotRuntimeKind,
+  getSnapshotRuntimeProviderId,
+  getSnapshotRuntimeProviderSnapshotHash,
+} from '../agentv3/sessionStateSnapshot';
 import { readTraceMetadataForContext } from '../services/traceMetadataStore';
 import { applyFinalResultQualityGate } from '../services/finalResultQualityGate';
 
@@ -141,7 +146,9 @@ export function registerAgentResumeRoutes(
         userId: requestContext.userId,
       };
       const snapshot = persistenceService.loadSessionStateSnapshot(sessionId);
-      const snapshotProviderId = snapshot?.agentRuntimeProviderId;
+      const snapshotRuntimeKind = getSnapshotRuntimeKind(snapshot);
+      const snapshotProviderId = getSnapshotRuntimeProviderId(snapshot);
+      const snapshotProviderHash = getSnapshotRuntimeProviderSnapshotHash(snapshot);
       const restoredProviderId = snapshot
         ? snapshotProviderId ?? null
         : providerSvc.getRawEffectiveProvider(providerScope)?.id ?? null;
@@ -156,17 +163,17 @@ export function registerAgentResumeRoutes(
       const restoredProviderSnapshotHash = resolveProviderRuntimeSnapshot(
         providerSvc,
         restoredProviderId,
-        restoredProviderId ? undefined : snapshot?.agentRuntimeKind,
+        restoredProviderId ? undefined : snapshotRuntimeKind,
         providerScope,
       ).snapshotHash;
       const providerSnapshotChanged = Boolean(
-        snapshot?.agentRuntimeProviderSnapshotHash &&
-        snapshot.agentRuntimeProviderSnapshotHash !== restoredProviderSnapshotHash,
+        snapshotProviderHash &&
+        snapshotProviderHash !== restoredProviderSnapshotHash,
       );
       const orchestrator = createAgentOrchestrator({
         traceProcessorService: getTraceProcessorService(),
         providerId: restoredProviderId,
-        runtimeOverride: restoredProviderId ? undefined : snapshot?.agentRuntimeKind,
+        runtimeOverride: restoredProviderId ? undefined : snapshotRuntimeKind,
         providerScope,
       }) as any;
 
@@ -195,7 +202,7 @@ export function registerAgentResumeRoutes(
       if (providerSnapshotChanged) {
         logger.warn('AgentRoutes', 'Provider snapshot changed; SDK session state will not be restored', {
           providerId: restoredProviderId,
-          previousProviderSnapshotHash: snapshot?.agentRuntimeProviderSnapshotHash,
+          previousProviderSnapshotHash: snapshotProviderHash,
           nextProviderSnapshotHash: restoredProviderSnapshotHash,
         });
       }
@@ -241,7 +248,7 @@ export function registerAgentResumeRoutes(
       const owner = normalizeResourceOwner(persistedSession.metadata);
 
       // Unified snapshot restoration — all fields populated from single source
-      // Restore ClaudeRuntime Maps (notes, plans, hypotheses, flags, artifacts, architecture, sdkSessionId)
+      // Restore runtime maps (notes, plans, hypotheses, flags, artifacts, architecture, engine state)
       if (snapshot && !providerSnapshotChanged && typeof orchestrator.restoreFromSnapshot === 'function') {
         orchestrator.restoreFromSnapshot(sessionId, effectiveTraceId, snapshot);
         logger.info('AgentRoutes', 'ClaudeRuntime Maps restored from snapshot', {

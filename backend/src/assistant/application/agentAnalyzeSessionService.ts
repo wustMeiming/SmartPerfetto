@@ -13,9 +13,12 @@ import { getProviderService } from '../../services/providerManager';
 import { resolveProviderRuntimeSnapshot } from '../../services/providerManager/providerSnapshot';
 import type { AgentRuntimeKind, ProviderScope } from '../../services/providerManager';
 import { getTraceProcessorService } from '../../services/traceProcessorService';
-import type {
-  ComparisonReportSection,
-  ComparisonSourceKind,
+import {
+  getSnapshotRuntimeKind,
+  getSnapshotRuntimeProviderId,
+  getSnapshotRuntimeProviderSnapshotHash,
+  type ComparisonReportSection,
+  type ComparisonSourceKind,
 } from '../../agentv3/sessionStateSnapshot';
 import {
   type EnhancedSessionContext,
@@ -372,7 +375,9 @@ export class AgentAnalyzeSessionService<TSession extends AnalyzeManagedSession> 
         if (restoredContext) {
           this.sessionContextManager.set(requestedSessionId, traceId, restoredContext);
 
-          const snapshotProviderId = stateSnapshot?.agentRuntimeProviderId;
+          const snapshotRuntimeKind = getSnapshotRuntimeKind(stateSnapshot);
+          const snapshotProviderId = getSnapshotRuntimeProviderId(stateSnapshot);
+          const snapshotProviderHash = getSnapshotRuntimeProviderSnapshotHash(stateSnapshot);
           const restoredProviderId = explicitProviderId !== undefined
             ? explicitProviderId
             : stateSnapshot
@@ -393,14 +398,14 @@ export class AgentAnalyzeSessionService<TSession extends AnalyzeManagedSession> 
           const restoredProviderSnapshotHash = !snapshotProviderMismatch
             ? resolveProviderSnapshotHash(
                 restoredProviderId,
-                restoredProviderId ? undefined : stateSnapshot?.agentRuntimeKind,
+                restoredProviderId ? undefined : snapshotRuntimeKind,
               )
             : null;
           const snapshotProviderHashMismatch = Boolean(
             !snapshotProviderMismatch &&
-            stateSnapshot?.agentRuntimeProviderSnapshotHash &&
+            snapshotProviderHash &&
             restoredProviderSnapshotHash &&
-            stateSnapshot.agentRuntimeProviderSnapshotHash !== restoredProviderSnapshotHash,
+            snapshotProviderHash !== restoredProviderSnapshotHash,
           );
 
           if (snapshotProviderMismatch) {
@@ -411,7 +416,7 @@ export class AgentAnalyzeSessionService<TSession extends AnalyzeManagedSession> 
             const restoredOrchestrator: IOrchestrator = createAgentOrchestrator({
               traceProcessorService: getTraceProcessorService(),
               providerId: restoredProviderId,
-              runtimeOverride: restoredProviderId ? undefined : stateSnapshot?.agentRuntimeKind,
+              runtimeOverride: restoredProviderId ? undefined : snapshotRuntimeKind,
               providerScope,
             });
 
@@ -483,7 +488,7 @@ export class AgentAnalyzeSessionService<TSession extends AnalyzeManagedSession> 
             if (snapshotProviderHashMismatch) {
               restoredLogger.warn('AgentRoutes', 'Provider snapshot changed; fresh SDK runtime will be used', {
                 providerId: restoredProviderId,
-                previousProviderSnapshotHash: stateSnapshot?.agentRuntimeProviderSnapshotHash,
+                previousProviderSnapshotHash: snapshotProviderHash,
                 nextProviderSnapshotHash: restoredProviderSnapshotHash,
               });
             }

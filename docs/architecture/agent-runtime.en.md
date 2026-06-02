@@ -11,6 +11,8 @@ or environment.
 |---|---|---|---|
 | `claude-agent-sdk` | Claude Agent SDK | Anthropic, Bedrock, Vertex, DeepSeek, Anthropic-compatible gateways | Default runtime; supports local Claude Code auth fallback for source runs, MCP server, verifier, and sub-agent behavior |
 | `openai-agents-sdk` | OpenAI Agents SDK | OpenAI, Ollama, OpenAI-compatible gateways | Native OpenAI runtime; adapts the same SmartPerfetto tools as function tools |
+| `pi-agent-core` | Pi Agent Core | custom only | Optional public runtime; real model configurations reuse the shared SmartPerfetto prompt/tool/report pipeline, while fake-stream remains smoke-only; does not enable `.pi` discovery, package extensions, shell tools, or file tools |
+| `opencode` | OpenCode server / SDK | custom only | Optional public runtime; uses explicit OpenAI-compatible or OpenCode model configuration, request-scoped SmartPerfetto MCP tools, and a hardened isolated OpenCode server; does not read local OpenCode login/project state or enable built-in file/shell/web/edit tools |
 
 ## Entry Points
 
@@ -20,7 +22,7 @@ HTTP analysis:
 POST /api/agent/v1/analyze
   -> AgentAnalyzeSessionService.prepareSession()
   -> createAgentOrchestrator()
-  -> ClaudeRuntime.analyze() | OpenAIRuntime.analyze()
+  -> ClaudeRuntime.analyze() | OpenAIRuntime.analyze() | PiAgentCoreRuntime.analyze() | OpenCodeRuntime.analyze()
 ```
 
 Resume and scene reconstruction use the same runtime factory:
@@ -44,10 +46,11 @@ Priority, highest first:
 3. `SMARTPERFETTO_AGENT_RUNTIME`.
 4. Default `claude-agent-sdk`.
 
-`SMARTPERFETTO_AGENT_RUNTIME` only accepts `claude-agent-sdk` or
-`openai-agents-sdk`. Provider names such as `deepseek` or `openai` are not valid
-runtime values. Provider Manager active profiles override env fallback, and a
-resumed session keeps the provider/runtime it was created with.
+`SMARTPERFETTO_AGENT_RUNTIME` only accepts `claude-agent-sdk`,
+`openai-agents-sdk`, `pi-agent-core`, or `opencode`. Provider names such as
+`deepseek` or `openai` are not valid runtime values. Provider Manager active profiles
+override env fallback, and a resumed session keeps the provider/runtime it was
+created with.
 
 Provider mapping:
 
@@ -56,7 +59,16 @@ Provider mapping:
 | `anthropic` / `bedrock` / `vertex` / `deepseek` | `claude-agent-sdk` | Claude/Anthropic |
 | `openai` | `openai-agents-sdk` | OpenAI Responses |
 | `ollama` | `openai-agents-sdk` | OpenAI-compatible Chat Completions |
-| `custom` | selected by `connection.agentRuntime` or `connection.openaiProtocol` | explicit configuration |
+| `custom` | selected by `connection.agentRuntime` or `connection.openaiProtocol` | explicit configuration; Pi Agent Core and OpenCode are custom-only |
+
+Provider connection fields map to runtime-specific env:
+
+| Fields | Runtime | Env |
+|---|---|---|
+| `claudeBaseUrl` / `claudeApiKey` / `claudeAuthToken` | `claude-agent-sdk` | `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` |
+| `openaiBaseUrl` / `openaiApiKey` / `openaiProtocol` | `openai-agents-sdk` | `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_AGENTS_PROTOCOL` |
+| `piAgentCoreModulePath` / `piAgentCoreModelJson` / `piAgentCoreSystemPrompt` | `pi-agent-core` | `SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH` / `SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON` / `SMARTPERFETTO_PI_AGENT_CORE_SYSTEM_PROMPT` |
+| `openCodeSdkModulePath` / `openCodeModelJson` / `openCodeSystemPrompt` plus OpenAI-compatible endpoint fields | `opencode` | `SMARTPERFETTO_OPENCODE_SDK_MODULE_PATH` / `SMARTPERFETTO_OPENCODE_MODEL_JSON` / `SMARTPERFETTO_OPENCODE_SYSTEM_PROMPT` plus `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` when model JSON is omitted |
 
 ## Tool Layer
 
@@ -67,17 +79,39 @@ artifacts, memory, code-aware lookup, baselines, and comparison tools.
 
 Claude runtime exposes these tools as an in-process MCP server. OpenAI runtime
 does not duplicate tool logic; it reads the same `McpToolRegistry` and adapts
-tool descriptors into OpenAI Agents SDK function tools. Both runtimes normalize
-their output into the same SSE events, `AnalysisResult`, and HTML report
-contract, although their SDK resume and streaming mechanics differ.
+tool descriptors into OpenAI Agents SDK function tools. Pi Agent Core uses
+request-scoped native tools built from the same shared descriptors, the shared
+system prompt, planning/hypothesis tools, and the same route-owned
+finalization/claim-verification/report pipeline without turning SmartPerfetto
+into a Pi coding-agent harness. OpenCode runs a hardened isolated server and
+bridges request-scoped SmartPerfetto tools through a per-analysis MCP bridge;
+its built-in project discovery, file, shell, web, and edit tools are disabled
+or denied. Runtime outputs normalize into the same SSE events,
+`AnalysisResult`, and HTML report contract, although their SDK/server resume
+and streaming mechanics differ.
 
 The tool surface is not a fixed-size list. Quick/full mode, artifact store
 availability, codebase permission, `referenceTraceId`, comparison context, and
 runtime allowlists shape the request-visible set.
 
+The Pi Agent Core real-model path reuses SmartPerfetto scene strategies, system
+prompt assembly, SQL/Skill tools, planning/hypothesis tools, artifacts, and the
+route-owned quality/finalization/report pipeline. It does not read `.pi`
+project configuration, package extensions, shell tools, or file tools. Provider
+Manager only exposes it for `custom` providers with explicit Pi model JSON or
+equivalent env configuration. `SMARTPERFETTO_PI_AGENT_CORE_FAKE_STREAM=1` is
+smoke/test-only and must stay labeled capability-limited.
+
+The OpenCode path is also custom-only. It can use `SMARTPERFETTO_OPENCODE_MODEL_JSON`
+with `providerID` / `modelID` / `baseUrl` / `apiKey` fields, or fall back to
+OpenAI-compatible `OPENAI_*` env/provider fields. SmartPerfetto does not reuse
+the user's OpenCode CLI login, config, or project extensions; rollback is
+switching the custom provider or `SMARTPERFETTO_AGENT_RUNTIME` back to
+`claude-agent-sdk` / `openai-agents-sdk`.
+
 ## Final Result And Quality Artifacts
 
-Both runtimes normalize their raw output into a shared `AnalysisResult`, then
+All runtimes normalize their raw output into a shared `AnalysisResult`, then
 run through the same quality and persistence chain:
 
 ```text
@@ -104,6 +138,10 @@ OpenAI history, the last response id, and reserved run state. Responses API can
 resume with `previousResponseId`; Chat Completions-compatible providers resume
 from full history.
 
+Pi Agent Core and OpenCode store runtime-specific opaque state only where the
+adapter supports it. They still preserve provider/runtime identity so resume,
+reports, and snapshots do not silently switch to another engine.
+
 Snapshots also carry final-result quality fields such as conclusion contracts,
 claim verification results, and identity resolutions so resume, report export,
 and analysis-result comparison can reuse them.
@@ -112,7 +150,8 @@ Raw trace comparison sessions must also persist `referenceTraceId`,
 `comparisonSource`, and `comparisonReportSection`. A comparison session cannot
 silently downgrade to single-trace mode or switch to a different reference
 trace. Claude/OpenAI SDK session keys must be read and written with the
-comparison identity.
+comparison identity, and Pi/OpenCode runtime state must preserve the same
+provider/runtime identity.
 
 ## Platform Boundaries
 

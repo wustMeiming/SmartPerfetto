@@ -18,10 +18,15 @@ describe('env credential source detection', () => {
       ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
       ANTHROPIC_AUTH_TOKEN: 'your_deepseek_api_key_here',
       OPENAI_API_KEY: 'sk-real-openai',
+      SMARTPERFETTO_OPENCODE_MODEL_JSON: '{"modelID":"opencode-test"}',
       CLAUDE_CODE_USE_BEDROCK: 'false',
     }, 'env');
 
-    expect(sources).toEqual(['ANTHROPIC_BASE_URL', 'OPENAI_API_KEY']);
+    expect(sources).toEqual([
+      'ANTHROPIC_BASE_URL',
+      'OPENAI_API_KEY',
+      'SMARTPERFETTO_OPENCODE_MODEL_JSON',
+    ]);
   });
 
   it('requires explicit true-like cloud flags', () => {

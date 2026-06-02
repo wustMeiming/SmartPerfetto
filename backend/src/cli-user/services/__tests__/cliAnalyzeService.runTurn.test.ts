@@ -188,6 +188,53 @@ describe('CliAnalyzeService runTurn final quality gate', () => {
     ]));
   });
 
+  it('surfaces runtime metadata from canonical snapshot engineState', async () => {
+    mockPreparedSession.providerId = 'provider-from-session';
+    mockPreparedSession.providerSnapshotHash = 'hash-from-session';
+    mockPersistAgentTurn.mockImplementationOnce((input: any) => {
+      input.session._lastSnapshot = {
+        version: 1,
+        snapshotTimestamp: Date.now(),
+        sessionId: 'cli-session-quality',
+        traceId: 'trace-cli',
+        conversationSteps: [],
+        queryHistory: [],
+        conclusionHistory: [],
+        agentDialogue: [],
+        agentResponses: [],
+        dataEnvelopes: [],
+        hypotheses: [],
+        analysisNotes: [],
+        analysisPlan: null,
+        planHistory: [],
+        uncertaintyFlags: [],
+        engineState: {
+          kind: 'openai-agents-sdk',
+          provider: {
+            providerId: 'provider-from-engine',
+            providerSnapshotHash: 'hash-from-engine',
+          },
+          openai: {
+            lastResponseId: 'resp-cli',
+          },
+        },
+        runSequence: 0,
+        conversationOrdinal: 0,
+      };
+    });
+
+    const service = new CliAnalyzeService();
+    const output = await service.runTurn({
+      traceId: 'trace-cli',
+      query: '分析启动慢',
+      onEvent: jest.fn(),
+    });
+
+    expect(output.providerId).toBe('provider-from-engine');
+    expect(output.agentRuntimeKind).toBe('openai-agents-sdk');
+    expect(output.providerSnapshotHash).toBe('hash-from-engine');
+  });
+
   it('derives verifier-ready contracts from CLI-collected DataEnvelopes before verification', async () => {
     const envelope = createDataEnvelope({
       columns: ['package', 'startup_type', 'ttid_ms'],

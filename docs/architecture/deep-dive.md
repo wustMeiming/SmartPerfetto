@@ -359,7 +359,7 @@ compound_patterns:
 
 ### 决策 2：Artifact Store — 控制返回给 LLM 的数据量
 
-决策 1 解决了 System Prompt 的膨胀问题。但即使场景策略只注入了一套，Agent 在执行过程中每次调用 Skill 仍然会产生大量数据（200+ 行帧数据），这些数据全部放进上下文带来新的问题。
+决策 1 解决了 System Prompt 的膨胀问题。但即使场景策略只注入了一套，Agent 在执行过程中每次调用 Skill 仍然会产生大量数据（例如多行帧级明细），这些数据全部放进上下文带来新的问题。
 
 早期版本把 Skill 执行结果（比如 200 行帧数据、487 行阻塞分析）完整返回给 Claude。每个 Skill 结果约 3000 tokens，一次分析调用 5-8 个 Skill，仅 Skill 数据就占 15000-24000 tokens。
 
@@ -507,13 +507,13 @@ SmartPerfetto 的设计是 Claude 只看到 2 个和 Skill 相关的 MCP Tool：
 - `invoke_skill(skillId, params)` — 执行指定的 Skill
 - `list_skills(category?)` — 按场景类别查询可用的 Skill 列表
 
-通过 `list_skills(category="scrolling")` 按需发现能力，再用 `invoke_skill` 调用。**2 个 MCP Tool 封装了 160+ 个分析能力，工具列表的 token 开销是固定的。**
+通过 `list_skills(category="scrolling")` 按需发现能力，再用 `invoke_skill` 调用。**MCP Tool 封装的是 registry/file-tree 发现的分析能力，工具列表的 token 开销不随 Skill 文件数量线性增长。**
 
 另一个好处是 YAML 格式降低了贡献门槛。性能分析专家如果对某个分析场景有经验，可以直接写 YAML Skill 定义 SQL 查询和输出格式，不需要懂 TypeScript 或修改后端代码。修改后在开发模式下刷新浏览器即可生效（热加载），迭代周期在秒级。
 
 ### Skill 系统的结构
 
-Skill 数量从项目初期的十几个增长到 200+，增长的驱动力不是「尽可能多」，而是分析实践中不断遇到新的场景需要覆盖——比如最初只有标准 HWUI 的帧分析，后来遇到 Flutter 应用需要专门的 Skill，再遇到厂商差异需要 override，再遇到启动分析中 JIT、class loading、Binder pool 各自需要独立的检测逻辑。
+Skill 数量从项目初期的十几个持续增长，增长的驱动力不是「尽可能多」，而是分析实践中不断遇到新的场景需要覆盖——比如最初只有标准 HWUI 的帧分析，后来遇到 Flutter 应用需要专门的 Skill，再遇到厂商差异需要 override，再遇到启动分析中 JIT、class loading、Binder pool 各自需要独立的检测逻辑。
 
 当前 Skill inventory 以 `backend/skills/**/*.skill.yaml` 文件树为准，按类型大致分布如下：
 
@@ -602,7 +602,7 @@ Flutter 的两种渲染模式涉及不同的线程，分析时需要看不同的
 
 但「自动识别 Flutter」本身也踩了坑（commit `355df8ee`，4/6）。早期的 pipeline 检测器是给每种架构单独打分，分数最高的胜出——结果 Flutter TextureView 的 trace 经常被误判为 STANDARD。原因是 Flutter TextureView 的宿主侧仍然走 HWUI 管线（`Choreographer#doFrame` / `DrawFrame` / `RenderThread`），这些信号同时被 STANDARD 和 TEXTUREVIEW 两个分类吸收。STANDARD 的信号覆盖面更广（trace 里几乎一定有 Choreographer 帧），总分常常压过专属的 TEXTUREVIEW，把 Flutter 应用误分到 STANDARD。同样的问题也出在 WeChat Skyline（被 WEBVIEW 吸收）和游戏引擎（被 STANDARD/MIXED 吸收）上。
 
-修法不是调权重，而是给特化 pipeline 加 `exclude_if`：TEXTUREVIEW 一旦看到 Flutter `1.ui` / `1.raster` 信号就直接屏蔽 STANDARD 分类；STANDARD_LEGACY/MIXED/SURFACEVIEW_BLAST 看到 Game Engine 信号就互斥；OPENGL_ES 看到 WebView/Game 信号就互斥。**24+ 种 pipeline 不能各打各的分，需要一个「特化 → 通用」的优先级链。** 这是「pipeline 多了之后必须做相互排斥」的典型例子——也是为什么 Skill 数量增长到 160+ 之后，光「正确路由到哪个 Skill」本身就成了独立的工程问题。
+修法不是调权重，而是给特化 pipeline 加 `exclude_if`：TEXTUREVIEW 一旦看到 Flutter `1.ui` / `1.raster` 信号就直接屏蔽 STANDARD 分类；STANDARD_LEGACY/MIXED/SURFACEVIEW_BLAST 看到 Game Engine 信号就互斥；OPENGL_ES 看到 WebView/Game 信号就互斥。**多条 pipeline 不能各打各的分，需要一个「特化 → 通用」的优先级链。** 这是「pipeline 多了之后必须做相互排斥」的典型例子——也是为什么 Skill inventory 增长之后，光「正确路由到哪个 Skill」本身就成了独立的工程问题。
 
 #### 厂商覆写 — 同一指标在不同平台上的字段名不同
 

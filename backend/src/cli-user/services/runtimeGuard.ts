@@ -9,6 +9,16 @@ import {
   type BackendAgentRuntimeKind,
   type RuntimeSelection,
 } from '../../agentRuntime/runtimeSelection';
+import {
+  EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
+  getPiAgentCoreRuntimeDiagnostics,
+  PI_AGENT_CORE_RUNTIME_KIND,
+} from '../../agentRuntime/piAgentCoreRuntime';
+import {
+  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
+  getOpenCodeRuntimeDiagnostics,
+  OPENCODE_RUNTIME_KIND,
+} from '../../agentRuntime/openCodeRuntime';
 import { getClaudeRuntimeDiagnostics } from '../../agentv3/claudeConfig';
 import { getOpenAIRuntimeDiagnostics, hasOpenAICredentials } from '../../agentOpenAI/openAiConfig';
 import { getTraceProcessorPath } from '../../services/workingTraceProcessor';
@@ -47,6 +57,23 @@ export function assertAnalysisRuntimeReady(options: RuntimeGuardOptions = {}): R
       );
     }
     return { selection, diagnostics };
+  }
+
+  if (
+    selection.kind === EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND ||
+    selection.kind === PI_AGENT_CORE_RUNTIME_KIND
+  ) {
+    return {
+      selection,
+      diagnostics: getPiAgentCoreRuntimeDiagnostics(process.env, selection.kind),
+    };
+  }
+
+  if (selection.kind === EXPERIMENTAL_OPENCODE_RUNTIME_KIND || selection.kind === OPENCODE_RUNTIME_KIND) {
+    return {
+      selection,
+      diagnostics: getOpenCodeRuntimeDiagnostics(process.env, selection.kind),
+    };
   }
 
   const diagnostics = getClaudeRuntimeDiagnostics(providerId);
@@ -117,7 +144,13 @@ export function collectDoctorReport(cliHome: string): DoctorReport {
   const providerId = providerIdFor(selection);
   const runtimeDiagnostics = selection.kind === 'openai-agents-sdk'
     ? getOpenAIRuntimeDiagnostics(providerId)
-    : getClaudeRuntimeDiagnostics(providerId);
+    : selection.kind === EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND ||
+      selection.kind === PI_AGENT_CORE_RUNTIME_KIND
+      ? getPiAgentCoreRuntimeDiagnostics(process.env, selection.kind)
+      : selection.kind === EXPERIMENTAL_OPENCODE_RUNTIME_KIND ||
+        selection.kind === OPENCODE_RUNTIME_KIND
+        ? getOpenCodeRuntimeDiagnostics(process.env, selection.kind)
+        : getClaudeRuntimeDiagnostics(providerId);
   const traceProcessorPath = getTraceProcessorPath();
   const traceProcessorExists = fs.existsSync(traceProcessorPath);
   const traceProcessorExecutable = traceProcessorExists && isExecutable(traceProcessorPath);
@@ -148,7 +181,13 @@ export function collectDoctorReport(cliHome: string): DoctorReport {
         ? `${selection.kind} credentials/configuration detected`
         : selection.kind === 'claude-agent-sdk'
           ? 'Claude SDK has no explicit credentials; local Claude login fallback will be used if available'
-          : 'OpenAI runtime needs OPENAI_API_KEY or a localhost/OpenAI-compatible provider',
+          : selection.kind === PI_AGENT_CORE_RUNTIME_KIND ||
+              selection.kind === EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND
+            ? 'Pi agent-core runtime needs SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON or a configured custom provider'
+            : selection.kind === EXPERIMENTAL_OPENCODE_RUNTIME_KIND ||
+              selection.kind === OPENCODE_RUNTIME_KIND
+              ? 'OpenCode runtime needs @opencode-ai/sdk and opencode-ai available, plus OpenAI-compatible model configuration'
+            : 'OpenAI runtime needs OPENAI_API_KEY or a localhost/OpenAI-compatible provider',
       details: {
         source: selection.source,
         providerId: selection.providerId,

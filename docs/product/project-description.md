@@ -2,7 +2,7 @@
 
 ## Overview
 
-**SmartPerfetto** is an AI-powered Android performance analysis platform built on Google's Perfetto trace viewer. It supports a Web UI, standalone npm CLI, Docker, source checkout, and GitHub portable packages. The backend can use Claude Agent SDK or OpenAI Agents SDK to analyze traces, identify root causes of jank/ANR/startup issues, and provide actionable optimization suggestions with evidence-backed reasoning.
+**SmartPerfetto** is an AI-powered Android performance analysis platform built on Google's Perfetto trace viewer. It supports a Web UI, standalone npm CLI, Docker, source checkout, and GitHub portable packages. The backend can use Claude Agent SDK, OpenAI Agents SDK, Pi Agent Core, or OpenCode to analyze traces, identify root causes of jank/ANR/startup issues, and provide actionable optimization suggestions with evidence-backed reasoning.
 
 ## Target Users
 
@@ -43,10 +43,10 @@ CLI (smp / smartperfetto) ───────────► same backend runt
 
 | Component | Purpose |
 |-----------|---------|
-| **Runtime Selector** | Chooses Claude Agent SDK or OpenAI Agents SDK per session/provider |
-| **ClaudeRuntime / OpenAIRuntime** | Main orchestrators: scene classification → dynamic system prompt → tool loop → verification/report contract |
+| **Runtime Selector** | Chooses Claude Agent SDK, OpenAI Agents SDK, Pi Agent Core, or OpenCode per session/provider |
+| **Runtime Adapters** | Claude/OpenAI/Pi/OpenCode orchestrators: scene classification → dynamic system prompt → tool loop → verification/report contract |
 | **MCP / Tool Registry** | Registry-driven tools bridging the runtime to trace data (SQL, Skills, schema lookup, planning, hypothesis, memory, code-aware lookup, comparison) |
-| **Skill Engine** | 200+ YAML-defined analysis pipelines producing layered results (L1 overview → L4 deep root cause); inventory is discovered from `backend/skills/` |
+| **Skill Engine** | YAML-defined analysis pipelines producing layered results (L1 overview → L4 deep root cause); inventory is discovered from `backend/skills/` |
 | **Scene Classifier** | Strategy-frontmatter-driven routing to scene-specific strategies |
 | **Result Quality Pipeline** | Final-report contract, evidence contract, claim verification, identity resolution, report generation, CLI artifacts, and analysis-result snapshots |
 | **Artifact Store** | Caches skill results as compact references (~3000 tokens saved per invocation) |
@@ -90,10 +90,10 @@ The tool surface is registry-driven and request-shaped. Quick analysis exposes a
 
 - **Backend:** Node.js 24 LTS, Express, TypeScript (strict)
 - **Frontend:** Mithril.js (Perfetto UI framework)
-- **AI Runtime:** Claude Agent SDK and OpenAI Agents SDK through one assistant contract
+- **AI Runtime:** Claude Agent SDK, OpenAI Agents SDK, Pi Agent Core, and OpenCode through one assistant contract
 - **Trace Processing:** trace_processor_shell (Perfetto, WASM + HTTP RPC)
 - **CLI:** npm package `@gracker/smartperfetto`, commands `smp` and `smartperfetto`
-- **Testing:** Jest, ts-jest (90 test files)
+- **Testing:** Jest, ts-jest, trace regression, E2E, build/typecheck, and PR verification gates
 - **Build:** esbuild, npm scripts
 
 ## Key Design Decisions

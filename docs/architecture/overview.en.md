@@ -47,9 +47,10 @@ boundaries. The LLM/agent checklist is in
 |---|---|---|
 | Perfetto UI plugin | `perfetto/ui/src/plugins/com.smartperfetto.AIAssistant/` | Panel, SSE, result rendering, scene navigation, selection interaction |
 | Express backend | `backend/src/index.ts` | Route registration, health checks, middleware, process cleanup |
-| Runtime selector | `backend/src/agentRuntime/` | Chooses Claude Agent SDK or OpenAI Agents SDK for each session |
+| Runtime selector | `backend/src/agentRuntime/` | Chooses Claude Agent SDK, OpenAI Agents SDK, Pi Agent Core, or OpenCode for each session |
 | Claude runtime | `backend/src/agentv3/` | Claude Agent SDK orchestration, MCP server, strategy injection, verifier, memory |
 | OpenAI runtime | `backend/src/agentOpenAI/` | OpenAI Agents SDK orchestration behind the same assistant contract |
+| Pi/OpenCode runtime adapters | `backend/src/agentRuntime/piAgentCoreRuntime.ts`, `backend/src/agentRuntime/openCodeRuntime.ts` | Custom third-party runtimes using the shared analysis contract, request-scoped tools, and runtime-specific safety boundaries |
 | Assistant application | `backend/src/assistant/` | Session management, stream projection, result contracts |
 | Skill engine | `backend/src/services/skillEngine/` | YAML Skill loading, parameter substitution, SQL execution, DataEnvelope output |
 | Skills | `backend/skills/` | Atomic, composite, deep, and rendering-pipeline analysis |
@@ -106,6 +107,8 @@ Skill, report, and trace-processor path. The difference is local storage under
 |---|---|---|
 | `claude-agent-sdk` | Anthropic, Bedrock, Vertex, Claude/Anthropic-compatible providers, local Claude Code fallback | Local Claude login only applies to source runs; Docker, portable, and npm CLI need explicit provider/env configuration |
 | `openai-agents-sdk` | OpenAI, Ollama, OpenAI-compatible providers | Credentials and Responses/chat-completions protocol are validated by OpenAI runtime rules |
+| `pi-agent-core` | Custom providers | Requires explicit Pi model JSON or equivalent env; does not read `.pi` project config, package extensions, shell tools, or file tools |
+| `opencode` | Custom providers | Requires explicit OpenCode/OpenAI-compatible model config; uses an isolated OpenCode server and request-scoped MCP tools, not personal OpenCode login/project state |
 
 Provider Manager active profiles override `.env` fallback. Resume must preserve
 the original provider/runtime/comparison identity and must not silently switch

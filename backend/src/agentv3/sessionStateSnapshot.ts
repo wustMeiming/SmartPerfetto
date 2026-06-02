@@ -29,6 +29,7 @@ import type { ClaimVerificationResult } from '../types/claimVerification';
 import type { IdentityResolutionV1 } from '../types/identityContract';
 import type { CodeAwareMode } from '../services/codebase/codeAwareFeature';
 import type { CodeLookupSummary } from '../services/codebase/codeLookupLedger';
+import type { AgentRuntimeKind } from '../services/providerManager/types';
 
 export type ComparisonSourceKind = 'raw_trace_pair' | 'analysis_result_snapshots';
 
@@ -98,6 +99,256 @@ export interface SnapshotRunContext {
   error?: string;
 }
 
+export interface SnapshotEngineProviderState {
+  /** Provider profile that supplied runtime credentials; null means env/default fallback. */
+  providerId?: string | null;
+  /** Non-secret provider/runtime snapshot hash for SDK state reuse checks. */
+  providerSnapshotHash?: string | null;
+}
+
+export interface ClaudeSnapshotEngineState {
+  sdkSessionId?: string;
+  sdkSessionMode?: 'full';
+}
+
+export interface OpenAISnapshotEngineState {
+  history?: unknown[];
+  lastResponseId?: string;
+  runState?: string;
+}
+
+export interface PiAgentCoreSnapshotEngineState {
+  opaque?: unknown;
+}
+
+export interface OpenCodeSnapshotEngineState {
+  opaque?: unknown;
+}
+
+export type SnapshotEngineState =
+  | {
+      kind: 'claude-agent-sdk';
+      provider: SnapshotEngineProviderState;
+      claude: ClaudeSnapshotEngineState;
+      openai?: never;
+      pi?: never;
+    }
+  | {
+      kind: 'openai-agents-sdk';
+      provider: SnapshotEngineProviderState;
+      openai: OpenAISnapshotEngineState;
+      claude?: never;
+      pi?: never;
+    }
+  | {
+      kind: 'pi-agent-core';
+      provider: SnapshotEngineProviderState;
+      pi: PiAgentCoreSnapshotEngineState;
+      claude?: never;
+      openai?: never;
+      opencode?: never;
+    }
+  | {
+      kind: 'opencode';
+      provider: SnapshotEngineProviderState;
+      opencode: OpenCodeSnapshotEngineState;
+      claude?: never;
+      openai?: never;
+      pi?: never;
+    };
+
+interface EngineProviderStateInput {
+  providerId?: string | null;
+  providerSnapshotHash?: string | null;
+}
+
+function createSnapshotEngineProviderState(
+  input: EngineProviderStateInput,
+): SnapshotEngineProviderState {
+  return {
+    providerId: input.providerId ?? null,
+    providerSnapshotHash: input.providerSnapshotHash ?? null,
+  };
+}
+
+export function createClaudeSnapshotEngineState(
+  input: EngineProviderStateInput & ClaudeSnapshotEngineState,
+): SnapshotEngineState {
+  return {
+    kind: 'claude-agent-sdk',
+    provider: createSnapshotEngineProviderState(input),
+    claude: {
+      sdkSessionId: input.sdkSessionId,
+      sdkSessionMode: input.sdkSessionMode,
+    },
+  };
+}
+
+export function createOpenAISnapshotEngineState(
+  input: EngineProviderStateInput & OpenAISnapshotEngineState,
+): SnapshotEngineState {
+  return {
+    kind: 'openai-agents-sdk',
+    provider: createSnapshotEngineProviderState(input),
+    openai: {
+      history: input.history,
+      lastResponseId: input.lastResponseId,
+      runState: input.runState,
+    },
+  };
+}
+
+export function createPiAgentCoreSnapshotEngineState(
+  input: EngineProviderStateInput & PiAgentCoreSnapshotEngineState = {},
+): SnapshotEngineState {
+  return {
+    kind: 'pi-agent-core',
+    provider: createSnapshotEngineProviderState(input),
+    pi: {
+      opaque: input.opaque,
+    },
+  };
+}
+
+export function createOpenCodeSnapshotEngineState(
+  input: EngineProviderStateInput & OpenCodeSnapshotEngineState = {},
+): SnapshotEngineState {
+  return {
+    kind: 'opencode',
+    provider: createSnapshotEngineProviderState(input),
+    opencode: {
+      opaque: input.opaque,
+    },
+  };
+}
+
+export function getSnapshotRuntimeKind(
+  snapshot: Pick<SessionStateSnapshot, 'engineState' | 'agentRuntimeKind'> | null | undefined,
+): AgentRuntimeKind | undefined {
+  return snapshot?.engineState?.kind ?? snapshot?.agentRuntimeKind;
+}
+
+export function getSnapshotRuntimeProviderId(
+  snapshot: Pick<SessionStateSnapshot, 'engineState' | 'agentRuntimeProviderId'> | null | undefined,
+): string | null | undefined {
+  const provider = snapshot?.engineState?.provider;
+  if (provider && Object.prototype.hasOwnProperty.call(provider, 'providerId')) {
+    return provider.providerId ?? null;
+  }
+  return snapshot?.agentRuntimeProviderId;
+}
+
+export function getSnapshotRuntimeProviderSnapshotHash(
+  snapshot: Pick<SessionStateSnapshot, 'engineState' | 'agentRuntimeProviderSnapshotHash'> | null | undefined,
+): string | null | undefined {
+  const provider = snapshot?.engineState?.provider;
+  if (provider && Object.prototype.hasOwnProperty.call(provider, 'providerSnapshotHash')) {
+    return provider.providerSnapshotHash ?? null;
+  }
+  return snapshot?.agentRuntimeProviderSnapshotHash;
+}
+
+export function getClaudeSnapshotEngineState(
+  snapshot: Pick<SessionStateSnapshot, 'engineState' | 'sdkSessionId' | 'sdkSessionMode'>,
+): ClaudeSnapshotEngineState | undefined {
+  if (snapshot.engineState) {
+    return snapshot.engineState.kind === 'claude-agent-sdk'
+      ? snapshot.engineState.claude
+      : undefined;
+  }
+  if (snapshot.sdkSessionId || snapshot.sdkSessionMode) {
+    return {
+      sdkSessionId: snapshot.sdkSessionId,
+      sdkSessionMode: snapshot.sdkSessionMode,
+    };
+  }
+  return undefined;
+}
+
+export function getOpenAISnapshotEngineState(
+  snapshot: Pick<SessionStateSnapshot, 'engineState' | 'openAIHistory' | 'openAILastResponseId' | 'openAIRunState' | 'sdkSessionId'>,
+): OpenAISnapshotEngineState | undefined {
+  if (snapshot.engineState) {
+    return snapshot.engineState.kind === 'openai-agents-sdk'
+      ? snapshot.engineState.openai
+      : undefined;
+  }
+  if (snapshot.openAIHistory || snapshot.openAILastResponseId || snapshot.openAIRunState || snapshot.sdkSessionId) {
+    return {
+      history: snapshot.openAIHistory,
+      lastResponseId: snapshot.openAILastResponseId || snapshot.sdkSessionId,
+      runState: snapshot.openAIRunState,
+    };
+  }
+  return undefined;
+}
+
+export function normalizeSessionStateSnapshot(
+  snapshot: SessionStateSnapshot,
+): SessionStateSnapshot {
+  if (snapshot.engineState) return snapshot;
+
+  const runtimeKind =
+    snapshot.agentRuntimeKind
+    ?? (
+      snapshot.openAIHistory || snapshot.openAILastResponseId || snapshot.openAIRunState
+        ? 'openai-agents-sdk'
+        : undefined
+    )
+    ?? (
+      snapshot.sdkSessionId || snapshot.sdkSessionMode
+        ? 'claude-agent-sdk'
+        : undefined
+    );
+
+  if (runtimeKind === 'claude-agent-sdk') {
+    return {
+      ...snapshot,
+      engineState: createClaudeSnapshotEngineState({
+        providerId: snapshot.agentRuntimeProviderId,
+        providerSnapshotHash: snapshot.agentRuntimeProviderSnapshotHash,
+        sdkSessionId: snapshot.sdkSessionId,
+        sdkSessionMode: snapshot.sdkSessionMode,
+      }),
+    };
+  }
+
+  if (runtimeKind === 'openai-agents-sdk') {
+    return {
+      ...snapshot,
+      engineState: createOpenAISnapshotEngineState({
+        providerId: snapshot.agentRuntimeProviderId,
+        providerSnapshotHash: snapshot.agentRuntimeProviderSnapshotHash,
+        history: snapshot.openAIHistory,
+        lastResponseId: snapshot.openAILastResponseId || snapshot.sdkSessionId,
+        runState: snapshot.openAIRunState,
+      }),
+    };
+  }
+
+  if (runtimeKind === 'pi-agent-core') {
+    return {
+      ...snapshot,
+      engineState: createPiAgentCoreSnapshotEngineState({
+        providerId: snapshot.agentRuntimeProviderId,
+        providerSnapshotHash: snapshot.agentRuntimeProviderSnapshotHash,
+      }),
+    };
+  }
+
+  if (runtimeKind === 'opencode') {
+    return {
+      ...snapshot,
+      engineState: createOpenCodeSnapshotEngineState({
+        providerId: snapshot.agentRuntimeProviderId,
+        providerSnapshotHash: snapshot.agentRuntimeProviderSnapshotHash,
+      }),
+    };
+  }
+
+  return snapshot;
+}
+
 // =============================================================================
 // SessionStateSnapshot — the core snapshot type
 // =============================================================================
@@ -158,12 +409,16 @@ export interface SessionStateSnapshot {
 
   // --- Cached Detection ---
   architecture?: ArchitectureInfo;
+  /** Canonical engine-local runtime state. Product/report state stays top-level. */
+  engineState?: SnapshotEngineState;
+  /** Legacy Claude/OpenAI runtime mirror kept during the compatible M7 split. */
   sdkSessionId?: string;
+  /** Legacy Claude runtime mirror kept during the compatible M7 split. */
   sdkSessionMode?: 'full';
 
-  // --- Backend Runtime State ---
+  // --- Backend Runtime State (legacy mirrors; use helpers above for reads) ---
   /** Runtime that produced the snapshot. Omitted for legacy Claude-only snapshots. */
-  agentRuntimeKind?: 'claude-agent-sdk' | 'openai-agents-sdk';
+  agentRuntimeKind?: AgentRuntimeKind;
   /**
    * Provider profile that supplied runtime credentials.
    * null means the session is pinned to env/default fallback and must not read

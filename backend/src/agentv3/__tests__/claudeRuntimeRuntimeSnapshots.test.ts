@@ -22,6 +22,8 @@ const originalEnv = {
   enterprise: process.env[ENTERPRISE_FEATURE_FLAG_ENV],
   enterpriseDbPath: process.env[ENTERPRISE_DB_PATH_ENV],
   providerDataDirOverride: process.env.PROVIDER_DATA_DIR_OVERRIDE,
+  precompactThreshold: process.env.CLAUDE_PRECOMPACT_THRESHOLD,
+  precompactWarnEnabled: process.env.CLAUDE_PRECOMPACT_WARN_ENABLED,
 };
 
 let tmpDir: string | undefined;
@@ -64,6 +66,8 @@ afterEach(async () => {
   restoreEnvValue(ENTERPRISE_FEATURE_FLAG_ENV, originalEnv.enterprise);
   restoreEnvValue(ENTERPRISE_DB_PATH_ENV, originalEnv.enterpriseDbPath);
   restoreEnvValue('PROVIDER_DATA_DIR_OVERRIDE', originalEnv.providerDataDirOverride);
+  restoreEnvValue('CLAUDE_PRECOMPACT_THRESHOLD', originalEnv.precompactThreshold);
+  restoreEnvValue('CLAUDE_PRECOMPACT_WARN_ENABLED', originalEnv.precompactWarnEnabled);
   resetProviderService();
   if (tmpDir) {
     await fs.rm(tmpDir, { recursive: true, force: true });
@@ -97,6 +101,89 @@ describe('ClaudeRuntime enterprise runtime_snapshots session map', () => {
       correctedResult: '',
       existingConclusion: '我需要继续调用工具补齐 Phase 2，并稍后输出报告。',
     })).toBe(true);
+  });
+
+  it('gives correction retries enough per-turn budget for streamed report output', () => {
+    expect(__testing.getCorrectionRetryTimeoutMs(5, false)).toBe(225_000);
+    expect(__testing.getCorrectionRetryTimeoutMs(10, true)).toBe(300_000);
+  });
+
+  it('only skips SDK correction for deliverable reports when errors are non-content blockers', () => {
+    const deliverable =
+      '# 启动性能分析报告\n\n' +
+      '## 综合结论\n\n' +
+      '冷启动 TTID=1912ms，主因是 ChaosTask，证据来自 art-1。\n\n' +
+      '## 关键证据链\n\n' +
+      '- art-1: ChaosTask self_ms=456ms。\n\n' +
+      '## 优化建议\n\n' +
+      '- 延迟模拟负载。';
+
+    expect(__testing.shouldSkipSdkCorrectionForDeliverableConclusion([
+      { type: 'plan_deviation', severity: 'error', message: '阶段未完成' },
+    ], deliverable)).toBe(true);
+
+    expect(__testing.shouldSkipSdkCorrectionForDeliverableConclusion([
+      { type: 'missing_evidence', severity: 'error', message: '缺少证据' },
+    ], deliverable)).toBe(false);
+
+    expect(__testing.shouldSkipSdkCorrectionForDeliverableConclusion([
+      {
+        type: 'missing_reasoning',
+        severity: 'error',
+        message: '最终报告缺失 Final Report Contract 必需结构：App/系统分层建议。',
+      },
+    ], deliverable)).toBe(false);
+
+    expect(__testing.shouldSkipSdkCorrectionForDeliverableConclusion([
+      { type: 'truncation', severity: 'error', message: '结论文本被截断' },
+    ], deliverable)).toBe(false);
+
+    expect(__testing.shouldSkipSdkCorrectionForDeliverableConclusion([
+      { type: 'missing_reasoning', severity: 'error', message: '结论不完整' },
+    ], '我还需要继续分析，稍后输出报告。')).toBe(false);
+  });
+
+  it('does not run SDK correction for soft truncation false positives on complete reports', () => {
+    const report =
+      '# 滑动性能分析报告\n\n' +
+      '## 综合结论\n\n' +
+      '滑动窗口总帧数 347，真实掉帧 7 帧，最长帧 62.73ms，主因是 CustomScroll_longFrameLoad。' +
+      '证据来自 evidence_ref_id=data:skill:scrolling_analysis:summary 与 source_ref=art-7。\n\n' +
+      '## 关键证据链\n\n' +
+      Array.from({ length: 20 }, (_, idx) =>
+        `- art-${idx + 1}: frame_id=${idx + 100}, dur=${30 + idx}.1ms, reason_code=workload_heavy。`,
+      ).join('\n') +
+      '\n\n## 优化建议\n\n' +
+      '- 拆分 CustomScroll_longFrameLoad，移出 Choreographer animation 回调。\n\n' +
+      '- source_ref=art-7 value=CustomScroll_longFrameLoad 59.31ms';
+
+    expect(__testing.looksLikeSoftTruncationFalsePositive(report)).toBe(true);
+    expect(__testing.shouldSkipSdkCorrectionForDeliverableConclusion([
+      { type: 'truncation', severity: 'error', message: '结论文本被截断' },
+    ], report)).toBe(true);
+
+    expect(__testing.shouldSkipSdkCorrectionForDeliverableConclusion([
+      { type: 'truncation', severity: 'error', message: '结论文本被截断' },
+      { type: 'missing_reasoning', severity: 'error', message: '缺少报告结构' },
+    ], report)).toBe(false);
+  });
+
+  it('still runs SDK correction for hard truncation of an otherwise structured report', () => {
+    const report =
+      '# 滑动性能分析报告\n\n' +
+      '## 综合结论\n\n' +
+      '滑动窗口总帧数 347，真实掉帧 7 帧，最长帧 62.73ms，证据来自 evidence_ref_id=data:art-1。\n\n' +
+      '## 关键证据链\n\n' +
+      Array.from({ length: 20 }, (_, idx) =>
+        `- art-${idx + 1}: frame_id=${idx + 100}, dur=${30 + idx}.1ms, reason_code=workload_heavy。`,
+      ).join('\n') +
+      '\n\n## 优化建议\n\n' +
+      '因此下一步需要继续';
+
+    expect(__testing.looksLikeSoftTruncationFalsePositive(report)).toBe(false);
+    expect(__testing.shouldSkipSdkCorrectionForDeliverableConclusion([
+      { type: 'truncation', severity: 'error', message: '结论文本被截断' },
+    ], report)).toBe(false);
   });
 
   it('prefers a streamed deliverable report over a terse terminal summary before verification', () => {
@@ -154,6 +241,74 @@ describe('ClaudeRuntime enterprise runtime_snapshots session map', () => {
     expect(normalized).not.toContain('我来分析这个 trace');
     expect(normalized).not.toContain('计划缺少架构特定分析阶段');
     expect(normalized).toContain('## ⚠️ 测试/基准应用标注');
+  });
+
+  it('normalizes bridge conclusion updates before they reach session logs', () => {
+    const normalized = __testing.normalizeClaudeBridgeConclusionUpdate({
+      type: 'conclusion',
+      content: {
+        conclusion:
+          '所有假设已解决，数据收集完整。输出最终报告：\n\n' +
+          '# 滑动性能分析报告\n\n' +
+          '## 综合结论\n\n' +
+          '真实掉帧 7 帧，证据来自 evidence_ref_id=data:art-1。\n\n' +
+          '## 优化建议\n\n' +
+          '- 拆分长任务。',
+      },
+      timestamp: 1,
+    } as any, 'scrolling', 'zh-CN');
+
+    expect((normalized.content as any).conclusion).toMatch(/^# 滑动性能分析报告/);
+    expect((normalized.content as any).conclusion).not.toContain('输出最终报告');
+  });
+
+  it('strips completed-data narration before startup report headings', () => {
+    const normalized = __testing.sanitizeClaudeConclusionText(
+      '所有数据收集完毕，开始撰写综合结论报告。\n\n' +
+      '---\n\n' +
+      '## 启动性能分析报告：`com.example.launch.aosp.heavy`\n\n' +
+      '### 1. 概览\n\n' +
+      '冷启动 TTID=1912ms，主因是 ChaosTask，证据来自 evidence_ref_id=data:art-1。\n\n' +
+      '### 2. 优化建议\n\n' +
+      '- 保留测试应用标注。',
+    );
+
+    expect(normalized).toMatch(/^## 启动性能分析报告/);
+    expect(normalized).not.toContain('所有数据收集完毕');
+  });
+
+  it('strips correction scaffold from corrected reports', () => {
+    const normalized = __testing.sanitizeClaudeConclusionText(
+      '# 滑动性能分析报告\n\n' +
+      '## 滑动性能分析报告（修正版）\n\n' +
+      '> ⚠️ **计划执行偏差（p1.5 + p2）**\n' +
+      '>\n' +
+      '> - **p1.5**: invoke_skill(process_identity_resolver) 未执行。\n\n' +
+      '---\n\n' +
+      '### 概览\n\n' +
+      '滑动总帧 347，真实掉帧 7，最长帧 62.73ms。',
+    );
+
+    expect(normalized).toMatch(/^# 滑动性能分析报告\n\n### 概览/);
+    expect(normalized).not.toContain('修正版');
+    expect(normalized).not.toContain('计划执行偏差');
+    expect((normalized.match(/滑动性能分析报告/g) || [])).toHaveLength(1);
+  });
+
+  it('strips tool-not-executed correction scaffold from corrected reports', () => {
+    const normalized = __testing.sanitizeClaudeConclusionText(
+      '# 滑动性能分析报告\n\n' +
+      '> ⚠️ **架构检测置信度低**（`detect_architecture` Skill 本次未执行，架构类型按标准 HWUI 处理）。\n\n' +
+      '## 一、概览\n\n' +
+      '滑动总帧 347，真实掉帧 7，证据来自 evidence_ref_id=data:skill:scrolling_analysis。\n\n' +
+      '## 优化建议\n\n' +
+      '- 移除 animation 回调中的长任务。',
+    );
+
+    expect(normalized).toContain('架构检测置信度低');
+    expect(normalized).toContain('架构类型按标准 HWUI 处理');
+    expect(normalized).not.toContain('Skill 本次未执行');
+    expect(normalized).not.toContain('detect_architecture` Skill');
   });
 
   it('recognizes missing SDK conversations from object-shaped result errors', () => {
@@ -317,8 +472,14 @@ describe('ClaudeRuntime enterprise runtime_snapshots session map', () => {
       analysisPlan: null,
       planHistory: [],
       uncertaintyFlags: [],
-      sdkSessionId: 'sdk-session-a',
-      sdkSessionMode: 'full',
+      engineState: {
+        kind: 'claude-agent-sdk',
+        provider: { providerId: null, providerSnapshotHash: null },
+        claude: {
+          sdkSessionId: 'sdk-session-a',
+          sdkSessionMode: 'full',
+        },
+      },
       runSequence: 0,
       conversationOrdinal: 0,
     });
@@ -428,6 +589,12 @@ describe('ClaudeRuntime enterprise runtime_snapshots session map', () => {
       });
 
       expect(snapshot.sdkSessionId).toBeUndefined();
+      expect(snapshot.engineState).toMatchObject({
+        kind: 'claude-agent-sdk',
+        claude: {
+          sdkSessionId: undefined,
+        },
+      });
     } finally {
       nowSpy.mockRestore();
     }
@@ -461,6 +628,17 @@ describe('ClaudeRuntime enterprise runtime_snapshots session map', () => {
 
       expect(snapshot.sdkSessionId).toBe('sdk-session-fresh');
       expect(snapshot.sdkSessionMode).toBe('full');
+      expect(snapshot.engineState).toEqual(expect.objectContaining({
+        kind: 'claude-agent-sdk',
+        provider: {
+          providerId: null,
+          providerSnapshotHash: null,
+        },
+        claude: {
+          sdkSessionId: 'sdk-session-fresh',
+          sdkSessionMode: 'full',
+        },
+      }));
     } finally {
       nowSpy.mockRestore();
     }
@@ -498,6 +676,12 @@ describe('ClaudeRuntime enterprise runtime_snapshots session map', () => {
       expect(snapshot.comparisonSource).toBe('raw_trace_pair');
       expect(snapshot.sdkSessionId).toBe('sdk-session-compare');
       expect(snapshot.sdkSessionMode).toBe('full');
+      expect(snapshot.engineState).toMatchObject({
+        kind: 'claude-agent-sdk',
+        claude: {
+          sdkSessionId: 'sdk-session-compare',
+        },
+      });
     } finally {
       nowSpy.mockRestore();
     }
@@ -529,6 +713,12 @@ describe('ClaudeRuntime enterprise runtime_snapshots session map', () => {
         conversationOrdinal: 0,
       });
       expect(snapshot.sdkSessionId).toBeUndefined();
+      expect(snapshot.engineState).toMatchObject({
+        kind: 'claude-agent-sdk',
+        claude: {
+          sdkSessionId: undefined,
+        },
+      });
     } finally {
       nowSpy.mockRestore();
     }
@@ -593,6 +783,84 @@ describe('ClaudeRuntime enterprise runtime_snapshots session map', () => {
       sdkSessionId: 'full-sdk-session',
       mode: 'full',
     }));
+  });
+
+  it('keeps monitor-only context pressure warnings out of user-facing progress updates', async () => {
+    process.env.CLAUDE_PRECOMPACT_THRESHOLD = '0.6';
+    const runtime = new ClaudeRuntime({
+      query: async () => ({ columns: [], rows: [] }),
+      getTrace: () => ({ traceOs: 'android', traceFormat: 'perfetto' }),
+    } as any, {
+      enableVerification: false,
+      enableSubAgents: false,
+    });
+    (runtime as any).architectureCache.set('trace-context-pressure', {
+      type: 'STANDARD',
+      confidence: 0.9,
+      evidence: [],
+    });
+    const updates: any[] = [];
+    runtime.on('update', update => updates.push(update));
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    claudeSdkMock.__setQueryImplementation(async function* () {
+      yield {
+        type: 'assistant',
+        session_id: 'sdk-context-pressure',
+        message: { content: [] },
+      };
+      yield {
+        type: 'stream_event',
+        event: {
+          type: 'message_start',
+          message: {
+            usage: {
+              input_tokens: 130_000,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+          },
+        },
+      };
+      yield {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'sdk-context-pressure',
+        num_turns: 1,
+        result: [
+          '# 启动性能分析报告',
+          '',
+          '## 综合结论',
+          '',
+          '冷启动 TTID=1912ms，主因是 ChaosTask，证据来自 data:art-1。',
+          '',
+          '## 关键证据链',
+          '',
+          '- data:art-1: startup_analysis 显示冷启动。',
+          '',
+          '## 优化建议',
+          '',
+          '- 减少主线程模拟负载。',
+        ].join('\n'),
+      };
+    });
+
+    try {
+      const result = await runtime.analyze('分析启动性能', 'session-context-pressure', 'trace-context-pressure', {
+        analysisMode: 'full',
+        packageName: 'com.example.launch.aosp.heavy',
+      });
+
+      expect(result.success).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('pre-rot threshold crossed'));
+      const progressText = updates
+        .filter(update => update.type === 'progress')
+        .map(update => JSON.stringify(update.content))
+        .join('\n');
+      expect(progressText).not.toContain('接近上下文上限');
+      expect(progressText).not.toContain('Context window is close to its limit');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('uses scoped Claude provider tuning when preparing full SDK options', async () => {

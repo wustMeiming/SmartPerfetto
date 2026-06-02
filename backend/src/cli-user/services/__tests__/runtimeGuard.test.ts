@@ -20,6 +20,10 @@ describe('runtime guard', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smartperfetto-runtime-guard-'));
     process.env = { ...originalEnv, PROVIDER_DATA_DIR_OVERRIDE: tmpDir };
     delete process.env.SMARTPERFETTO_AGENT_RUNTIME;
+    delete process.env.SMARTPERFETTO_ENABLE_EXPERIMENTAL_AGENT_RUNTIME;
+    delete process.env.SMARTPERFETTO_EXPERIMENTAL_AGENT_RUNTIME;
+    delete process.env.SMARTPERFETTO_PI_AGENT_CORE_FAKE_STREAM;
+    delete process.env.SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON;
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_BASE_URL;
     delete process.env.ANTHROPIC_API_KEY;
@@ -58,6 +62,33 @@ describe('runtime guard', () => {
     process.env.OPENAI_BASE_URL = 'http://localhost:11434/v1';
     const result = assertAnalysisRuntimeReady();
     expect(result.selection.kind).toBe('openai-agents-sdk');
+  });
+
+  test('does not treat the hidden experimental runtime as Claude SDK', () => {
+    process.env.SMARTPERFETTO_ENABLE_EXPERIMENTAL_AGENT_RUNTIME = '1';
+    process.env.SMARTPERFETTO_EXPERIMENTAL_AGENT_RUNTIME = 'experimental-pi-agent-core';
+    process.env.SMARTPERFETTO_PI_AGENT_CORE_FAKE_STREAM = '1';
+    const result = assertAnalysisRuntimeReady({ providerId: null });
+    expect(result.selection.kind).toBe('experimental-pi-agent-core');
+    expect(result.diagnostics).toMatchObject({
+      configured: true,
+      experimental: true,
+      package: '@earendil-works/pi-agent-core',
+    });
+  });
+
+  test('allows public Pi agent-core runtime with explicit model JSON', () => {
+    process.env.SMARTPERFETTO_AGENT_RUNTIME = 'pi-agent-core';
+    process.env.SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON = '{"id":"pi-test","provider":"test"}';
+
+    const result = assertAnalysisRuntimeReady({ providerId: null });
+    expect(result.selection.kind).toBe('pi-agent-core');
+    expect(result.diagnostics).toMatchObject({
+      configured: true,
+      experimental: false,
+      modelConfigured: true,
+      package: '@earendil-works/pi-agent-core',
+    });
   });
 
   test('uses saved session runtime override instead of current env selection', () => {

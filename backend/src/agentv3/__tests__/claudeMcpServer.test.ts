@@ -673,7 +673,7 @@ describe('createClaudeMcpServer', () => {
     });
 
     it('keeps root-cause verification SQL on a generic root drill phase even when execute_sql was omitted', async () => {
-      const { tools, emittedUpdates } = createTestServer();
+      const { tools, emittedUpdates, analysisPlan } = createTestServer();
       await callTool(tools, 'submit_plan', {
         phases: [
           { id: 'p2', name: '根因深钻', goal: '对主要掉帧类别逐帧深钻，定位机制级根因', expectedTools: ['invoke_skill'] },
@@ -1326,6 +1326,54 @@ describe('createClaudeMcpServer', () => {
       expect(envelope?.meta?.planPhaseWarning).toBeUndefined();
     });
 
+    it('backfills concurrent overview skill results to a recently completed matching phase', async () => {
+      const { tools, emittedUpdates, analysisPlan } = createTestServer();
+      await callTool(tools, 'submit_plan', {
+        phases: [
+          {
+            id: 'p1',
+            name: '概览与数据收集',
+            goal: '获取滑动分析概览、掉帧列表和批量根因分类',
+            expectedTools: ['invoke_skill'],
+            expectedCalls: [{ tool: 'invoke_skill', skillId: 'scrolling_analysis' }],
+          },
+          {
+            id: 'p1b',
+            name: '进程身份确认',
+            goal: '确认焦点进程身份，避免查错进程',
+            expectedTools: ['invoke_skill'],
+            expectedCalls: [{ tool: 'invoke_skill', skillId: 'process_identity_resolver' }],
+          },
+          {
+            id: 'p2',
+            name: '根因深钻',
+            goal: '对代表帧执行机制级深钻',
+            expectedTools: ['invoke_skill'],
+          },
+        ],
+        successCriteria: 'Concurrent support tools must not steal overview evidence attribution',
+      });
+
+      await callTool(tools, 'update_plan_phase', { phaseId: 'p1', status: 'in_progress' });
+      await callTool(tools, 'update_plan_phase', { phaseId: 'p1b', status: 'in_progress' });
+      expect(analysisPlan.current?.phases.find(p => p.id === 'p1')?.status).toBe('completed');
+      expect(analysisPlan.current?.phases.find(p => p.id === 'p1b')?.status).toBe('in_progress');
+
+      const result = await callTool(tools, 'invoke_skill', {
+        skillId: 'scrolling_analysis',
+        params: { process_name: 'com.example.app' },
+      });
+      const envelope = emittedUpdates
+        .filter((u: any) => u.type === 'data')
+        .flatMap((u: any) => u.content ?? [])
+        .find((env: any) => env.meta?.skillId === 'scrolling_analysis');
+
+      expect(result.success).toBe(true);
+      expect(envelope?.meta?.planPhaseId).toBe('p1');
+      expect(envelope?.meta?.planPhaseAttribution).toBe('inferred');
+      expect(envelope?.meta?.planPhaseWarning).toContain('并发工具回填绑定');
+    });
+
     it('allows active-phase support SQL when expectedCalls narrow the skill call', async () => {
       const { tools, emittedUpdates } = createTestServer();
       await callTool(tools, 'submit_plan', {
@@ -1664,6 +1712,45 @@ describe('createClaudeMcpServer', () => {
 
       expect(result.success).toBe(true);
       expect(envelope?.meta?.planPhaseId).toBe('p1');
+      expect(envelope?.meta?.planPhaseAttribution).toBe('inferred');
+      expect(envelope?.meta?.planPhaseWarning).toContain('最近完成');
+    });
+
+    it('binds semantic correction evidence to a recently completed phase without an active phase', async () => {
+      const { tools, emittedUpdates, analysisPlan } = createTestServer();
+      await callTool(tools, 'submit_plan', {
+        phases: [
+          { id: 'p2', name: '启动详情分析', goal: '获取四象限、热点 slice、阻塞关系和关键任务数据', expectedTools: ['invoke_skill'] },
+          { id: 'p3', name: '综合结论', goal: '输出最终报告', expectedTools: [] },
+        ],
+        successCriteria: 'Correction-time evidence should still keep semantic phase context',
+      });
+      await callTool(tools, 'update_plan_phase', {
+        phaseId: 'p2',
+        status: 'completed',
+        summary: '已完成启动详情和阻塞关系初查',
+      });
+      await callTool(tools, 'update_plan_phase', {
+        phaseId: 'p3',
+        status: 'completed',
+        summary: '已输出最终报告，进入自动修正',
+      });
+      for (const phase of analysisPlan.current?.phases ?? []) {
+        phase.status = 'completed';
+        phase.completedAt = Date.now();
+      }
+
+      const result = await callTool(tools, 'invoke_skill', {
+        skillId: 'blocking_chain_analysis',
+        params: { process_name: 'com.example', start_ts: '100', end_ts: '200' },
+      });
+      const envelope = emittedUpdates
+        .filter((u: any) => u.type === 'data')
+        .flatMap((u: any) => u.content ?? [])
+        .find((env: any) => env.meta?.skillId === 'blocking_chain_analysis');
+
+      expect(result.success).toBe(true);
+      expect(envelope?.meta?.planPhaseId).toBe('p2');
       expect(envelope?.meta?.planPhaseAttribution).toBe('inferred');
       expect(envelope?.meta?.planPhaseWarning).toContain('最近完成');
     });

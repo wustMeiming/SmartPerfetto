@@ -15,6 +15,7 @@ import type {
 import {
   assertAgentRuntimeSupported,
   DUAL_SURFACE_PROVIDER_TYPES,
+  isAgentRuntimeKind,
   isDualSurfaceProviderType,
   resolveProviderAgentRuntime,
   sharedKeyShouldUseClaudeAuthToken,
@@ -26,6 +27,8 @@ const SENSITIVE_FIELDS: (keyof ProviderConfig['connection'])[] = [
   'claudeApiKey',
   'claudeAuthToken',
   'openaiApiKey',
+  'piAgentCoreModelJson',
+  'openCodeModelJson',
   'awsBearerToken',
   'awsAccessKeyId',
   'awsSecretAccessKey',
@@ -205,7 +208,7 @@ export class ProviderService {
   }
 
   switchAgentRuntime(id: string, runtime: AgentRuntimeKind, scope?: ProviderScope): ProviderConfig {
-    if (runtime !== 'claude-agent-sdk' && runtime !== 'openai-agents-sdk') {
+    if (!isAgentRuntimeKind(runtime)) {
       throw new Error(`Invalid agent runtime: ${runtime}`);
     }
     return this.update(id, { connection: { agentRuntime: runtime } }, scope);
@@ -285,6 +288,31 @@ export class ProviderService {
     env.OPENAI_AGENTS_PROTOCOL = this.resolveOpenAIProtocol(provider);
   }
 
+  private applyPiAgentCoreConnection(env: Record<string, string>, provider: ProviderConfig): void {
+    if (provider.connection.piAgentCoreModulePath) {
+      env.SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH = provider.connection.piAgentCoreModulePath;
+    }
+    if (provider.connection.piAgentCoreModelJson) {
+      env.SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON = provider.connection.piAgentCoreModelJson;
+    }
+    if (provider.connection.piAgentCoreSystemPrompt) {
+      env.SMARTPERFETTO_PI_AGENT_CORE_SYSTEM_PROMPT = provider.connection.piAgentCoreSystemPrompt;
+    }
+  }
+
+  private applyOpenCodeConnection(env: Record<string, string>, provider: ProviderConfig): void {
+    this.applyOpenAIConnection(env, provider);
+    if (provider.connection.openCodeSdkModulePath) {
+      env.SMARTPERFETTO_OPENCODE_SDK_MODULE_PATH = provider.connection.openCodeSdkModulePath;
+    }
+    if (provider.connection.openCodeModelJson) {
+      env.SMARTPERFETTO_OPENCODE_MODEL_JSON = provider.connection.openCodeModelJson;
+    }
+    if (provider.connection.openCodeSystemPrompt) {
+      env.SMARTPERFETTO_OPENCODE_SYSTEM_PROMPT = provider.connection.openCodeSystemPrompt;
+    }
+  }
+
   private toEnvVars(provider: ProviderConfig): Record<string, string> {
     const env: Record<string, string> = {};
     const runtime = this.resolveAgentRuntime(provider);
@@ -362,6 +390,10 @@ export class ProviderService {
         env.SMARTPERFETTO_AGENT_RUNTIME = runtime;
         if (runtime === 'openai-agents-sdk') {
           this.applyOpenAIConnection(env, provider);
+        } else if (runtime === 'pi-agent-core') {
+          this.applyPiAgentCoreConnection(env, provider);
+        } else if (runtime === 'opencode') {
+          this.applyOpenCodeConnection(env, provider);
         } else {
           this.applyClaudeAuth(env, provider);
           const baseUrl = this.getClaudeBaseUrl(provider);
@@ -372,7 +404,15 @@ export class ProviderService {
     }
 
     env.SMARTPERFETTO_AGENT_RUNTIME = runtime;
-    if (runtime === 'openai-agents-sdk') {
+    if (runtime === 'pi-agent-core') {
+      // Pi agent-core uses its own model JSON; keep Claude/OpenAI model env
+      // variables unset so downstream diagnostics cannot misclassify it.
+    } else if (runtime === 'opencode') {
+      if (!provider.connection.openCodeModelJson) {
+        env.OPENAI_MODEL = provider.models.primary;
+        env.OPENAI_LIGHT_MODEL = provider.models.light;
+      }
+    } else if (runtime === 'openai-agents-sdk') {
       env.OPENAI_MODEL = provider.models.primary;
       env.OPENAI_LIGHT_MODEL = provider.models.light;
     } else {
@@ -381,7 +421,13 @@ export class ProviderService {
       if (provider.models.subAgent) env.CLAUDE_SUB_AGENT_MODEL = provider.models.subAgent;
     }
 
-    if (runtime === 'openai-agents-sdk') {
+    if (runtime === 'pi-agent-core') {
+      // Runtime-specific Pi tuning is intentionally not mapped to Claude/OpenAI
+      // knobs. Add explicit Pi knobs here only after the adapter supports them.
+    } else if (runtime === 'opencode') {
+      // OpenCode tuning is runtime-specific and intentionally not mapped to
+      // Claude/OpenAI loop knobs.
+    } else if (runtime === 'openai-agents-sdk') {
       if (provider.tuning?.maxTurns) env.OPENAI_MAX_TURNS = String(provider.tuning.maxTurns);
       if (provider.tuning?.fullPerTurnMs) env.OPENAI_FULL_PER_TURN_MS = String(provider.tuning.fullPerTurnMs);
       if (provider.tuning?.quickPerTurnMs) env.OPENAI_QUICK_PER_TURN_MS = String(provider.tuning.quickPerTurnMs);

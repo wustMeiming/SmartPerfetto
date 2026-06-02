@@ -1,9 +1,9 @@
 // backend/src/services/providerManager/templates.ts
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { OfficialProviderTemplate } from './types';
+import type { ProviderTemplate } from './types';
 
-export const officialTemplates: OfficialProviderTemplate[] = [
+export const officialTemplates: ProviderTemplate[] = [
   {
     type: 'anthropic',
     displayName: 'Anthropic',
@@ -322,6 +322,16 @@ export const officialTemplates: OfficialProviderTemplate[] = [
       openaiBaseUrl: 'http://localhost:11434/v1',
       agentRuntime: 'openai-agents-sdk',
       openaiProtocol: 'chat_completions',
+    },
+  },
+  {
+    type: 'custom',
+    displayName: 'Custom Provider',
+    requiredFields: [],
+    defaultModels: { primary: '', light: '' },
+    availableModels: [],
+    defaultConnection: {
+      agentRuntime: 'claude-agent-sdk',
     },
   },
 ];

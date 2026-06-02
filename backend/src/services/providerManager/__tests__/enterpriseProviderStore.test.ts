@@ -136,6 +136,45 @@ describe('enterprise provider store', () => {
       .toBe('sk-enterprise-secret-a');
   });
 
+  it('stores third-party model JSON secrets outside provider_credentials', async () => {
+    const piProvider = svc.create({
+      name: 'Enterprise Pi',
+      category: 'custom',
+      type: 'custom',
+      models: { primary: 'pi-primary', light: 'pi-light' },
+      connection: {
+        agentRuntime: 'pi-agent-core',
+        piAgentCoreModelJson: '{"id":"pi-test","provider":"test","apiKey":"sk-enterprise-pi-json"}',
+      },
+    }, scope('user-a'));
+    const openCodeProvider = svc.create({
+      name: 'Enterprise OpenCode',
+      category: 'custom',
+      type: 'custom',
+      models: { primary: 'opencode-primary', light: 'opencode-light' },
+      connection: {
+        agentRuntime: 'opencode',
+        openCodeModelJson: '{"providerID":"test","modelID":"opencode-test","apiKey":"sk-enterprise-opencode-json"}',
+      },
+    }, scope('user-a'));
+
+    const rows = readProviderRows();
+    const piRow = rows.find(item => item.id === piProvider.id);
+    const openCodeRow = rows.find(item => item.id === openCodeProvider.id);
+    expect(piRow).toBeDefined();
+    expect(openCodeRow).toBeDefined();
+    expect(piRow!.policy_json).not.toContain('sk-enterprise-pi-json');
+    expect(openCodeRow!.policy_json).not.toContain('sk-enterprise-opencode-json');
+
+    const secretFile = await fs.readFile(path.join(secretDir, 'provider-secrets.enc.json'), 'utf-8');
+    expect(secretFile).not.toContain('sk-enterprise-pi-json');
+    expect(secretFile).not.toContain('sk-enterprise-opencode-json');
+    expect(svc.getEnvForProvider(piProvider.id, scope('user-a'))!.SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON)
+      .toContain('sk-enterprise-pi-json');
+    expect(svc.getEnvForProvider(openCodeProvider.id, scope('user-a'))!.SMARTPERFETTO_OPENCODE_MODEL_JSON)
+      .toContain('sk-enterprise-opencode-json');
+  });
+
   it('keeps personal provider activation isolated by user scope', () => {
     const providerA = svc.create({
       ...input,

@@ -9,6 +9,16 @@ import { collectEnvCredentialSources } from './envCredentialSources';
 import { resolveAgentRuntimeSelection } from './runtimeSelection';
 import { getProviderService } from '../services/providerManager';
 import { getSmartPerfettoVersion } from '../version';
+import {
+  EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
+  getPiAgentCoreRuntimeDiagnostics,
+  PI_AGENT_CORE_RUNTIME_KIND,
+} from './piAgentCoreRuntime';
+import {
+  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
+  getOpenCodeRuntimeDiagnostics,
+  OPENCODE_RUNTIME_KIND,
+} from './openCodeRuntime';
 
 export function buildRuntimeHealthPayload(now: Date = new Date()) {
   const runtimeSelection = resolveAgentRuntimeSelection();
@@ -25,7 +35,24 @@ export function buildRuntimeHealthPayload(now: Date = new Date()) {
   );
   const selectedDiagnostics = runtimeSelection.kind === 'openai-agents-sdk'
     ? openAIDiagnostics
-    : claudeDiagnostics;
+    : runtimeSelection.kind === PI_AGENT_CORE_RUNTIME_KIND ||
+      runtimeSelection.kind === EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND
+      ? getPiAgentCoreRuntimeDiagnostics(process.env, runtimeSelection.kind)
+      : runtimeSelection.kind === EXPERIMENTAL_OPENCODE_RUNTIME_KIND ||
+        runtimeSelection.kind === OPENCODE_RUNTIME_KIND
+        ? getOpenCodeRuntimeDiagnostics(process.env, runtimeSelection.kind)
+        : claudeDiagnostics;
+  const selectedModel = 'model' in selectedDiagnostics
+    ? selectedDiagnostics.model
+    : selectedDiagnostics.runtime === EXPERIMENTAL_OPENCODE_RUNTIME_KIND ||
+      selectedDiagnostics.runtime === OPENCODE_RUNTIME_KIND
+      ? 'opencode'
+    : 'modelConfigured' in selectedDiagnostics && selectedDiagnostics.modelConfigured
+      ? 'pi-agent-core'
+      : '';
+  const selectedProviderMode = 'providerMode' in selectedDiagnostics
+    ? selectedDiagnostics.providerMode
+    : selectedDiagnostics.runtime;
   const envSources = collectEnvCredentialSources(process.env, 'health');
   const providerOverridesEnv = runtimeSelection.source === 'provider' && envSources.length > 0;
 
@@ -36,8 +63,8 @@ export function buildRuntimeHealthPayload(now: Date = new Date()) {
     version: getSmartPerfettoVersion(),
     aiEngine: {
       runtime: runtimeSelection.kind,
-      model: selectedDiagnostics.model,
-      providerMode: selectedDiagnostics.providerMode,
+      model: selectedModel,
+      providerMode: selectedProviderMode,
       configured: selectedDiagnostics.configured,
       source: runtimeSelection.source,
       credentialSource: runtimeSelection.source === 'provider'

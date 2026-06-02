@@ -13,6 +13,7 @@ export type {
   ProviderScope,
   ProviderCreateInput,
   ProviderUpdateInput,
+  ProviderTemplate,
   OfficialProviderTemplate,
   ModelOption,
   TestResult,

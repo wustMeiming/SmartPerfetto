@@ -41,8 +41,19 @@ const OPENAI_RUNTIME_TYPES: readonly ProviderType[] = [
   'custom',
 ];
 
+const PI_AGENT_CORE_RUNTIME_TYPES: readonly ProviderType[] = [
+  'custom',
+];
+
+const OPENCODE_RUNTIME_TYPES: readonly ProviderType[] = [
+  'custom',
+];
+
 export function isAgentRuntimeKind(value: unknown): value is AgentRuntimeKind {
-  return value === 'claude-agent-sdk' || value === 'openai-agents-sdk';
+  return value === 'claude-agent-sdk'
+    || value === 'openai-agents-sdk'
+    || value === 'pi-agent-core'
+    || value === 'opencode';
 }
 
 export function isDualSurfaceProviderType(type: ProviderType): type is DualSurfaceProviderType {
@@ -50,9 +61,10 @@ export function isDualSurfaceProviderType(type: ProviderType): type is DualSurfa
 }
 
 export function supportsAgentRuntimeType(type: ProviderType, runtime: AgentRuntimeKind): boolean {
-  return runtime === 'openai-agents-sdk'
-    ? OPENAI_RUNTIME_TYPES.includes(type)
-    : CLAUDE_RUNTIME_TYPES.includes(type);
+  if (runtime === 'openai-agents-sdk') return OPENAI_RUNTIME_TYPES.includes(type);
+  if (runtime === 'pi-agent-core') return PI_AGENT_CORE_RUNTIME_TYPES.includes(type);
+  if (runtime === 'opencode') return OPENCODE_RUNTIME_TYPES.includes(type);
+  return CLAUDE_RUNTIME_TYPES.includes(type);
 }
 
 export function assertAgentRuntimeSupported(type: ProviderType, runtime?: unknown): asserts runtime is AgentRuntimeKind | undefined {
@@ -77,6 +89,12 @@ export function resolveProviderAgentRuntime(
     case 'ollama':
       return 'openai-agents-sdk';
     case 'custom':
+      if (
+        provider?.connection.openCodeModelJson ||
+        provider?.connection.openCodeSdkModulePath
+      ) {
+        return 'opencode';
+      }
       if (
         provider?.connection.openaiProtocol ||
         provider?.connection.openaiBaseUrl ||

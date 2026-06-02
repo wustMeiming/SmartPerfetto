@@ -41,7 +41,14 @@ async function runTest(provider: ProviderConfig): Promise<Omit<TestResult, 'late
   if (provider.type === 'vertex') return testVertex(provider);
   if (provider.type === 'ollama') return testOllama(provider);
 
-  if (resolveProviderAgentRuntime(provider) === 'openai-agents-sdk') {
+  const runtime = resolveProviderAgentRuntime(provider);
+  if (runtime === 'pi-agent-core') {
+    return testPiAgentCore(provider);
+  }
+  if (runtime === 'opencode') {
+    return testOpenCode(provider);
+  }
+  if (runtime === 'openai-agents-sdk') {
     return testOpenAICompatible(provider);
   }
   return testAnthropic(provider);
@@ -57,6 +64,62 @@ function getOpenAIBaseUrl(provider: ProviderConfig, defaultBaseUrl: string): str
 
 function getOpenAIApiKey(provider: ProviderConfig): string | undefined {
   return provider.connection.openaiApiKey || provider.connection.apiKey;
+}
+
+function testPiAgentCore(provider: ProviderConfig): Omit<TestResult, 'latencyMs'> {
+  if (provider.type !== 'custom') {
+    return { success: false, error: 'Pi Agent Core runtime is only supported for custom providers' };
+  }
+  const rawModel = provider.connection.piAgentCoreModelJson?.trim();
+  if (!rawModel) {
+    return { success: false, error: 'Pi Agent Core model JSON is required' };
+  }
+  try {
+    const parsed = JSON.parse(rawModel);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { success: false, error: 'Pi Agent Core model JSON must be an object' };
+    }
+  } catch (err: any) {
+    return { success: false, error: `Pi Agent Core model JSON is invalid: ${err.message}` };
+  }
+  return {
+    success: true,
+    modelVerified: false,
+    error: 'Pi Agent Core provider configuration is syntactically valid; runtime smoke runs during analysis.',
+  };
+}
+
+function testOpenCode(provider: ProviderConfig): Omit<TestResult, 'latencyMs'> {
+  if (provider.type !== 'custom') {
+    return { success: false, error: 'OpenCode runtime is only supported for custom providers' };
+  }
+  const rawModel = provider.connection.openCodeModelJson?.trim();
+  if (rawModel) {
+    try {
+      const parsed = JSON.parse(rawModel);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { success: false, error: 'OpenCode model JSON must be an object' };
+      }
+    } catch (err: any) {
+      return { success: false, error: `OpenCode model JSON is invalid: ${err.message}` };
+    }
+    return {
+      success: true,
+      modelVerified: false,
+      error: 'OpenCode provider configuration is syntactically valid; runtime smoke runs during analysis.',
+    };
+  }
+  if (!getOpenAIBaseUrl(provider, '')) {
+    return { success: false, error: 'OpenCode requires an OpenAI-compatible Base URL or OpenCode model JSON' };
+  }
+  if (!provider.models.primary) {
+    return { success: false, error: 'OpenCode requires a primary model' };
+  }
+  return {
+    success: true,
+    modelVerified: false,
+    error: 'OpenCode will use the OpenAI-compatible provider fields through its server runtime.',
+  };
 }
 
 async function testAnthropic(provider: ProviderConfig): Promise<Omit<TestResult, 'latencyMs'>> {

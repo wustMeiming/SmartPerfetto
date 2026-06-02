@@ -3,6 +3,7 @@
 // This file is part of SmartPerfetto. See LICENSE for details.
 
 import {describe, it, expect} from '@jest/globals';
+import {z} from 'zod';
 
 import {
   McpToolRegistry,
@@ -10,12 +11,20 @@ import {
   buildAllowedTools,
   filterByExposure,
   type McpToolDefinition,
+  type McpToolRegistration,
 } from '../mcpToolRegistry';
 
-/** Stub SDK tool object — the registry treats `tool` opaquely so a
- * marker shape is enough to verify pass-through. */
+/** Stub SDK tool object with the shape returned by Claude SDK `tool(...)`. */
 function stub(name: string): unknown {
-  return {kind: 'stub', toolName: name};
+  return {
+    name,
+    description: `${name} description`,
+    inputSchema: {q: z.string().optional()},
+    annotations: {readOnlyHint: true},
+    handler: async (args: Record<string, unknown>) => ({
+      content: [{type: 'text' as const, text: JSON.stringify(args)}],
+    }),
+  };
 }
 
 describe('McpToolRegistry — basic registration', () => {
@@ -41,7 +50,7 @@ describe('McpToolRegistry — basic registration', () => {
 
   it('register accepts a full McpToolDefinition with summary + requires', () => {
     const registry = new McpToolRegistry();
-    const def: McpToolDefinition = {
+    const def: McpToolRegistration = {
       tool: stub('x'),
       name: 'execute_sql',
       exposure: 'public',
@@ -86,15 +95,32 @@ describe('McpToolRegistry — allowedTools shape', () => {
     ]);
   });
 
+  it('listForRequest keeps non-deprecated tools and gates code-aware tools by permission', () => {
+    const registry = new McpToolRegistry();
+    registry.registerSdk(stub('a'), 'execute_sql', 'public');
+    registry.registerSdk(stub('b'), 'submit_plan', 'internal');
+    registry.registerSdk(stub('c'), 'lookup_app_source', 'requires_codebase_permission');
+    registry.registerSdk(stub('d'), 'old_tool', 'deprecated');
+
+    expect(registry.listForRequest({
+      sessionId: 's1',
+      hasCodebaseAccess: false,
+    }).map(def => def.name)).toEqual(['execute_sql', 'submit_plan']);
+    expect(registry.listForRequest({
+      sessionId: 's1',
+      hasCodebaseAccess: true,
+    }).map(def => def.name)).toEqual(['execute_sql', 'submit_plan', 'lookup_app_source']);
+  });
+
   it('MCP_NAME_PREFIX matches the SDK contract', () => {
     expect(MCP_NAME_PREFIX).toBe('mcp__smartperfetto__');
   });
 
   it('buildAllowedTools (free function) matches registry method', () => {
-    const defs: McpToolDefinition[] = [
-      {tool: stub('a'), name: 'one', exposure: 'public'},
-      {tool: stub('b'), name: 'two', exposure: 'internal'},
-    ];
+    const registry = new McpToolRegistry();
+    registry.registerSdk(stub('one'), 'one', 'public');
+    registry.registerSdk(stub('two'), 'two', 'internal');
+    const defs: readonly McpToolDefinition[] = registry.list();
     expect(buildAllowedTools(defs)).toEqual([
       `${MCP_NAME_PREFIX}one`,
       `${MCP_NAME_PREFIX}two`,
@@ -104,12 +130,12 @@ describe('McpToolRegistry — allowedTools shape', () => {
 
 describe('McpToolRegistry — filterByExposure', () => {
   function seed(): McpToolDefinition[] {
-    return [
-      {tool: stub('a'), name: 'execute_sql', exposure: 'public'},
-      {tool: stub('b'), name: 'submit_plan', exposure: 'internal'},
-      {tool: stub('c'), name: 'old_tool', exposure: 'deprecated'},
-      {tool: stub('d'), name: 'invoke_skill', exposure: 'public'},
-    ];
+    const registry = new McpToolRegistry();
+    registry.registerSdk(stub('execute_sql'), 'execute_sql', 'public');
+    registry.registerSdk(stub('submit_plan'), 'submit_plan', 'internal');
+    registry.registerSdk(stub('old_tool'), 'old_tool', 'deprecated');
+    registry.registerSdk(stub('invoke_skill'), 'invoke_skill', 'public');
+    return [...registry.list()];
   }
 
   it('returns only entries matching the requested exposures', () => {
@@ -151,7 +177,7 @@ describe('McpToolRegistry — ACI snapshot', () => {
     });
   });
 
-  it('emits empty summary by default; populates when given', () => {
+  it('emits empty summary by default; populates explicit summaries when given', () => {
     const registry = new McpToolRegistry();
     registry.registerSdk(stub('a'), 'execute_sql', 'public');
     registry.registerSdk(stub('b'), 'invoke_skill', 'public', {
@@ -175,6 +201,19 @@ describe('McpToolRegistry — ACI snapshot', () => {
       sessionId: 's1',
       hasCodebaseAccess: true,
     }).map(tool => tool.toolName)).toEqual(['list_codebases', 'lookup_app_source']);
+  });
+
+  it('records capability probe reasons without exposing code-aware tools implicitly', () => {
+    const registry = new McpToolRegistry();
+
+    expect(registry.probeCapabilities({
+      sessionId: 's1',
+      hasCodebaseAccess: false,
+    })).toEqual({codeAwareAvailable: false, reason: 'no_permission'});
+    expect(registry.probeCapabilities({
+      sessionId: 's1',
+      hasCodebaseAccess: true,
+    })).toEqual({codeAwareAvailable: true});
   });
 });
 

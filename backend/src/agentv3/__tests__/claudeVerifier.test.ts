@@ -48,6 +48,7 @@ import {
   learnFromVerificationResults,
   normalizeLLMSeverity,
   isConclusionIncomplete,
+  parseVerifierJsonIssues,
 } from '../claudeVerifier';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -595,6 +596,35 @@ describe('generateCorrectionPrompt', () => {
     const prompt = generateCorrectionPrompt(issues, fullConclusion);
     expect(prompt).not.toContain('结论尚未生成');
     expect(prompt).toContain('请修正以下问题');
+    expect(prompt).toContain('修正阶段不要调用工具或重新查询数据');
+    expect(prompt).toContain('不要把报告标成');
+    expect(prompt).toContain('计划执行偏差');
+    expect(prompt).toContain('不要声称某个工具或 Skill 未执行');
+  });
+});
+
+describe('parseVerifierJsonIssues', () => {
+  it('parses the first balanced JSON array and ignores prose after it', () => {
+    const issues = parseVerifierJsonIssues(
+      '```json\n' +
+      '[{"type":"missing_evidence","severity":"critical","message":"缺少 art-1 证据"}]\n' +
+      '```\n' +
+      '补充说明：[不要把这段当作 JSON]',
+    );
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].type).toBe('missing_evidence');
+    expect(issues[0].message).toContain('art-1');
+  });
+
+  it('skips non-JSON bracketed prose before the verifier array', () => {
+    const issues = parseVerifierJsonIssues(
+      '[ERROR] 需要关注：\n' +
+      '[{"type":"severity_mismatch","severity":"warning","message":"单帧异常不应标 critical"}]',
+    );
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].type).toBe('severity_mismatch');
   });
 });
 
@@ -624,12 +654,17 @@ describe('learnFromVerificationResults', () => {
   const mockFs = require('fs') as jest.Mocked<typeof import('fs')>;
 
   beforeEach(() => {
+    const actualFs = jest.requireActual<typeof import('fs')>('fs');
     (mockFs.existsSync as jest.Mock).mockImplementation((...args: unknown[]) => {
       const p = args[0] as string;
       if (typeof p === 'string' && p.includes('learned_misdiagnosis')) return false;
-      return false;
+      return actualFs.existsSync(p);
     });
-    (mockFs.readFileSync as jest.Mock).mockImplementation(() => '[]');
+    (mockFs.readFileSync as jest.Mock).mockImplementation((...args: unknown[]) => {
+      const p = args[0] as string;
+      if (typeof p === 'string' && p.includes('learned_misdiagnosis')) return '[]';
+      return actualFs.readFileSync(p, args[1] as BufferEncoding | undefined);
+    });
     (mockFs.writeFileSync as jest.Mock).mockClear();
     (mockFs.renameSync as jest.Mock).mockClear();
     (mockFs.mkdirSync as jest.Mock).mockClear();
@@ -779,6 +814,39 @@ describe('verifySceneCompleteness — startup cold-start checks', () => {
 });
 
 describe('verifyConclusion progress output', () => {
+  it('treats missing startup final-report contract sections as correction errors', async () => {
+    const conclusion = [
+      '# 启动性能分析报告',
+      '',
+      '## 启动类型与 TTID/TTFD',
+      '本次为冷启动，TTID=1912ms，TTFD 不可用。',
+      '',
+      '## 阶段耗时分解',
+      'startup_detail 显示 ChaosTask self_ms=456ms，dur_ms=1338ms。',
+      '',
+      '## 根因编号引用',
+      'SR12 对应三方 SDK 初始化过重，SR19 对应并发启动干扰。',
+      '',
+      '## 优化建议',
+      '[App层] 延迟非关键初始化到首帧后。',
+      '',
+      'JIT 编译影响可排除；startup_slow_reasons 已交叉验证。',
+    ].join('\n');
+
+    const result = await verifyConclusion([], conclusion, {
+      enableLLM: false,
+      sceneType: 'startup',
+      query: '分析启动性能',
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.heuristicIssues).toContainEqual(expect.objectContaining({
+      type: 'missing_reasoning',
+      severity: 'error',
+      message: expect.stringContaining('App/系统分层建议'),
+    }));
+  });
+
   it('emits user-facing progress without exposing internal issue details', async () => {
     const emitted: any[] = [];
 
@@ -794,11 +862,26 @@ describe('verifyConclusion progress output', () => {
       .filter(update => update.type === 'progress')
       .map(update => String(update.content?.message || ''));
     expect(progressMessages).toEqual(expect.arrayContaining([
-      '质量校验发现报告仍需补齐，系统已记录详细诊断并将尝试自动修正。',
+      '质量校验记录了报告改进项，系统会根据严重程度决定自动修正或交由最终门禁处理。',
     ]));
     expect(progressMessages.join('\n')).not.toContain('[ERROR]');
     expect(progressMessages.join('\n')).not.toContain('未提交分析计划');
     expect(progressMessages.join('\n')).not.toContain('验证发现');
+  });
+
+  it('can suppress user-facing issue progress when final gates remain authoritative', async () => {
+    const emitted: any[] = [];
+
+    const result = await verifyConclusion([], 'short', {
+      enableLLM: false,
+      plan: null,
+      emitUpdate: update => emitted.push(update),
+      emitIssueProgress: false,
+      outputLanguage: 'zh-CN',
+    });
+
+    expect(result.passed).toBe(false);
+    expect(emitted.filter(update => update.type === 'progress')).toHaveLength(0);
   });
 });
 

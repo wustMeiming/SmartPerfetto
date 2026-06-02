@@ -4,13 +4,21 @@
 
 import type { TraceProcessorService } from '../services/traceProcessorService';
 import type { IOrchestrator } from '../agent/core/orchestratorTypes';
-import { createClaudeRuntime } from '../agentv3';
 import { getProviderService, type AgentRuntimeKind, type ProviderScope } from '../services/providerManager';
+import { createAnalysisHarness } from './analysisHarness';
+import { isProductionAgentRuntimeKind } from './runtimeCapabilities';
+import {
+  type ExperimentalAgentRuntimeKind,
+  resolveExperimentalAgentRuntimeSelection,
+} from './piAgentCoreRuntime';
+import { createRuntimeRegistryForSelection } from './runtimeRegistry';
 
 export type BackendAgentRuntimeKind = AgentRuntimeKind;
+export type ResolvedAgentRuntimeKind = BackendAgentRuntimeKind | ExperimentalAgentRuntimeKind;
+export const ANALYSIS_HARNESS_ENV = 'SMARTPERFETTO_ANALYSIS_HARNESS';
 
-export interface RuntimeSelection {
-  kind: BackendAgentRuntimeKind;
+export interface RuntimeSelection<K extends string = ResolvedAgentRuntimeKind> {
+  kind: K;
   source: 'provider' | 'snapshot' | 'env' | 'default';
   providerId?: string;
   providerName?: string;
@@ -30,13 +38,14 @@ export interface CreateAgentOrchestratorInput {
 }
 
 function parseRuntimeEnv(value: string | undefined): BackendAgentRuntimeKind | undefined {
-  switch (value) {
-    case 'claude-agent-sdk':
-    case 'openai-agents-sdk':
-      return value;
-    default:
-      return undefined;
-  }
+  return isProductionAgentRuntimeKind(value) ? value : undefined;
+}
+
+export function isAnalysisHarnessEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const value = env[ANALYSIS_HARNESS_ENV]?.trim().toLowerCase();
+  return value !== '0' && value !== 'false' && value !== 'off';
 }
 
 export function resolveAgentRuntimeSelection(
@@ -76,8 +85,13 @@ export function resolveAgentRuntimeSelection(
   if (process.env.SMARTPERFETTO_AGENT_RUNTIME) {
     throw new Error(
       `Unsupported SMARTPERFETTO_AGENT_RUNTIME="${process.env.SMARTPERFETTO_AGENT_RUNTIME}". ` +
-      'Use "claude-agent-sdk" or "openai-agents-sdk".'
+      'Use "claude-agent-sdk", "openai-agents-sdk", "pi-agent-core", or "opencode".'
     );
+  }
+
+  const experimentalRuntime = resolveExperimentalAgentRuntimeSelection();
+  if (experimentalRuntime) {
+    return experimentalRuntime;
   }
 
   return { kind: 'claude-agent-sdk', source: 'default' };
@@ -85,16 +99,12 @@ export function resolveAgentRuntimeSelection(
 
 export function createAgentOrchestrator(input: CreateAgentOrchestratorInput): IOrchestrator {
   const selection = resolveAgentRuntimeSelection(input.providerId, input.runtimeOverride, input.providerScope);
-  switch (selection.kind) {
-    case 'openai-agents-sdk': {
-      // Lazy import keeps the OpenAI runtime isolated from Claude-only startup
-      // paths and avoids circular imports while both SDKs remain first-class.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { createOpenAIRuntime } = require('../agentOpenAI');
-      return createOpenAIRuntime(input.traceProcessorService);
-    }
-    case 'claude-agent-sdk':
-    default:
-      return createClaudeRuntime(input.traceProcessorService);
-  }
+  const registry = createRuntimeRegistryForSelection(selection.kind);
+  const engine = registry.createOrchestrator(selection.kind, {
+    traceProcessorService: input.traceProcessorService,
+    selection,
+  });
+  return isAnalysisHarnessEnabled()
+    ? createAnalysisHarness({ engine })
+    : engine;
 }

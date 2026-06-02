@@ -26,6 +26,7 @@ import type { SceneType } from './sceneClassifier';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from './outputLanguage';
 import { backendLogPath } from '../runtimePaths';
 import { getFinalReportContract } from './strategyLoader';
+import { assessFinalReportContractCompleteness } from '../services/finalReportContractGate';
 
 /** Hardcoded known misdiagnosis patterns — common false positives in performance analysis. */
 const HARDCODED_MISDIAGNOSIS_PATTERNS: Array<{
@@ -779,6 +780,65 @@ function repairTruncatedJson(json: string): string {
   return s;
 }
 
+function collectJsonArrayCandidates(text: string): string[] {
+  const candidates: string[] = [];
+
+  for (let start = text.indexOf('['); start >= 0; start = text.indexOf('[', start + 1)) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let idx = start; idx < text.length; idx++) {
+      const char = text[idx];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === '\\') {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+      } else if (char === '[') {
+        depth++;
+      } else if (char === ']') {
+        depth--;
+        if (depth === 0) {
+          candidates.push(text.slice(start, idx + 1));
+          break;
+        }
+      }
+    }
+
+    if (depth > 0) {
+      candidates.push(text.slice(start));
+      break;
+    }
+  }
+
+  return candidates;
+}
+
+export function parseVerifierJsonIssues(result: string): VerificationIssue[] {
+  for (const candidate of collectJsonArrayCandidates(result)) {
+    for (const jsonStr of [candidate, repairTruncatedJson(candidate)]) {
+      try {
+        const parsed = JSON.parse(jsonStr);
+        if (Array.isArray(parsed)) return parsed as VerificationIssue[];
+      } catch {
+        // Try the next candidate. Verifier output is advisory, so malformed
+        // prose-adjacent JSON should not create noisy runtime warnings.
+      }
+    }
+  }
+
+  return [];
+}
+
 /**
  * Run LLM-based verification using a lightweight model (haiku).
  * Validates evidence support, severity consistency, and completeness.
@@ -864,37 +924,17 @@ ${conclusionPreview}${truncationNote}
       return undefined;
     }
 
-    // Parse JSON from the result. LLM responses may be truncated mid-JSON,
-    // so we attempt repair (close unclosed strings/brackets) before giving up.
-    // Use greedy match first; fall back to `[` without closing `]` (truncated).
-    const jsonMatch = result.match(/\[[\s\S]*\]/) || result.match(/\[[\s\S]+/);
-    if (jsonMatch) {
-      let jsonStr = jsonMatch[0];
-      let parsed: VerificationIssue[];
-      try {
-        parsed = JSON.parse(jsonStr);
-      } catch {
-        // Attempt repair: close unclosed strings and brackets
-        jsonStr = repairTruncatedJson(jsonStr);
-        try {
-          parsed = JSON.parse(jsonStr);
-        } catch (repairErr) {
-          console.warn('[ClaudeVerifier] JSON repair failed:', (repairErr as Error).message);
-          return [];
-        }
-      }
-      // LLM may return non-standard severity levels (e.g. "critical", "high", "medium")
-      // that don't match the VerificationIssue type union ('error' | 'warning').
-      // Normalize to prevent these from silently bypassing the correction retry logic
-      // (which filters on severity === 'error').
-      return parsed
-        .filter(i => i.type && i.message)
-        .map(i => ({
-          ...i,
-          severity: normalizeLLMSeverity(i.severity),
-        }));
-    }
-    return [];
+    const parsed = parseVerifierJsonIssues(result);
+    // LLM may return non-standard severity levels (e.g. "critical", "high", "medium")
+    // that don't match the VerificationIssue type union ('error' | 'warning').
+    // Normalize to prevent these from silently bypassing the correction retry logic
+    // (which filters on severity === 'error').
+    return parsed
+      .filter(i => i.type && i.message)
+      .map(i => ({
+        ...i,
+        severity: normalizeLLMSeverity(i.severity),
+      }));
   } catch (err) {
     console.warn('[ClaudeVerifier] LLM verification failed (graceful degradation):', (err as Error).message);
     return undefined;
@@ -966,6 +1006,7 @@ export function generateCorrectionPrompt(
   const errorIssues = issues.filter(i => i.severity === 'error');
   const warningIssues = issues.filter(i => i.severity === 'warning');
   const finalReportContractGuidance = renderFinalReportContractGuidance(sceneType, outputLanguage);
+  const originalConclusionForCorrection = originalConclusion.substring(0, 12_000);
 
   const issueList = errorIssues
     .map((i, idx) => `${idx + 1}. **[ERROR]** ${i.message}`)
@@ -991,13 +1032,15 @@ The analysis has collected enough data, but the final conclusion was not generat
 ${issueList ? `Issues to resolve:\n${issueList}\n` : ''}${warningList}
 
 ### Requirements
-1. Resolve all unfinished bookkeeping first: unresolved hypotheses must call resolve_hypothesis, and unfinished phases must call update_plan_phase.
+1. Address unfinished bookkeeping in the report text only: mark unresolved hypotheses as confirmed, rejected, or unknown from the already collected evidence, and explain any skipped phase as a limitation. Do not call tools during correction.
 2. Then output a complete structured analysis report in English. It must satisfy the active scene's Final Report Contract:
 ${finalReportContractGuidance}
 3. Use the data already collected. Do not rerun invoke_skill just to fetch overview data again.
+4. Do not label the report as "corrected", "revised", or "verification feedback". Do not put verifier diagnostics, plan deviations, missing tool lists, tool-not-executed claims, or internal phase IDs at the top of the report; if a limitation is user-relevant, summarize it briefly inside the relevant evidence or limitations section.
+5. Do not claim that a tool or Skill was not executed. If evidence is limited, describe the confidence/limitation without asserting tool execution history.
 
 ### Existing Reasoning Context
-${originalConclusion.substring(0, 2000)}
+${originalConclusionForCorrection}
 
 Output the complete report directly in English.`;
     }
@@ -1009,14 +1052,16 @@ Output the complete report directly in English.`;
 ${issueList ? `待解决问题：\n${issueList}\n` : ''}${warningList}
 
 ### 要求
-1. **先解决所有未完成事项**（未解决的假设请调用 resolve_hypothesis，未完成的阶段请 update_plan_phase）
+1. **只在报告正文中处理未完成事项**（根据已收集证据把未解决假设标记为 confirmed / rejected / unknown，并把跳过阶段写成限制说明；修正阶段不要调用工具）
 2. **然后直接输出完整的结构化分析报告**，必须满足当前场景的 Final Report Contract：
 ${finalReportContractGuidance}
 3. **使用已收集的数据**，不需要重新调用 invoke_skill 获取概览数据
 4. 报告必须完整但克制；不要逐行复制已展示的大表，只引用关键行和 evidence/source。不要为了压缩长度裁剪关键结论或证据。
+5. 不要把报告标成“修正版/修正后/验证反馈”，不要在报告开头输出 verifier 诊断、计划执行偏差、缺失工具列表、工具未执行断言或内部 phase id；如果限制对用户有意义，只在对应证据/限制小节中简短说明。
+6. 不要声称某个工具或 Skill 未执行；如果证据有限，只说明置信度或限制，不要编造工具执行历史。
 
 ### 已有推理上下文
-${originalConclusion.substring(0, 2000)}
+${originalConclusionForCorrection}
 
 请直接输出完整报告。`;
   }
@@ -1032,16 +1077,18 @@ ${issueList}${warningList}
 1. Re-check the analysis conclusion.
 2. Fix every ERROR issue:
    - **missing_evidence**: Add concrete data evidence for CRITICAL/HIGH findings, including timestamps, numbers, or tool results.
-   - **plan_deviation**: Execute unfinished plan phases or explicitly explain why they were skipped.
+   - **plan_deviation**: Address unfinished plan phases in the report text or explicitly explain why they were skipped. Do not call update_plan_phase during correction.
    - **missing_reasoning**: Produce a complete analysis conclusion.
-   - **unresolved_hypothesis**: Call resolve_hypothesis and mark every unresolved hypothesis as confirmed or rejected.
+   - **unresolved_hypothesis**: Mark every unresolved hypothesis as confirmed, rejected, or unknown from the already collected evidence.
 3. Output the corrected complete conclusion in English and satisfy the active scene's Final Report Contract:
 ${finalReportContractGuidance}
+4. Do not label the report as "corrected", "revised", or "verification feedback". Do not put verifier diagnostics, plan deviations, missing tool lists, tool-not-executed claims, or internal phase IDs at the top of the report; if a limitation is user-relevant, summarize it briefly inside the relevant evidence or limitations section.
+5. Do not claim that a tool or Skill was not executed. If evidence is limited, describe the confidence/limitation without asserting tool execution history.
 
 ### Original Conclusion To Fix
-${originalConclusion.substring(0, 2000)}
+${originalConclusionForCorrection}
 
-Output only the corrected conclusion. If extra data is needed, call tools to fetch it.`;
+Output only the corrected conclusion. Do not call tools or rerun data queries during this correction; use the already collected evidence and explicitly mark anything that remains unknown.`;
   }
 
   return `## 验证反馈 — 请修正以下问题
@@ -1054,17 +1101,19 @@ ${issueList}${warningList}
 1. 重新审视你的分析结论
 2. 针对每个 ERROR 问题进行修正：
    - **missing_evidence**: 为 CRITICAL/HIGH 发现补充具体数据证据（时间戳、数值、工具调用结果）
-   - **plan_deviation**: 执行未完成的计划阶段，或明确说明跳过原因
+   - **plan_deviation**: 在报告正文中处理未完成计划阶段，或明确说明跳过原因；修正阶段不要调用 update_plan_phase
    - **missing_reasoning**: 补充完整的分析结论
-   - **unresolved_hypothesis**: 调用 resolve_hypothesis 将所有未解决假设标记为 confirmed 或 rejected
+   - **unresolved_hypothesis**: 根据已收集证据把未解决假设标记为 confirmed / rejected / unknown
 3. 输出修正后的完整结论，并满足当前场景的 Final Report Contract：
 ${finalReportContractGuidance}
 4. 结论必须完整但克制；不要逐行复制已展示的大表，只引用关键行和 evidence/source。不要为了压缩长度裁剪关键结论或证据。
+5. 不要把报告标成“修正版/修正后/验证反馈”，不要在报告开头输出 verifier 诊断、计划执行偏差、缺失工具列表、工具未执行断言或内部 phase id；如果限制对用户有意义，只在对应证据/限制小节中简短说明。
+6. 不要声称某个工具或 Skill 未执行；如果证据有限，只说明置信度或限制，不要编造工具执行历史。
 
 ### 原始结论（需修正）
-${originalConclusion.substring(0, 2000)}
+${originalConclusionForCorrection}
 
-请直接输出修正后的结论，不要重复描述问题。如需额外数据，可以调用工具获取。`;
+请直接输出修正后的结论，不要重复描述问题。修正阶段不要调用工具或重新查询数据；只能使用已经收集到的证据，仍缺失的信息请明确标注为未知/待确认。`;
 }
 
 /**
@@ -1087,6 +1136,10 @@ export async function verifyConclusion(
     verifierTimeoutMs?: number;
     /** User-facing output language for verifier progress messages. */
     outputLanguage?: OutputLanguage;
+    /** Original user query, used for conditional scene contract checks. */
+    query?: string;
+    /** Suppress user-facing progress when the caller will defer non-blocking issues to final gates. */
+    emitIssueProgress?: boolean;
   } = {},
 ): Promise<VerificationResult> {
   const startTime = Date.now();
@@ -1110,6 +1163,24 @@ export async function verifyConclusion(
   if (sceneType && sceneType !== 'general') {
     const sceneIssues = verifySceneCompleteness(sceneType, findings, conclusion, plan?.toolCallLog ?? []);
     heuristicIssues.push(...sceneIssues);
+
+    const contractIssue = assessFinalReportContractCompleteness({
+      conclusion,
+      query: options.query,
+      sceneType,
+    });
+    if (contractIssue) {
+      const missingText = contractIssue.missingLabels.join('、');
+      heuristicIssues.push({
+        type: 'missing_reasoning',
+        severity: 'error',
+        message: localize(
+          outputLanguage,
+          `最终报告缺失 Final Report Contract 必需结构：${missingText}。请用清晰同名小节补齐，尤其不要把必需结构放在长树状图或附录之后。`,
+          `The final report is missing required Final Report Contract structure: ${missingText}. Add clear matching sections before long trees or appendices.`,
+        ),
+      });
+    }
   }
 
   // Layer 3: LLM verification (conditional skip — Phase 1-B optimization)
@@ -1147,15 +1218,15 @@ export async function verifyConclusion(
   }
 
   // Emit SSE warnings for issues
-  if (emitUpdate && allIssues.length > 0) {
+  if (emitUpdate && options.emitIssueProgress !== false && allIssues.length > 0) {
     emitUpdate({
       type: 'progress',
       content: {
         phase: 'concluding',
         message: localize(
           outputLanguage,
-          '质量校验发现报告仍需补齐，系统已记录详细诊断并将尝试自动修正。',
-          'Quality verification found report gaps; detailed diagnostics were recorded and the system will try to correct them automatically.',
+          '质量校验记录了报告改进项，系统会根据严重程度决定自动修正或交由最终门禁处理。',
+          'Quality verification recorded report improvement items; the system will decide whether to correct automatically or defer to final gates.',
         ),
       },
       timestamp: Date.now(),

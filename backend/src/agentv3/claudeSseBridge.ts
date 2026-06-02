@@ -149,6 +149,28 @@ export function createSseBridge(
       return;
     }
 
+    // Claude Agent SDK emits control-plane status messages while waiting for
+    // model responses. They do not represent user-visible analysis progress.
+    if (msg.type === 'system' && msg.subtype === 'status') {
+      return;
+    }
+
+    if (msg.type === 'rate_limit_event') {
+      emit({
+        type: 'progress',
+        content: {
+          phase: 'analyzing',
+          message: localize(
+            language,
+            'AI 服务请求被限流，SDK 正在等待后续响应...',
+            'AI service request was rate limited; the SDK is waiting for the next response...',
+          ),
+        },
+        timestamp: now,
+      });
+      return;
+    }
+
     if (msg.type === 'stream_event') {
       const event = msg.event;
       if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta') {

@@ -41,6 +41,8 @@ const SENSITIVE_CONNECTION_FIELDS: Array<keyof ProviderConfig['connection']> = [
   'claudeApiKey',
   'claudeAuthToken',
   'openaiApiKey',
+  'piAgentCoreModelJson',
+  'openCodeModelJson',
   'awsBearerToken',
   'awsAccessKeyId',
   'awsSecretAccessKey',
@@ -147,6 +149,8 @@ function parseRuntimeEnv(value: string | undefined): AgentRuntimeKind | undefine
   switch (value) {
     case 'claude-agent-sdk':
     case 'openai-agents-sdk':
+    case 'pi-agent-core':
+    case 'opencode':
       return value;
     default:
       return undefined;
@@ -169,9 +173,10 @@ function pickResolvedTimeouts(
 }
 
 function inferBaseUrl(runtimeKind: AgentRuntimeKind, env: Record<string, string>): string | undefined {
-  if (runtimeKind === 'openai-agents-sdk') {
+  if (runtimeKind === 'openai-agents-sdk' || runtimeKind === 'opencode') {
     return env.OPENAI_BASE_URL;
   }
+  if (runtimeKind === 'pi-agent-core') return undefined;
   return env.ANTHROPIC_BASE_URL || env.ANTHROPIC_BEDROCK_BASE_URL;
 }
 
@@ -180,7 +185,9 @@ function envRuntimeSnapshot(runtimeOverride?: AgentRuntimeKind): ProviderRuntime
     ?? parseRuntimeEnv(process.env.SMARTPERFETTO_AGENT_RUNTIME)
     ?? 'claude-agent-sdk';
   const env = pickEnv(process.env, [...PROVIDER_RUNTIME_ENV_KEYS, ...SECRET_ENV_KEYS]);
-  const timeoutPrefix = runtimeKind === 'openai-agents-sdk' ? 'OPENAI' : 'CLAUDE';
+  const timeoutPrefix = runtimeKind === 'openai-agents-sdk' || runtimeKind === 'opencode'
+    ? 'OPENAI'
+    : 'CLAUDE';
   const resolvedTimeouts: ProviderRuntimeSnapshot['resolvedTimeouts'] = {};
   const timeoutMap: Array<[keyof ProviderRuntimeSnapshot['resolvedTimeouts'], string]> = [
     ['fullPerTurnMs', `${timeoutPrefix}_FULL_PER_TURN_MS`],
@@ -196,7 +203,11 @@ function envRuntimeSnapshot(runtimeOverride?: AgentRuntimeKind): ProviderRuntime
     if (Number.isFinite(parsed)) resolvedTimeouts[key] = parsed;
   }
 
-  const modelPrefix = runtimeKind === 'openai-agents-sdk' ? 'OPENAI' : 'CLAUDE';
+  const modelPrefix = runtimeKind === 'openai-agents-sdk' || runtimeKind === 'opencode'
+    ? 'OPENAI'
+    : runtimeKind === 'claude-agent-sdk'
+      ? 'CLAUDE'
+      : undefined;
   const nonSecretEnv = pickEnv(process.env, PROVIDER_RUNTIME_ENV_KEYS);
   return {
     version: 1,
@@ -204,8 +215,8 @@ function envRuntimeSnapshot(runtimeOverride?: AgentRuntimeKind): ProviderRuntime
     providerType: 'env',
     runtimeKind,
     resolvedModels: {
-      primary: env[`${modelPrefix}_MODEL`],
-      light: env[`${modelPrefix}_LIGHT_MODEL`],
+      primary: modelPrefix ? env[`${modelPrefix}_MODEL`] : undefined,
+      light: modelPrefix ? env[`${modelPrefix}_LIGHT_MODEL`] : undefined,
       subAgent: runtimeKind === 'claude-agent-sdk'
         ? env.CLAUDE_SUB_AGENT_MODEL
         : undefined,

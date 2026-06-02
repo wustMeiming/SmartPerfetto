@@ -24,7 +24,10 @@ import {
 import { EnhancedSessionContext } from '../agent/context/enhancedSessionContext';
 import { FocusStore, FocusStoreSnapshot } from '../agent/context/focusStore';
 import { TraceAgentState } from '../agent/state/traceAgentState';
-import type { SessionStateSnapshot } from '../agentv3/sessionStateSnapshot';
+import {
+  normalizeSessionStateSnapshot,
+  type SessionStateSnapshot,
+} from '../agentv3/sessionStateSnapshot';
 import { backendDataPath } from '../runtimePaths';
 import { applyEnterpriseMinimalSchema } from './enterpriseSchema';
 import { resolveEnterpriseDbPath } from './enterpriseDb';
@@ -739,14 +742,14 @@ export class SessionPersistenceService {
 
       // V2 path: return new snapshot directly
       if (session.metadata.sessionStateSnapshot) {
-        return session.metadata.sessionStateSnapshot;
+        return normalizeSessionStateSnapshot(session.metadata.sessionStateSnapshot);
       }
 
       // V1 fallback: reconstruct from runtimeArraysSnapshot
       const legacy = session.metadata.runtimeArraysSnapshot;
       if (!legacy) return null;
 
-      return {
+      return normalizeSessionStateSnapshot({
         version: 1,
         snapshotTimestamp: session.updatedAt,
         sessionId: session.id,
@@ -765,7 +768,7 @@ export class SessionPersistenceService {
         architecture: session.metadata.architectureSnapshot,
         runSequence: 0,       // Not stored in legacy format
         conversationOrdinal: 0, // Not stored in legacy format
-      };
+      });
     } catch (error) {
       console.error('[SessionPersistence] Failed to load session state snapshot:', error);
       return null;

@@ -478,6 +478,7 @@ interface SqlErrorFixPair {
  */
 /** TTL for error-fix pairs: 30 days. Older pairs may reference outdated schemas. */
 const ERROR_FIX_PAIR_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const RECENT_COMPLETED_PHASE_ATTRIBUTION_WINDOW_MS = 15 * 60 * 1000;
 
 /**
  * P0-G2: ReAct reasoning nudge — appended to successful data tool results.
@@ -1340,7 +1341,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             .filter(p =>
               p.status === 'completed' &&
               typeof p.completedAt === 'number' &&
-              Date.now() - p.completedAt <= 5 * 60 * 1000
+              Date.now() - p.completedAt <= RECENT_COMPLETED_PHASE_ATTRIBUTION_WINDOW_MS
             )
             .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0)),
           toolName,
@@ -1386,7 +1387,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         .filter(p =>
           p.status === 'completed' &&
           typeof p.completedAt === 'number' &&
-          Date.now() - p.completedAt <= 5 * 60 * 1000 &&
+          Date.now() - p.completedAt <= RECENT_COMPLETED_PHASE_ATTRIBUTION_WINDOW_MS &&
           phaseHasToolExpectation(p) &&
           phaseMatchesToolInput(p, toolName, input)
         )
@@ -1400,6 +1401,29 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             outputLanguage,
             `当前没有明确进行中的 plan 阶段；已绑定到最近完成且匹配工具的阶段 "${phase.name}"，需要核对。`,
             `No plan phase is explicitly in progress; bound to the most recently completed matching phase "${phase.name}" and should be verified.`,
+          ),
+        };
+      }
+      const semanticRecentCompleted = inferSemanticPhase(
+        plan.phases
+          .filter(p =>
+            p.status === 'completed' &&
+            typeof p.completedAt === 'number' &&
+            Date.now() - p.completedAt <= RECENT_COMPLETED_PHASE_ATTRIBUTION_WINDOW_MS
+          )
+          .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0)),
+        toolName,
+        input,
+      );
+      if (semanticRecentCompleted &&
+        phaseSemanticScore(semanticRecentCompleted, toolName, input) >= 50) {
+        return {
+          phase: semanticRecentCompleted,
+          attribution: 'inferred',
+          warning: localize(
+            outputLanguage,
+            `当前没有明确进行中的 plan 阶段；已按证据语义绑定到最近完成的阶段 "${semanticRecentCompleted.name}"，需要核对。`,
+            `No plan phase is explicitly in progress; bound to the recently completed phase "${semanticRecentCompleted.name}" by evidence semantics and should be verified.`,
           ),
         };
       }
@@ -1443,8 +1467,38 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       const inferredPhase = matchingPending.length === 1
         ? matchingPending[0]
         : inferSemanticPhase(matchingPending, toolName, input);
+      const recentCompleted = plan.phases
+        .filter(p =>
+          p.status === 'completed' &&
+          typeof p.completedAt === 'number' &&
+          Date.now() - p.completedAt <= RECENT_COMPLETED_PHASE_ATTRIBUTION_WINDOW_MS &&
+          phaseHasToolExpectation(p) &&
+          phaseMatchesToolInput(p, toolName, input)
+        )
+        .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+      const recentCompletedPhase = recentCompleted.length === 1
+        ? recentCompleted[0]
+        : inferSemanticPhase(recentCompleted, toolName, input);
+      const recentCompletedScore = recentCompletedPhase
+        ? phaseSemanticScore(recentCompletedPhase, toolName, input)
+        : 0;
+      const inferredSemanticScore = inferredPhase
+        ? phaseSemanticScore(inferredPhase, toolName, input)
+        : 0;
+      if (recentCompletedPhase &&
+        recentCompletedScore >= 50 &&
+        (!inferredPhase || recentCompletedScore >= inferredSemanticScore + 30)) {
+        return {
+          phase: recentCompletedPhase,
+          attribution: 'inferred',
+          warning: localize(
+            outputLanguage,
+            `工具结果语义匹配刚完成的阶段 "${recentCompletedPhase.name}"，但当前已进入阶段 "${phase.name}"；已按并发工具回填绑定。`,
+            `Tool result semantically matched recently completed phase "${recentCompletedPhase.name}" while phase "${phase.name}" is now active; bound as concurrent-tool backfill.`,
+          ),
+        };
+      }
       if (inferredPhase) {
-        const inferredSemanticScore = phaseSemanticScore(inferredPhase, toolName, input);
         if (activeSemanticScore >= 50 && inferredSemanticScore < activeSemanticScore + 30) {
           return { phase, attribution: 'active' };
         }
@@ -1457,6 +1511,20 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       );
       if (semanticPending && phaseSemanticScore(semanticPending, toolName, input) >= 50) {
         return bindPendingPhaseForEvidence(semanticPending, toolName, input);
+      }
+      if (recentCompletedPhase) {
+        const recentSemanticScore = recentCompletedScore;
+        if (recentSemanticScore >= 50 && recentSemanticScore >= activeSemanticScore + 30) {
+          return {
+            phase: recentCompletedPhase,
+            attribution: 'inferred',
+            warning: localize(
+              outputLanguage,
+              `工具结果语义匹配刚完成的阶段 "${recentCompletedPhase.name}"，但当前已进入阶段 "${phase.name}"；已按并发工具回填绑定。`,
+              `Tool result semantically matched recently completed phase "${recentCompletedPhase.name}" while phase "${phase.name}" is now active; bound as concurrent-tool backfill.`,
+            ),
+          };
+        }
       }
       if (activeSemanticScore >= 50) {
         return { phase, attribution: 'active' };

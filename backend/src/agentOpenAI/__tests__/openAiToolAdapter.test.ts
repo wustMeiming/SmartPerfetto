@@ -80,4 +80,16 @@ describe('createOpenAIToolsFromMcpDefinitions', () => {
 
     expect((tools[0] as any).name).toBe('submit_hypothesis');
   });
+
+  it('fails closed when the registry entry is not a Claude SDK-like descriptor', () => {
+    expect(() => createOpenAIToolsFromMcpDefinitions([
+      {
+        name: 'broken_tool',
+        tool: { description: 'missing schema and handler' },
+        exposure: 'public',
+      },
+    ] as any)).toThrow(
+      'Cannot adapt MCP tool broken_tool: unsupported SDK descriptor shape',
+    );
+  });
 });

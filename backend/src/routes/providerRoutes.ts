@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import express from 'express';
-import { getProviderService, officialTemplates } from '../services/providerManager';
+import { getProviderService, isAgentRuntimeKind, officialTemplates } from '../services/providerManager';
 import type { AgentRuntimeKind, ProviderCreateInput, ProviderScope, ProviderUpdateInput } from '../services/providerManager';
 import { testProviderConnection } from '../services/providerManager/connectionTester';
 import { authenticate, requireRequestContext, type RequestContext } from '../middleware/auth';
@@ -179,7 +179,7 @@ router.post('/:id/runtime', (req, res) => {
   try {
     const svc = getProviderService();
     const runtime = req.body?.agentRuntime as AgentRuntimeKind | undefined;
-    if (runtime !== 'claude-agent-sdk' && runtime !== 'openai-agents-sdk') {
+    if (!isAgentRuntimeKind(runtime)) {
       return res.status(400).json({ success: false, error: 'Invalid agentRuntime' });
     }
     const context = requireRequestContext(req);
@@ -230,7 +230,7 @@ router.post('/:id/test', async (req, res) => {
 
 function maskEnvKeys(env: Record<string, string>): Record<string, string> {
   const masked: Record<string, string> = {};
-  const sensitivePatterns = ['KEY', 'TOKEN', 'SECRET'];
+  const sensitivePatterns = ['KEY', 'TOKEN', 'SECRET', 'MODEL_JSON'];
   for (const [k, v] of Object.entries(env)) {
     if (sensitivePatterns.some(p => k.includes(p)) && v.length > 8) {
       masked[k] = `****${v.slice(-4)}`;

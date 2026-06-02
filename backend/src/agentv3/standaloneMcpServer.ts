@@ -35,6 +35,7 @@ import {
   filterByExposure,
   type McpToolDefinition,
 } from './mcpToolRegistry';
+import { createJsonSchemaFromZodRawShape } from '../agentRuntime/runtimeToolSpec';
 
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_NAME = 'smartperfetto';
@@ -65,39 +66,6 @@ export const RPC_ERROR_CODES = {
   INTERNAL_ERROR: -32603,
   TOOL_EXECUTION_FAILED: -32000,
 } as const;
-
-/** Loose shape for the SDK tool object held in the registry —
- * `tool()` from `@anthropic-ai/claude-agent-sdk` returns an opaque
- * descriptor; we only call it via the `handler` it carries.
- *
- * Note (Codex round E P1): `inputSchema` on the SDK descriptor is
- * the Zod raw shape (e.g. `{query: ZodString}`), NOT a JSON
- * Schema. External MCP clients want JSON Schema. We emit a safe
- * permissive `{type: 'object', additionalProperties: true}` for
- * `tools/list` rather than leak the Zod internals; the handler
- * itself will reject malformed args via the Zod parser the SDK
- * wraps around it.
- */
-interface SdkToolLike {
-  description?: string;
-  inputSchema?: unknown;
-  handler?: (args: unknown) => Promise<unknown> | unknown;
-  // Some SDK tool objects expose the handler under different keys
-  // depending on the version. Handle the most common spellings.
-  callback?: (args: unknown) => Promise<unknown> | unknown;
-  fn?: (args: unknown) => Promise<unknown> | unknown;
-}
-
-/** Best-effort handler extraction across SDK versions. */
-function getToolHandler(
-  tool: unknown,
-): ((args: unknown) => Promise<unknown> | unknown) | null {
-  const t = tool as SdkToolLike;
-  if (typeof t.handler === 'function') return t.handler.bind(t);
-  if (typeof t.callback === 'function') return t.callback.bind(t);
-  if (typeof t.fn === 'function') return t.fn.bind(t);
-  return null;
-}
 
 /** Dispatch one JSON-RPC request against the registry. Pure
  * function — no I/O. The stdio loop wraps this and writes the
@@ -165,16 +133,9 @@ export async function dispatch(
         `Tool '${params.name}' is not exposed to external hosts`,
       );
     }
-    const handler = getToolHandler(def.tool);
-    if (!handler) {
-      return rpcError(
-        id,
-        RPC_ERROR_CODES.INTERNAL_ERROR,
-        `Tool '${params.name}' has no callable handler`,
-      );
-    }
     try {
-      const out = await handler(params.arguments ?? {});
+      const args = (params.arguments ?? {}) as Record<string, unknown>;
+      const out = await def.shared.handler(args, {});
       return {jsonrpc: '2.0', id, result: out};
     } catch (err) {
       return rpcError(
@@ -205,15 +166,10 @@ function sdkToolToMcpDescriptor(def: McpToolDefinition): {
   description: string;
   inputSchema: unknown;
 } {
-  const t = def.tool as SdkToolLike;
   return {
     name: def.name,
-    description: def.summary || t.description || '',
-    // Codex round E P1#1: SDK's `inputSchema` is Zod raw shape, not
-    // JSON Schema. Emit a safe permissive descriptor so external MCP
-    // clients see valid JSON Schema; the handler still validates
-    // against the real Zod shape on `tools/call`.
-    inputSchema: {type: 'object', additionalProperties: true},
+    description: def.summary || def.shared.description,
+    inputSchema: createJsonSchemaFromZodRawShape(def.shared.inputSchema),
   };
 }
 

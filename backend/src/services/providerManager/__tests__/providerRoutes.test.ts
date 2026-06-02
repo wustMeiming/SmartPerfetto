@@ -99,7 +99,7 @@ describe('Provider Routes', () => {
     expect(res.body.providers).toEqual([]);
   });
 
-  it('GET /api/v1/providers/templates returns official templates', async () => {
+  it('GET /api/v1/providers/templates returns provider templates including custom runtime entry', async () => {
     const res = await request(app).get('/api/v1/providers/templates');
     expect(res.status).toBe(200);
     expect(res.body.templates.length).toBeGreaterThan(0);
@@ -107,6 +107,14 @@ describe('Provider Routes', () => {
     const xiaomi = res.body.templates.find((template: { type: string }) => template.type === 'xiaomi');
     expect(xiaomi.defaultConnection.claudeBaseUrl).toBe('https://token-plan-sgp.xiaomimimo.com/anthropic');
     expect(xiaomi.defaultConnection.openaiBaseUrl).toBe('https://token-plan-sgp.xiaomimimo.com/v1');
+    const custom = res.body.templates.find((template: { type: string }) => template.type === 'custom');
+    expect(custom).toMatchObject({
+      displayName: 'Custom Provider',
+      requiredFields: [],
+      defaultModels: { primary: '', light: '' },
+      availableModels: [],
+      defaultConnection: { agentRuntime: 'claude-agent-sdk' },
+    });
   });
 
   it('requires provider management permission for provider access in enterprise SSO', async () => {
@@ -201,6 +209,93 @@ describe('Provider Routes', () => {
 
     expect(runtimeRes.status).toBe(400);
     expect(runtimeRes.body.error).toMatch(/does not support openai-agents-sdk/);
+  });
+
+  it('POST /:id/runtime rejects public Pi runtime for non-custom providers', async () => {
+    const createRes = await request(app).post('/api/v1/providers').send({
+      name: 'DeepSeek Dual',
+      category: 'official',
+      type: 'deepseek',
+      models: { primary: 'deepseek-v4-pro', light: 'deepseek-v4-flash' },
+      connection: {
+        apiKey: 'sk-deepseek-test',
+        agentRuntime: 'claude-agent-sdk',
+        claudeBaseUrl: 'https://api.deepseek.com/anthropic',
+        openaiBaseUrl: 'https://api.deepseek.com/v1',
+      },
+    });
+    const id = createRes.body.provider.id;
+
+    const runtimeRes = await request(app)
+      .post(`/api/v1/providers/${id}/runtime`)
+      .send({ agentRuntime: 'pi-agent-core' });
+
+    expect(runtimeRes.status).toBe(400);
+    expect(runtimeRes.body.error).toMatch(/does not support pi-agent-core/);
+  });
+
+  it('creates and activates custom Pi agent-core providers without exposing model JSON', async () => {
+    const createRes = await request(app).post('/api/v1/providers').send({
+      name: 'Pi Custom',
+      category: 'custom',
+      type: 'custom',
+      models: { primary: 'pi-model', light: 'pi-light' },
+      connection: {
+        agentRuntime: 'pi-agent-core',
+        piAgentCoreModulePath: '/tmp/pi-agent-core/dist/index.js',
+        piAgentCoreModelJson: '{"id":"pi-test","provider":"test","apiKey":"sk-pi-secret"}',
+        piAgentCoreSystemPrompt: 'Runtime-only Pi prompt',
+      },
+    });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.provider.connection.agentRuntime).toBe('pi-agent-core');
+    expect(createRes.body.provider.connection.piAgentCoreModelJson).toMatch(/^\*{4}/);
+    expect(JSON.stringify(createRes.body)).not.toContain('sk-pi-secret');
+
+    const id = createRes.body.provider.id;
+    const activateRes = await request(app).post(`/api/v1/providers/${id}/activate`);
+    expect(activateRes.status).toBe(200);
+
+    const effectiveRes = await request(app).get('/api/v1/providers/effective');
+    expect(effectiveRes.status).toBe(200);
+    expect(effectiveRes.body.provider.connection.agentRuntime).toBe('pi-agent-core');
+    expect(effectiveRes.body.env.SMARTPERFETTO_AGENT_RUNTIME).toBe('pi-agent-core');
+    expect(effectiveRes.body.env.SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON).toMatch(/^\*{4}/);
+    expect(JSON.stringify(effectiveRes.body)).not.toContain('sk-pi-secret');
+  });
+
+  it('creates and activates custom OpenCode providers without exposing model JSON', async () => {
+    const createRes = await request(app).post('/api/v1/providers').send({
+      name: 'OpenCode Custom',
+      category: 'custom',
+      type: 'custom',
+      models: { primary: 'opencode-model', light: 'opencode-light' },
+      connection: {
+        agentRuntime: 'opencode',
+        openaiBaseUrl: 'https://example.test/v1',
+        openaiApiKey: 'sk-opencode-openai',
+        openaiProtocol: 'chat_completions',
+        openCodeSdkModulePath: '/tmp/opencode-sdk/dist/index.js',
+        openCodeModelJson: '{"providerID":"smartperfetto","modelID":"opencode-test","apiKey":"sk-opencode-secret"}',
+        openCodeSystemPrompt: 'Runtime-only OpenCode prompt',
+      },
+    });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.provider.connection.agentRuntime).toBe('opencode');
+    expect(createRes.body.provider.connection.openCodeModelJson).toMatch(/^\*{4}/);
+    expect(JSON.stringify(createRes.body)).not.toContain('sk-opencode-secret');
+
+    const id = createRes.body.provider.id;
+    const activateRes = await request(app).post(`/api/v1/providers/${id}/activate`);
+    expect(activateRes.status).toBe(200);
+
+    const effectiveRes = await request(app).get('/api/v1/providers/effective');
+    expect(effectiveRes.status).toBe(200);
+    expect(effectiveRes.body.provider.connection.agentRuntime).toBe('opencode');
+    expect(effectiveRes.body.env.SMARTPERFETTO_AGENT_RUNTIME).toBe('opencode');
+    expect(effectiveRes.body.env.SMARTPERFETTO_OPENCODE_MODEL_JSON).toMatch(/^\*{4}/);
+    expect(effectiveRes.body.env.SMARTPERFETTO_OPENCODE_SDK_MODULE_PATH).toBe('/tmp/opencode-sdk/dist/index.js');
+    expect(JSON.stringify(effectiveRes.body)).not.toContain('sk-opencode-secret');
   });
 
   it('records enterprise audit events for provider management actions', async () => {

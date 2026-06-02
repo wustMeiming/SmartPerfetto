@@ -3,6 +3,7 @@
 // This file is part of SmartPerfetto. See LICENSE for details.
 
 import {describe, it, expect} from '@jest/globals';
+import {z} from 'zod';
 
 import {McpToolRegistry} from '../mcpToolRegistry';
 import {
@@ -18,13 +19,15 @@ import {
 /** Minimal SDK-tool stub that pretends to be the shape `tool()`
  * from `@anthropic-ai/claude-agent-sdk` returns. */
 function stubSdkTool(opts: {
+  name?: string;
   description?: string;
-  inputSchema?: unknown;
+  inputSchema?: z.ZodRawShape;
   handler?: (args: unknown) => Promise<unknown> | unknown;
 }): unknown {
   return {
+    name: opts.name ?? 'stub_tool',
     description: opts.description ?? '',
-    inputSchema: opts.inputSchema ?? {type: 'object'},
+    inputSchema: opts.inputSchema ?? {},
     handler: opts.handler ?? (async () => ({content: [{type: 'text', text: 'ok'}]})),
   };
 }
@@ -86,12 +89,44 @@ describe('dispatch — tools/list', () => {
     expect(tools.map(t => t.name)).toEqual(['alpha']);
   });
 
-  it('descriptor carries name + description + safe permissive inputSchema', async () => {
+  it('does not expose requires_codebase_permission tools to standalone hosts', async () => {
+    const registry = new McpToolRegistry();
+    registry.registerSdk(
+      stubSdkTool({description: 'public alpha'}),
+      'alpha',
+      'public',
+    );
+    registry.registerSdk(
+      stubSdkTool({description: 'source lookup'}),
+      'lookup_app_source',
+      'requires_codebase_permission',
+    );
+
+    const listResp = await dispatch(registry, {
+      jsonrpc: '2.0',
+      id: 20,
+      method: 'tools/list',
+    });
+    const tools = (listResp!.result as {tools: Array<{name: string}>}).tools;
+    expect(tools.map(t => t.name)).toEqual(['alpha']);
+
+    const callResp = await dispatch(registry, {
+      jsonrpc: '2.0',
+      id: 21,
+      method: 'tools/call',
+      params: {name: 'lookup_app_source', arguments: {query: 'MainActivity'}},
+    });
+    expect(callResp!.error?.code).toBe(RPC_ERROR_CODES.METHOD_NOT_FOUND);
+    expect(callResp!.error?.message).toMatch(/not exposed/);
+  });
+
+  it('descriptor carries name + description + JSON Schema from shared input schema', async () => {
     const registry = new McpToolRegistry();
     registry.registerSdk(
       stubSdkTool({
+        name: 'alpha',
         description: 'Describe the thing.',
-        inputSchema: {type: 'object', properties: {q: {type: 'string'}}},
+        inputSchema: {q: z.string()},
       }),
       'alpha',
       'public',
@@ -108,12 +143,10 @@ describe('dispatch — tools/list', () => {
     }>;
     expect(tools[0].name).toBe('alpha');
     expect(tools[0].description).toBe('Describe the thing.');
-    // Codex round E P1#1: SDK's inputSchema is Zod raw shape, not
-    // JSON Schema. We emit a safe permissive descriptor — the
-    // handler still validates against the Zod schema on tools/call.
-    expect(tools[0].inputSchema).toEqual({
+    expect(tools[0].inputSchema).toMatchObject({
       type: 'object',
-      additionalProperties: true,
+      properties: {q: {type: 'string'}},
+      required: ['q'],
     });
   });
 

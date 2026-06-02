@@ -24,7 +24,7 @@
         "tests/**/*.ts"
       ],
       "project": ["package.json", "src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"],
-      "ignoreDependencies": ["jest", "tsx"],
+      "ignoreDependencies": ["@earendil-works/pi-agent-core", "jest", "tsx"],
       "ignoreBinaries": ["jest", "tsx"]
     }
   },

@@ -48,8 +48,17 @@ export function tool(
   description: string,
   schema: Record<string, any>,
   handler: (...args: any[]) => any,
+  options?: { annotations?: Record<string, unknown>; _meta?: Record<string, unknown> },
 ): any {
-  return { name, description, schema, handler };
+  return {
+    name,
+    description,
+    inputSchema: schema,
+    schema,
+    handler,
+    annotations: options?.annotations,
+    _meta: options?._meta,
+  };
 }
 
 /** Mock createSdkMcpServer — returns a config object. */

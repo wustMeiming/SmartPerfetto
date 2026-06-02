@@ -201,6 +201,77 @@ describe('Provider connection tester', () => {
     expect(result.modelVerified).toBe(false);
     expect(result.error).toContain('matches multiple installed tags');
   });
+
+  it('validates custom Pi Agent Core providers locally without network fetch', async () => {
+    globalThis.fetch = jest.fn() as any;
+
+    const result = await testProviderConnection(customPiProvider());
+
+    expect(result).toMatchObject({
+      success: true,
+      modelVerified: false,
+      error: 'Pi Agent Core provider configuration is syntactically valid; runtime smoke runs during analysis.',
+    });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('fails custom Pi Agent Core providers with invalid model JSON', async () => {
+    const result = await testProviderConnection(customPiProvider({
+      connection: {
+        agentRuntime: 'pi-agent-core',
+        piAgentCoreModelJson: '{"id":',
+      },
+    }));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Pi Agent Core model JSON is invalid');
+  });
+
+  it('validates custom OpenCode providers with model JSON locally without network fetch', async () => {
+    globalThis.fetch = jest.fn() as any;
+
+    const result = await testProviderConnection(customOpenCodeProvider());
+
+    expect(result).toMatchObject({
+      success: true,
+      modelVerified: false,
+      error: 'OpenCode provider configuration is syntactically valid; runtime smoke runs during analysis.',
+    });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('accepts custom OpenCode providers backed by OpenAI-compatible fields', async () => {
+    const result = await testProviderConnection(customOpenCodeProvider({
+      models: {
+        primary: 'opencode-model',
+        light: 'opencode-light',
+      },
+      connection: {
+        agentRuntime: 'opencode',
+        openaiBaseUrl: 'https://example.test/v1',
+        openaiApiKey: 'sk-test',
+        openaiProtocol: 'chat_completions',
+      },
+    }));
+
+    expect(result).toMatchObject({
+      success: true,
+      modelVerified: false,
+      error: 'OpenCode will use the OpenAI-compatible provider fields through its server runtime.',
+    });
+  });
+
+  it('fails custom OpenCode providers with invalid model JSON', async () => {
+    const result = await testProviderConnection(customOpenCodeProvider({
+      connection: {
+        agentRuntime: 'opencode',
+        openCodeModelJson: '{"modelID":',
+      },
+    }));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('OpenCode model JSON is invalid');
+  });
 });
 
 function openAIProvider(): ProviderConfig {
@@ -263,6 +334,48 @@ function ollamaProvider(overrides: Partial<ProviderConfig> = {}): ProviderConfig
       openaiBaseUrl: 'http://localhost:11434/v1',
       agentRuntime: 'openai-agents-sdk',
       openaiProtocol: 'chat_completions',
+    },
+    ...overrides,
+  };
+}
+
+function customPiProvider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
+  return {
+    id: 'custom-pi-provider-test',
+    name: 'Custom Pi Provider Test',
+    category: 'custom',
+    type: 'custom',
+    isActive: false,
+    createdAt: '2026-05-08T00:00:00.000Z',
+    updatedAt: '2026-05-08T00:00:00.000Z',
+    models: {
+      primary: 'pi-model',
+      light: 'pi-light',
+    },
+    connection: {
+      agentRuntime: 'pi-agent-core',
+      piAgentCoreModelJson: '{"id":"pi-test","provider":"test"}',
+    },
+    ...overrides,
+  };
+}
+
+function customOpenCodeProvider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
+  return {
+    id: 'custom-opencode-provider-test',
+    name: 'Custom OpenCode Provider Test',
+    category: 'custom',
+    type: 'custom',
+    isActive: false,
+    createdAt: '2026-05-08T00:00:00.000Z',
+    updatedAt: '2026-05-08T00:00:00.000Z',
+    models: {
+      primary: 'opencode-model',
+      light: 'opencode-light',
+    },
+    connection: {
+      agentRuntime: 'opencode',
+      openCodeModelJson: '{"providerID":"smartperfetto","modelID":"opencode-test"}',
     },
     ...overrides,
   };

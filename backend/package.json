@@ -132,5 +132,11 @@
     "tsx": "^4.22.3",
     "typescript": "^5.9.3",
     "yaml": "^2.9.0"
+  },
+  "optionalDependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.48",
+    "@earendil-works/pi-agent-core": "^0.78.0",
+    "@opencode-ai/sdk": "^1.15.13",
+    "opencode-ai": "^1.15.13"
   }
 }

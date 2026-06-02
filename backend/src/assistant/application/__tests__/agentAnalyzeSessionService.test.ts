@@ -600,11 +600,16 @@ describe('AgentAnalyzeSessionService session continuity', () => {
       analysisPlan: null,
       planHistory: [],
       uncertaintyFlags: [],
-      agentRuntimeKind: 'openai-agents-sdk',
-      agentRuntimeProviderId: provider.id,
-      agentRuntimeProviderSnapshotHash: originalHash,
-      sdkSessionId: 'sdk-response-old',
-      openAILastResponseId: 'sdk-response-old',
+      engineState: {
+        kind: 'openai-agents-sdk',
+        provider: {
+          providerId: provider.id,
+          providerSnapshotHash: originalHash,
+        },
+        openai: {
+          lastResponseId: 'sdk-response-old',
+        },
+      },
       runSequence: 0,
       conversationOrdinal: 0,
     });
@@ -670,8 +675,14 @@ describe('AgentAnalyzeSessionService session continuity', () => {
       analysisPlan: null,
       planHistory: [],
       uncertaintyFlags: [],
-      agentRuntimeKind: 'openai-agents-sdk',
-      agentRuntimeProviderId: null,
+      engineState: {
+        kind: 'openai-agents-sdk',
+        provider: {
+          providerId: null,
+          providerSnapshotHash: null,
+        },
+        openai: {},
+      },
       runSequence: 0,
       conversationOrdinal: 0,
     });

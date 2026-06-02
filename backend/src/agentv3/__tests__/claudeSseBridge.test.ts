@@ -2,7 +2,7 @@
 // Copyright (C) 2024-2026 Gracker (Chris)
 // This file is part of SmartPerfetto. See LICENSE for details.
 
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import { createSseBridge } from '../claudeSseBridge';
 import type { StreamingUpdate } from '../../agent/types';
 
@@ -81,6 +81,39 @@ describe('createSseBridge', () => {
         message: expect.stringContaining('results may be incomplete'),
       }),
     }));
+  });
+
+  it('handles SDK status and rate-limit control messages without unhandled log noise', () => {
+    const updates: StreamingUpdate[] = [];
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const bridge = createSseBridge((update) => updates.push(update));
+
+    try {
+      bridge.handleMessage({
+        type: 'system',
+        subtype: 'status',
+        status: 'requesting',
+        uuid: 'request-1',
+        session_id: 'sdk-session-1',
+      });
+      bridge.handleMessage({
+        type: 'rate_limit_event',
+        retry_after_ms: 1000,
+      });
+
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(updates).toEqual([
+        expect.objectContaining({
+          type: 'progress',
+          content: expect.objectContaining({
+            phase: 'analyzing',
+            message: expect.stringContaining('限流'),
+          }),
+        }),
+      ]);
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 
   it('can flush pending streamed answer text when a stream is cancelled before assistant/result', () => {

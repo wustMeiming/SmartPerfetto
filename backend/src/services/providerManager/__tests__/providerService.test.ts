@@ -62,12 +62,16 @@ describe('ProviderService', () => {
           claudeApiKey: 'sk-ant-runtime123456',
           claudeAuthToken: 'provider-token-123456',
           openaiApiKey: 'sk-openai-runtime123456',
+          piAgentCoreModelJson: '{"apiKey":"sk-pi-runtime123456","id":"pi-test"}',
+          openCodeModelJson: '{"apiKey":"sk-opencode-runtime123456","modelID":"opencode-test"}',
         },
       });
       const list = svc.list();
       expect(list[0].connection.claudeApiKey).toMatch(/^\*{4}/);
       expect(list[0].connection.claudeAuthToken).toMatch(/^\*{4}/);
       expect(list[0].connection.openaiApiKey).toMatch(/^\*{4}/);
+      expect(list[0].connection.piAgentCoreModelJson).toMatch(/^\*{4}/);
+      expect(list[0].connection.openCodeModelJson).toMatch(/^\*{4}/);
     });
 
     it('masks sensitive custom headers and env overrides in returned providers', () => {
@@ -270,6 +274,18 @@ describe('ProviderService', () => {
       })).toThrow(/does not support claude-agent-sdk/);
     });
 
+    it('rejects public Pi runtime for non-custom provider types', () => {
+      expect(() => svc.create({
+        ...validInput,
+        type: 'deepseek',
+        connection: {
+          apiKey: 'sk-deepseek-test',
+          agentRuntime: 'pi-agent-core',
+          piAgentCoreModelJson: '{"id":"pi-test","provider":"test"}',
+        },
+      })).toThrow(/does not support pi-agent-core/);
+    });
+
     it('rejects stale non-SDK runtime overrides on providers', () => {
       expect(() => svc.resolveAgentRuntime({
         ...validInput,
@@ -296,6 +312,60 @@ describe('ProviderService', () => {
       expect(env.OPENAI_MODEL).toBe('gpt-5.5');
       expect(env.OPENAI_LIGHT_MODEL).toBe('gpt-5.4-mini');
       expect(env.ANTHROPIC_BASE_URL).toBeUndefined();
+      expect(env.CLAUDE_MODEL).toBeUndefined();
+    });
+
+    it('returns Pi agent-core env vars for custom Pi providers without Claude/OpenAI model env', () => {
+      const p = svc.create({
+        ...validInput,
+        type: 'custom',
+        models: { primary: 'pi-model', light: 'pi-light' },
+        connection: {
+          agentRuntime: 'pi-agent-core',
+          piAgentCoreModulePath: '/tmp/pi-agent-core/dist/index.js',
+          piAgentCoreModelJson: '{"id":"pi-test","provider":"test","apiKey":"sk-pi-secret"}',
+          piAgentCoreSystemPrompt: 'Runtime-only Pi prompt',
+        },
+      });
+      svc.activate(p.id);
+      const env = svc.getEffectiveEnv()!;
+
+      expect(env.SMARTPERFETTO_AGENT_RUNTIME).toBe('pi-agent-core');
+      expect(env.SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH).toBe('/tmp/pi-agent-core/dist/index.js');
+      expect(env.SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON).toBe('{"id":"pi-test","provider":"test","apiKey":"sk-pi-secret"}');
+      expect(env.SMARTPERFETTO_PI_AGENT_CORE_SYSTEM_PROMPT).toBe('Runtime-only Pi prompt');
+      expect(env.OPENAI_MODEL).toBeUndefined();
+      expect(env.OPENAI_API_KEY).toBeUndefined();
+      expect(env.CLAUDE_MODEL).toBeUndefined();
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    });
+
+    it('returns OpenCode env vars for custom OpenCode providers', () => {
+      const p = svc.create({
+        ...validInput,
+        type: 'custom',
+        models: { primary: 'opencode-primary', light: 'opencode-light' },
+        connection: {
+          agentRuntime: 'opencode',
+          openaiBaseUrl: 'https://example.test/v1',
+          openaiApiKey: 'sk-opencode-openai',
+          openCodeSdkModulePath: '/tmp/opencode-sdk/dist/index.js',
+          openCodeModelJson: '{"providerID":"smartperfetto","modelID":"opencode-test","apiKey":"sk-opencode-secret"}',
+          openCodeSystemPrompt: 'Runtime-only OpenCode prompt',
+          openaiProtocol: 'chat_completions',
+        },
+      });
+      svc.activate(p.id);
+      const env = svc.getEffectiveEnv()!;
+
+      expect(env.SMARTPERFETTO_AGENT_RUNTIME).toBe('opencode');
+      expect(env.OPENAI_BASE_URL).toBe('https://example.test/v1');
+      expect(env.OPENAI_API_KEY).toBe('sk-opencode-openai');
+      expect(env.OPENAI_AGENTS_PROTOCOL).toBe('chat_completions');
+      expect(env.SMARTPERFETTO_OPENCODE_SDK_MODULE_PATH).toBe('/tmp/opencode-sdk/dist/index.js');
+      expect(env.SMARTPERFETTO_OPENCODE_MODEL_JSON).toBe('{"providerID":"smartperfetto","modelID":"opencode-test","apiKey":"sk-opencode-secret"}');
+      expect(env.SMARTPERFETTO_OPENCODE_SYSTEM_PROMPT).toBe('Runtime-only OpenCode prompt');
+      expect(env.OPENAI_MODEL).toBeUndefined();
       expect(env.CLAUDE_MODEL).toBeUndefined();
     });
 

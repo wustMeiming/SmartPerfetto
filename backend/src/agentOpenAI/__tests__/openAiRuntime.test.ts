@@ -1087,6 +1087,14 @@ describe('OpenAIRuntime previous response recovery', () => {
       expect(snapshot.sdkSessionId).toBeUndefined();
       expect(snapshot.openAILastResponseId).toBeUndefined();
       expect(snapshot.openAIHistory).toBeUndefined();
+      expect(snapshot.engineState).toEqual(expect.objectContaining({
+        kind: 'openai-agents-sdk',
+        provider: {
+          providerId: null,
+          providerSnapshotHash: null,
+        },
+      }));
+      expect(snapshot.engineState?.openai.lastResponseId).toBeUndefined();
     } finally {
       nowSpy.mockRestore();
     }
@@ -1121,6 +1129,18 @@ describe('OpenAIRuntime previous response recovery', () => {
       expect(snapshot.openAILastResponseId).toBe('resp_fresh');
       expect(snapshot.openAIHistory).toBe(history);
       expect(snapshot.openAIRunState).toBe('{"state":true}');
+      expect(snapshot.engineState).toEqual(expect.objectContaining({
+        kind: 'openai-agents-sdk',
+        provider: {
+          providerId: null,
+          providerSnapshotHash: null,
+        },
+        openai: {
+          history,
+          lastResponseId: 'resp_fresh',
+          runState: '{"state":true}',
+        },
+      }));
     } finally {
       nowSpy.mockRestore();
     }
@@ -1159,6 +1179,8 @@ describe('OpenAIRuntime previous response recovery', () => {
       expect(snapshot.openAILastResponseId).toBe('resp_compare_fresh');
       expect(snapshot.openAIHistory).toBe(history);
       expect(snapshot.openAIRunState).toBe('{"compare":true}');
+      expect(snapshot.engineState?.kind).toBe('openai-agents-sdk');
+      expect(snapshot.engineState?.openai.lastResponseId).toBe('resp_compare_fresh');
     } finally {
       nowSpy.mockRestore();
     }
@@ -1185,8 +1207,14 @@ describe('OpenAIRuntime previous response recovery', () => {
       analysisPlan: null,
       planHistory: [],
       uncertaintyFlags: [],
-      openAIHistory: [{ role: 'user', content: 'previous question' }],
-      openAILastResponseId: 'resp_old',
+      engineState: {
+        kind: 'openai-agents-sdk',
+        provider: { providerId: null, providerSnapshotHash: null },
+        openai: {
+          history: [{ role: 'user', content: 'previous question' }],
+          lastResponseId: 'resp_old',
+        },
+      },
       runSequence: 0,
       conversationOrdinal: 0,
     });

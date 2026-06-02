@@ -7,12 +7,14 @@
 export { isClaudeCodeEnabled } from './claudeConfig';
 
 import type { TraceProcessorService } from '../services/traceProcessorService';
+import type { RuntimeSelection } from '../agentRuntime/runtimeSelection';
 import type { ClaudeAgentConfig } from './claudeConfig';
 import { ClaudeRuntime } from './claudeRuntime';
 
 export function createClaudeRuntime(
   traceProcessorService: TraceProcessorService,
   config?: Partial<ClaudeAgentConfig>,
+  runtimeSelection?: RuntimeSelection,
 ): ClaudeRuntime {
-  return new ClaudeRuntime(traceProcessorService, config);
+  return new ClaudeRuntime(traceProcessorService, config, runtimeSelection);
 }

@@ -10,6 +10,46 @@ export {
   type RuntimeSelection,
 } from './runtimeSelection';
 export {
+  createAnalysisRunSpec,
+  type AnalysisRunSpec,
+  type CreateAnalysisRunSpecInput,
+  type RuntimeBudgetInputs,
+} from './analysisRunSpec';
+export {
+  getProductionEngineCapabilities,
+  isProductionAgentRuntimeKind,
+  listProductionRuntimeKinds,
+  type EngineCapabilities,
+  type RuntimeClassifierPolicy,
+  type RuntimeContinuationPolicy,
+} from './runtimeCapabilities';
+export {
+  RuntimeRegistry,
+  createProductionRuntimeRegistry,
+  createRuntimeRegistry,
+  productionRuntimeRegistry,
+  type RuntimeEngineDefinition,
+  type RuntimeFactoryInput,
+} from './runtimeRegistry';
+export {
+  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
+  OPENCODE_PROJECT_DIR_ENV,
+  OPENCODE_SDK_MODULE_PATH_ENV,
+  OPENCODE_SERVER_PORT_ENV,
+  OPENCODE_SERVER_TIMEOUT_MS_ENV,
+  OpenCodeRuntime,
+  createOpenCodeHardenedConfig,
+  createOpenCodeRuntimeDefinition,
+  createOpenCodeToolAllowlist,
+  getOpenCodeEngineCapabilities,
+  getOpenCodeRuntimeDiagnostics,
+  projectOpenCodeEventToStreamingUpdate,
+  type ExperimentalOpenCodeRuntimeKind,
+  type OpenCodeEvent,
+  type OpenCodeRuntimeOptions,
+  type OpenCodeSdkModuleLoader,
+} from './openCodeRuntime';
+export {
   SDK_SESSION_FRESHNESS_MS,
   buildEntityContext,
   buildQuickConversationContext,

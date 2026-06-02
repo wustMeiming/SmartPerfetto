@@ -34,6 +34,11 @@
 import {createSdkMcpServer} from '@anthropic-ai/claude-agent-sdk';
 
 import {
+  createClaudeSdkToolFromSharedSpec,
+  sharedToolSpecFromClaudeSdkTool,
+  type SharedToolSpec,
+} from '../agentRuntime/runtimeToolSpec';
+import {
   type McpToolAci,
   type McpToolExposure,
   makeSparkProvenance,
@@ -47,14 +52,15 @@ import {
  * short names. */
 export const MCP_NAME_PREFIX = 'mcp__smartperfetto__';
 
-/** One tool stored in the registry. The `tool` object is the
- * SDK-shaped descriptor returned by `tool(...)` from
- * `@anthropic-ai/claude-agent-sdk`; `name` is the short name MCP uses
- * natively. */
+/** One tool stored in the registry. `shared` is the SDK-neutral
+ * SmartPerfetto tool body; `tool` is the Claude SDK-native view
+ * generated from it. */
 export interface McpToolDefinition {
   /** Short MCP tool name (no prefix). */
   name: string;
-  /** SDK tool descriptor — passed unmodified to `createSdkMcpServer`. */
+  /** Shared SmartPerfetto tool body and schema. */
+  shared: SharedToolSpec;
+  /** Claude SDK tool descriptor — passed to `createSdkMcpServer`. */
   tool: unknown;
   /** Exposure level — drives stdio / A2A filtering downstream. */
   exposure: McpToolExposure;
@@ -66,6 +72,10 @@ export interface McpToolDefinition {
   /** Required env vars or capability flags. */
   requires?: string[];
 }
+
+export type McpToolRegistration = Omit<McpToolDefinition, 'shared'> & {
+  shared?: SharedToolSpec;
+};
 
 export interface ToolRequestScope {
   sessionId: string;
@@ -116,8 +126,21 @@ export class McpToolRegistry {
    * name; callers control ordering and uniqueness explicitly so the
    * existing conditional registration patterns
    * (`if (writeAnalysisNote) registry.register(...)`) keep working. */
-  register(def: McpToolDefinition): void {
-    this.entries.push(def);
+  register(def: McpToolRegistration): void {
+    const shared = def.shared ?? sharedToolSpecFromClaudeSdkTool(
+      def.name,
+      def.tool,
+      def.exposure,
+      {summary: def.summary, requires: def.requires},
+    );
+    this.entries.push({
+      name: shared.name,
+      shared,
+      tool: createClaudeSdkToolFromSharedSpec(shared),
+      exposure: shared.exposure,
+      summary: shared.summary,
+      requires: shared.requires,
+    });
   }
 
   /** Convenience for the existing call sites that pass `(tool,
@@ -129,7 +152,26 @@ export class McpToolRegistry {
     exposure: McpToolExposure,
     extras?: Pick<McpToolDefinition, 'summary' | 'requires'>,
   ): void {
-    this.register({tool, name, exposure, ...extras});
+    this.register({
+      tool,
+      name,
+      exposure,
+      shared: sharedToolSpecFromClaudeSdkTool(name, tool, exposure, extras),
+      ...extras,
+    });
+  }
+
+  /** Register an SDK-neutral SmartPerfetto tool body and build the
+   * Claude SDK-native descriptor view from it. */
+  registerShared(spec: SharedToolSpec): void {
+    this.register({
+      name: spec.name,
+      exposure: spec.exposure,
+      tool: createClaudeSdkToolFromSharedSpec(spec),
+      shared: spec,
+      summary: spec.summary,
+      requires: spec.requires,
+    });
   }
 
   /** Read-only view of every entry in registration order. */

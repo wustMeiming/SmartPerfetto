@@ -75,6 +75,8 @@ interface VerifyOptions {
   forbiddenDegradedFallbacks: string[];
   /** Allow full-mode source/tool checks that intentionally do not emit data envelopes. */
   allowNoDataEnvelopes: boolean;
+  /** Allow capability-limited preview runtimes that only prove routing/SSE/finalization. */
+  allowCapabilityLimitedRuntime: boolean;
   /** Tool names that must be dispatched during the run. */
   requiredTools: string[];
 }
@@ -163,6 +165,7 @@ function printUsage(): void {
   console.log('  --forbid-degraded-fallback <name>  Fail if a degraded event with this fallback is emitted; repeatable');
   console.log('  --require-tool <name>              Require an agent_task_dispatched tool call; repeatable');
   console.log('  --allow-no-data-envelopes          Do not require data envelopes in full mode');
+  console.log('  --allow-capability-limited-runtime Do not require plan/tool/data events for preview runtime smoke tests');
   console.log('  --output <path>                   JSON report output path');
   console.log('  --require-conclusion-evidence     Fail unless analysis_completed conclusion has concrete evidence refs');
   console.log('  --keep-session                    Do not delete session after verification');
@@ -191,6 +194,7 @@ function parseArgs(argv: string[]): VerifyOptions {
     forbiddenText: [],
     forbiddenDegradedFallbacks: [],
     allowNoDataEnvelopes: false,
+    allowCapabilityLimitedRuntime: false,
     requiredTools: [],
   };
   let smartScope: 'all' | 'scene_types' | 'scene_ids' | undefined;
@@ -252,6 +256,12 @@ function parseArgs(argv: string[]): VerifyOptions {
     }
 
     if (arg === '--allow-no-data-envelopes') {
+      options.allowNoDataEnvelopes = true;
+      continue;
+    }
+
+    if (arg === '--allow-capability-limited-runtime') {
+      options.allowCapabilityLimitedRuntime = true;
       options.allowNoDataEnvelopes = true;
       continue;
     }
@@ -998,15 +1008,16 @@ async function main(): Promise<void> {
     const isQuickMode = sse.planSubmittedCount === 0;
 
     const smartMode = options.preset === 'smart';
+    const capabilityLimitedRuntime = options.allowCapabilityLimitedRuntime;
     const requiredChecks = {
       hasProgressEvents: sse.progressCount > 0,
-      ...(smartMode ? {} : { hasAgentResponses: sse.agentResponseCount > 0 }),
+      ...(smartMode || capabilityLimitedRuntime ? {} : { hasAgentResponses: sse.agentResponseCount > 0 }),
       hasTerminalConclusionPayload: sse.conclusionCount > 0 || sse.analysisCompletedConclusionChars > 0,
       hasAnalysisCompletedEvent: sse.terminalEvent === 'analysis_completed' || sse.terminalEvent === 'end',
       hasNoSseErrors: sse.errorEvents.length === 0,
     };
 
-    const fullModeChecks = smartMode
+    const fullModeChecks = smartMode || capabilityLimitedRuntime
       ? {}
       : {
         ...(options.allowNoDataEnvelopes ? {} : { hasDataEnvelopes: sse.dataEnvelopeCount > 0 }),
@@ -1017,9 +1028,9 @@ async function main(): Promise<void> {
     // Mode expectation: if the caller pinned `--mode fast|full`, verify the backend honored it.
     // Catches regressions where a fast CLI flag silently falls back to the full pipeline (or vice versa).
     const modeExpectationChecks: Record<string, boolean> = {};
-    if (options.analysisMode === 'fast') {
+    if (!capabilityLimitedRuntime && options.analysisMode === 'fast') {
       modeExpectationChecks.fastModeHonored = isQuickMode;
-    } else if (options.analysisMode === 'full') {
+    } else if (!capabilityLimitedRuntime && options.analysisMode === 'full') {
       modeExpectationChecks.fullModeHonored = !isQuickMode;
     }
     const conclusionEvidenceChecks = options.requireConclusionEvidence
