@@ -67,20 +67,49 @@ describe('experimental runtime import boundaries', () => {
 
   it('keeps selection and experimental kind parsing out of concrete runtime modules', () => {
     expect(staticImports(readSource('runtimeSelection.ts'))).not.toEqual(
-      expect.arrayContaining(['./piAgentCoreRuntime', './openCodeRuntime']),
+      expect.arrayContaining([
+        './engines/pi/piAgentCoreRuntime',
+        './engines/opencode/openCodeRuntime',
+      ]),
     );
     expect(staticImports(readSource('experimentalRuntime.ts'))).not.toEqual(
-      expect.arrayContaining(['./piAgentCoreRuntime', './openCodeRuntime', './runtimeSelection']),
+      expect.arrayContaining([
+        './engines/pi/piAgentCoreRuntime',
+        './engines/opencode/openCodeRuntime',
+        './runtimeSelection',
+      ]),
     );
-    expect(staticImports(readSource('piAgentCoreRuntime.ts'))).not.toContain('./openCodeRuntime');
+    expect(staticImports(readSource(path.join('engines', 'pi', 'piAgentCoreRuntime.ts'))))
+      .not.toContain('../opencode/openCodeRuntime');
   });
 
   it('keeps experimental runtime factories lazily loaded from the registry', () => {
     const registrySource = readSource('runtimeRegistry.ts');
     expect(staticImports(registrySource)).not.toEqual(
-      expect.arrayContaining(['./piAgentCoreRuntime', './openCodeRuntime']),
+      expect.arrayContaining([
+        './engines/pi/piAgentCoreRuntime',
+        './engines/opencode/openCodeRuntime',
+      ]),
     );
-    expect(registrySource).toContain("require('./piAgentCoreRuntime')");
-    expect(registrySource).toContain("require('./openCodeRuntime')");
+    expect(registrySource).toContain("require('./engines/pi/piAgentCoreRuntime')");
+    expect(registrySource).toContain("require('./engines/opencode/openCodeRuntime')");
+  });
+
+  it('loads concrete runtime implementations from engine directories', () => {
+    const descriptorsSource = readSource('runtimeDescriptors.ts');
+    const diagnosticsSource = readSource('runtimeDiagnostics.ts');
+
+    expect(descriptorsSource).toContain("require('./engines/claude')");
+    expect(descriptorsSource).toContain("require('./engines/claude/claudeConfig')");
+    expect(descriptorsSource).toContain("require('./engines/openai')");
+    expect(descriptorsSource).toContain("require('./engines/openai/openAiConfig')");
+    expect(descriptorsSource).toContain("require('./engines/pi/piAgentCoreRuntime')");
+    expect(descriptorsSource).toContain("require('./engines/opencode/openCodeRuntime')");
+    expect(diagnosticsSource).toContain("require('./engines/pi/piAgentCoreRuntime')");
+    expect(diagnosticsSource).toContain("require('./engines/opencode/openCodeRuntime')");
+    expect(descriptorsSource).not.toContain("require('../agentv3')");
+    expect(descriptorsSource).not.toContain("require('../agentOpenAI')");
+    expect(descriptorsSource).not.toContain("require('./piAgentCoreRuntime')");
+    expect(descriptorsSource).not.toContain("require('./openCodeRuntime')");
   });
 });

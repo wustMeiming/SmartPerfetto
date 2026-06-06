@@ -60,7 +60,7 @@ export const PRODUCTION_RUNTIME_DESCRIPTORS = [
     createOrchestrator: ({ traceProcessorService, selection }) => {
       // Lazy load to keep providerManager runtime matrix imports cycle-free.
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { createClaudeRuntime } = require('../agentv3') as typeof import('../agentv3');
+      const { createClaudeRuntime } = require('./engines/claude') as typeof import('./engines/claude');
       return createClaudeRuntime(
         traceProcessorService,
         undefined,
@@ -69,7 +69,7 @@ export const PRODUCTION_RUNTIME_DESCRIPTORS = [
     },
     getDiagnostics: ({ selectedProviderId }: RuntimeDiagnosticsInput<typeof CLAUDE_AGENT_RUNTIME_KIND>) => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { getClaudeRuntimeDiagnostics } = require('../agentv3/claudeConfig') as typeof import('../agentv3/claudeConfig');
+      const { getClaudeRuntimeDiagnostics } = require('./engines/claude/claudeConfig') as typeof import('./engines/claude/claudeConfig');
       return getClaudeRuntimeDiagnostics(selectedProviderId ?? null);
     },
   },
@@ -82,7 +82,7 @@ export const PRODUCTION_RUNTIME_DESCRIPTORS = [
     capabilities: createCapabilities(OPENAI_AGENT_RUNTIME_KIND, 'OpenAI Agents SDK'),
     createOrchestrator: ({ traceProcessorService, selection }) => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { createOpenAIRuntime } = require('../agentOpenAI') as typeof import('../agentOpenAI');
+      const { createOpenAIRuntime } = require('./engines/openai') as typeof import('./engines/openai');
       return createOpenAIRuntime(
         traceProcessorService,
         selection as RuntimeSelection<AgentRuntimeKind>,
@@ -90,7 +90,7 @@ export const PRODUCTION_RUNTIME_DESCRIPTORS = [
     },
     getDiagnostics: ({ selectedProviderId }: RuntimeDiagnosticsInput<typeof OPENAI_AGENT_RUNTIME_KIND>) => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { getOpenAIRuntimeDiagnostics } = require('../agentOpenAI') as typeof import('../agentOpenAI');
+      const { getOpenAIRuntimeDiagnostics } = require('./engines/openai/openAiConfig') as typeof import('./engines/openai/openAiConfig');
       return getOpenAIRuntimeDiagnostics(selectedProviderId ?? null);
     },
   },
@@ -103,12 +103,12 @@ export const PRODUCTION_RUNTIME_DESCRIPTORS = [
     capabilities: createCapabilities(PI_AGENT_CORE_RUNTIME_KIND, 'Pi Agent Core'),
     createOrchestrator: input => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { createPiAgentCoreRuntime } = require('./piAgentCoreRuntime') as typeof import('./piAgentCoreRuntime');
+      const { createPiAgentCoreRuntime } = require('./engines/pi/piAgentCoreRuntime') as typeof import('./engines/pi/piAgentCoreRuntime');
       return createPiAgentCoreRuntime(input);
     },
     getDiagnostics: ({ env, kind }: RuntimeDiagnosticsInput<typeof PI_AGENT_CORE_RUNTIME_KIND>) => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { getPiAgentCoreRuntimeDiagnostics } = require('./piAgentCoreRuntime') as typeof import('./piAgentCoreRuntime');
+      const { getPiAgentCoreRuntimeDiagnostics } = require('./engines/pi/piAgentCoreRuntime') as typeof import('./engines/pi/piAgentCoreRuntime');
       return getPiAgentCoreRuntimeDiagnostics(env, kind);
     },
   },
@@ -121,12 +121,12 @@ export const PRODUCTION_RUNTIME_DESCRIPTORS = [
     capabilities: createCapabilities(OPENCODE_RUNTIME_KIND, 'OpenCode'),
     createOrchestrator: input => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { OpenCodeRuntime } = require('./openCodeRuntime') as typeof import('./openCodeRuntime');
+      const { OpenCodeRuntime } = require('./engines/opencode/openCodeRuntime') as typeof import('./engines/opencode/openCodeRuntime');
       return new OpenCodeRuntime(input, { env: input.env });
     },
     getDiagnostics: ({ env, kind }: RuntimeDiagnosticsInput<typeof OPENCODE_RUNTIME_KIND>) => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { getOpenCodeRuntimeDiagnostics } = require('./openCodeRuntime') as typeof import('./openCodeRuntime');
+      const { getOpenCodeRuntimeDiagnostics } = require('./engines/opencode/openCodeRuntime') as typeof import('./engines/opencode/openCodeRuntime');
       return getOpenCodeRuntimeDiagnostics(env, kind);
     },
   },

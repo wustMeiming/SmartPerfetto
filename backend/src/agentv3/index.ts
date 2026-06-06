@@ -3,18 +3,9 @@
 // This file is part of SmartPerfetto. See LICENSE for details.
 
 // Public API surface — only export what external consumers actually import.
-// Internal agentv3 modules import directly from their source files.
-export { isClaudeCodeEnabled } from './claudeConfig';
-
-import type { TraceProcessorService } from '../services/traceProcessorService';
-import type { RuntimeSelection } from '../agentRuntime/runtimeSelection';
-import type { ClaudeAgentConfig } from './claudeConfig';
-import { ClaudeRuntime } from './claudeRuntime';
-
-export function createClaudeRuntime(
-  traceProcessorService: TraceProcessorService,
-  config?: Partial<ClaudeAgentConfig>,
-  runtimeSelection?: RuntimeSelection,
-): ClaudeRuntime {
-  return new ClaudeRuntime(traceProcessorService, config, runtimeSelection);
-}
+// The concrete Claude runtime now lives under agentRuntime/engines/claude.
+export {
+  createClaudeRuntime,
+  isClaudeCodeEnabled,
+  type ClaudeAgentConfig,
+} from '../agentRuntime/engines/claude';

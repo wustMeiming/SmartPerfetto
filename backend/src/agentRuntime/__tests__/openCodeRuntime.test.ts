@@ -18,6 +18,7 @@ import {
   getOpenCodePlanCompletionStatus,
   getOpenCodeEngineCapabilities,
   getOpenCodeRuntimeDiagnostics,
+  __testing as openCodeTesting,
   projectOpenCodeEventToStreamingUpdate,
   runOpenCodePrompt,
   type OpenCodeSdkModuleLoader,
@@ -169,6 +170,16 @@ describe('experimental OpenCode runtime contract', () => {
       smartperfetto_lookup_blog_knowledge: true,
       mcp__smartperfetto__lookup_blog_knowledge: true,
     });
+  });
+
+  it('uses the engine-local OpenCode MCP bridge child in source mode', () => {
+    const command = openCodeTesting.resolveOpenCodeBridgeCommand({});
+
+    expect(command[0]).toContain('tsx');
+    expect(command[1]).toBe(path.resolve(
+      process.cwd(),
+      'src/agentRuntime/engines/opencode/openCodeMcpBridgeChild.ts',
+    ));
   });
 
   it('enumerates conservative standalone MCP tool-name variants for OpenCode', () => {

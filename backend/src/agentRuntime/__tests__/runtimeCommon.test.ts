@@ -182,9 +182,9 @@ describe('runtimeCommon', () => {
     const srcRoot = path.resolve(__dirname, '..');
     const privateConverterPattern = /\bfunction\s+toProtocolHypothesis\s*\(/;
 
-    expect(fs.readFileSync(path.join(srcRoot, 'piAgentCoreRuntime.ts'), 'utf8'))
+    expect(fs.readFileSync(path.join(srcRoot, 'engines', 'pi', 'piAgentCoreRuntime.ts'), 'utf8'))
       .not.toMatch(privateConverterPattern);
-    expect(fs.readFileSync(path.join(srcRoot, 'openCodeRuntime.ts'), 'utf8'))
+    expect(fs.readFileSync(path.join(srcRoot, 'engines', 'opencode', 'openCodeRuntime.ts'), 'utf8'))
       .not.toMatch(privateConverterPattern);
   });
 

@@ -187,7 +187,7 @@ describe('runtime registry', () => {
         throw new Error('definition factory should not be called');
       });
 
-      jest.doMock('../piAgentCoreRuntime', () => ({
+      jest.doMock('../engines/pi/piAgentCoreRuntime', () => ({
         createPiAgentCoreRuntime,
         createPiAgentCoreRuntimeDefinition,
         getPiAgentCoreEngineCapabilities,
@@ -212,7 +212,7 @@ describe('runtime registry', () => {
         .toHaveBeenCalledWith(EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND);
       expect(createPiAgentCoreRuntimeDefinition).not.toHaveBeenCalled();
 
-      jest.dontMock('../piAgentCoreRuntime');
+      jest.dontMock('../engines/pi/piAgentCoreRuntime');
     });
   });
 
@@ -225,7 +225,7 @@ describe('runtime registry', () => {
         throw new Error('definition factory should not be called');
       });
 
-      jest.doMock('../openCodeRuntime', () => ({
+      jest.doMock('../engines/opencode/openCodeRuntime', () => ({
         OpenCodeRuntime,
         createOpenCodeRuntimeDefinition,
         getOpenCodeEngineCapabilities,
@@ -250,7 +250,7 @@ describe('runtime registry', () => {
         .toHaveBeenCalledWith(EXPERIMENTAL_OPENCODE_RUNTIME_KIND);
       expect(createOpenCodeRuntimeDefinition).not.toHaveBeenCalled();
 
-      jest.dontMock('../openCodeRuntime');
+      jest.dontMock('../engines/opencode/openCodeRuntime');
     });
   });
 

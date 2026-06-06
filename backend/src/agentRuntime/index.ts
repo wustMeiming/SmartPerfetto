@@ -68,7 +68,7 @@ export {
   type OpenCodeEvent,
   type OpenCodeRuntimeOptions,
   type OpenCodeSdkModuleLoader,
-} from './openCodeRuntime';
+} from './engines/opencode';
 export {
   SDK_SESSION_FRESHNESS_MS,
   buildEntityContext,

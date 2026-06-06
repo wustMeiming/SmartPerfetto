@@ -23,7 +23,7 @@ type RuntimeDiagnosticsResolver<K extends string = string> =
 const EXPERIMENTAL_RUNTIME_DIAGNOSTICS: Record<ExperimentalAgentRuntimeKind, RuntimeDiagnosticsResolver> = {
   [EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND]: ({ env, kind }) => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getPiAgentCoreRuntimeDiagnostics } = require('./piAgentCoreRuntime') as typeof import('./piAgentCoreRuntime');
+    const { getPiAgentCoreRuntimeDiagnostics } = require('./engines/pi/piAgentCoreRuntime') as typeof import('./engines/pi/piAgentCoreRuntime');
     return getPiAgentCoreRuntimeDiagnostics(
       env,
       kind as Parameters<typeof getPiAgentCoreRuntimeDiagnostics>[1],
@@ -31,7 +31,7 @@ const EXPERIMENTAL_RUNTIME_DIAGNOSTICS: Record<ExperimentalAgentRuntimeKind, Run
   },
   [EXPERIMENTAL_OPENCODE_RUNTIME_KIND]: ({ env, kind }) => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getOpenCodeRuntimeDiagnostics } = require('./openCodeRuntime') as typeof import('./openCodeRuntime');
+    const { getOpenCodeRuntimeDiagnostics } = require('./engines/opencode/openCodeRuntime') as typeof import('./engines/opencode/openCodeRuntime');
     return getOpenCodeRuntimeDiagnostics(
       env,
       kind as Parameters<typeof getOpenCodeRuntimeDiagnostics>[1],

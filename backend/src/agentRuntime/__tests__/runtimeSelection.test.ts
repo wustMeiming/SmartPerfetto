@@ -309,7 +309,7 @@ describe('resolveAgentRuntimeSelection', () => {
   it('passes the resolved Claude runtime selection snapshot into the runtime instance', async () => {
     const claudeRuntime = createMockOrchestrator('claude');
     const createClaudeRuntime = jest.fn(() => claudeRuntime);
-    jest.doMock('../../agentv3', () => ({ createClaudeRuntime }));
+    jest.doMock('../engines/claude', () => ({ createClaudeRuntime }));
 
     const traceProcessorService = { kind: 'trace-processor' } as any;
     const { createAgentOrchestrator } = await import('../runtimeSelection');
@@ -335,8 +335,8 @@ describe('resolveAgentRuntimeSelection', () => {
     const openAIRuntime = createMockOrchestrator('openai');
     const createClaudeRuntime = jest.fn(() => claudeRuntime);
     const createOpenAIRuntime = jest.fn(() => openAIRuntime);
-    jest.doMock('../../agentv3', () => ({ createClaudeRuntime }));
-    jest.doMock('../../agentOpenAI', () => ({ createOpenAIRuntime }));
+    jest.doMock('../engines/claude', () => ({ createClaudeRuntime }));
+    jest.doMock('../engines/openai', () => ({ createOpenAIRuntime }));
 
     const traceProcessorService = { kind: 'trace-processor' } as any;
     const { createAgentOrchestrator } = await import('../runtimeSelection');
@@ -376,7 +376,7 @@ describe('resolveAgentRuntimeSelection', () => {
     process.env.SMARTPERFETTO_OPENCODE_PROJECT_DIR = '/process/opencode';
     const piRuntime = createMockOrchestrator('pi');
     const createPiAgentCoreRuntime = jest.fn((_input: any) => piRuntime);
-    jest.doMock('../piAgentCoreRuntime', () => ({ createPiAgentCoreRuntime }));
+    jest.doMock('../engines/pi/piAgentCoreRuntime', () => ({ createPiAgentCoreRuntime }));
 
     try {
       const traceProcessorService = { kind: 'trace-processor' } as any;
@@ -401,7 +401,7 @@ describe('resolveAgentRuntimeSelection', () => {
       else process.env.SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH = originalProcessPiModule;
       if (originalProcessOpenCodeProject === undefined) delete process.env.SMARTPERFETTO_OPENCODE_PROJECT_DIR;
       else process.env.SMARTPERFETTO_OPENCODE_PROJECT_DIR = originalProcessOpenCodeProject;
-      jest.dontMock('../piAgentCoreRuntime');
+      jest.dontMock('../engines/pi/piAgentCoreRuntime');
     }
   });
 
@@ -426,7 +426,7 @@ describe('resolveAgentRuntimeSelection', () => {
     process.env.SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH = '/process/pi-agent-core.mjs';
     const openCodeRuntime = createMockOrchestrator('opencode');
     const OpenCodeRuntime = jest.fn((_input: any, _options: any) => openCodeRuntime);
-    jest.doMock('../openCodeRuntime', () => ({ OpenCodeRuntime }));
+    jest.doMock('../engines/opencode/openCodeRuntime', () => ({ OpenCodeRuntime }));
 
     try {
       const traceProcessorService = { kind: 'trace-processor' } as any;
@@ -454,7 +454,7 @@ describe('resolveAgentRuntimeSelection', () => {
       else process.env.SMARTPERFETTO_OPENCODE_PROJECT_DIR = originalProcessOpenCodeProject;
       if (originalProcessPiModule === undefined) delete process.env.SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH;
       else process.env.SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH = originalProcessPiModule;
-      jest.dontMock('../openCodeRuntime');
+      jest.dontMock('../engines/opencode/openCodeRuntime');
     }
   });
 

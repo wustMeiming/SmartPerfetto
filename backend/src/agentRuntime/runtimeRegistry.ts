@@ -77,7 +77,7 @@ export function createRuntimeRegistryForSelection(kind: string): RuntimeRegistry
     const {
       createPiAgentCoreRuntime,
       getPiAgentCoreEngineCapabilities,
-    } = require('./piAgentCoreRuntime') as typeof import('./piAgentCoreRuntime');
+    } = require('./engines/pi/piAgentCoreRuntime') as typeof import('./engines/pi/piAgentCoreRuntime');
     return createRuntimeRegistry([
       ...productionRuntimeDefinitions,
       {
@@ -92,7 +92,7 @@ export function createRuntimeRegistryForSelection(kind: string): RuntimeRegistry
     const {
       OpenCodeRuntime,
       getOpenCodeEngineCapabilities,
-    } = require('./openCodeRuntime') as typeof import('./openCodeRuntime');
+    } = require('./engines/opencode/openCodeRuntime') as typeof import('./engines/opencode/openCodeRuntime');
     return createRuntimeRegistry([
       ...productionRuntimeDefinitions,
       {

@@ -2,13 +2,12 @@
 // Copyright (C) 2024-2026 Gracker (Chris)
 // This file is part of SmartPerfetto. See LICENSE for details.
 
+export { createOpenAIRuntime, OpenAIRuntime } from './openAiRuntime';
 export {
   createOpenAIEnv,
-  createOpenAIRuntime,
-  createOpenAIToolsFromMcpDefinitions,
   getOpenAIRuntimeDiagnostics,
   hasOpenAICredentials,
   loadOpenAIConfig,
-  OpenAIRuntime,
   type OpenAIAgentConfig,
-} from '../agentRuntime/engines/openai';
+} from './openAiConfig';
+export { createOpenAIToolsFromMcpDefinitions } from './openAiToolAdapter';
