@@ -75,12 +75,18 @@ import {
   normalizeRuntimeToolExtra,
 } from './runtimeToolSpec';
 import { isTraceProcessorQueryCancelledError } from '../services/traceProcessorCancellation';
+import {
+  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
+  OPENCODE_RUNTIME_KIND,
+} from './runtimeKinds';
 
-export const EXPERIMENTAL_OPENCODE_RUNTIME_KIND = 'experimental-opencode' as const;
-export const OPENCODE_RUNTIME_KIND = 'opencode' as const;
 export type ExperimentalOpenCodeRuntimeKind = typeof EXPERIMENTAL_OPENCODE_RUNTIME_KIND;
 export type PublicOpenCodeRuntimeKind = typeof OPENCODE_RUNTIME_KIND;
 export type OpenCodeRuntimeKind = ExperimentalOpenCodeRuntimeKind | PublicOpenCodeRuntimeKind;
+export {
+  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
+  OPENCODE_RUNTIME_KIND,
+};
 
 export const OPENCODE_SDK_MODULE_PATH_ENV = 'SMARTPERFETTO_OPENCODE_SDK_MODULE_PATH';
 export const OPENCODE_PROJECT_DIR_ENV = 'SMARTPERFETTO_OPENCODE_PROJECT_DIR';

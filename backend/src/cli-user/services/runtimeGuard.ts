@@ -10,15 +10,17 @@ import {
   type RuntimeSelection,
 } from '../../agentRuntime/runtimeSelection';
 import {
-  EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
   getPiAgentCoreRuntimeDiagnostics,
-  PI_AGENT_CORE_RUNTIME_KIND,
 } from '../../agentRuntime/piAgentCoreRuntime';
 import {
-  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
   getOpenCodeRuntimeDiagnostics,
-  OPENCODE_RUNTIME_KIND,
 } from '../../agentRuntime/openCodeRuntime';
+import {
+  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
+  EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
+  OPENCODE_RUNTIME_KIND,
+  PI_AGENT_CORE_RUNTIME_KIND,
+} from '../../agentRuntime/runtimeKinds';
 import { getClaudeRuntimeDiagnostics } from '../../agentv3/claudeConfig';
 import { getOpenAIRuntimeDiagnostics, hasOpenAICredentials } from '../../agentOpenAI/openAiConfig';
 import { getTraceProcessorPath } from '../../services/workingTraceProcessor';

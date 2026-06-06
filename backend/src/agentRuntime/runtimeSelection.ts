@@ -10,7 +10,7 @@ import { isProductionAgentRuntimeKind } from './runtimeKinds';
 import {
   type ExperimentalAgentRuntimeKind,
   resolveExperimentalAgentRuntimeSelection,
-} from './piAgentCoreRuntime';
+} from './experimentalRuntime';
 import { createRuntimeRegistryForSelection } from './runtimeRegistry';
 
 export type BackendAgentRuntimeKind = AgentRuntimeKind;

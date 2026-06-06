@@ -10,15 +10,17 @@ import { resolveAgentRuntimeSelection } from './runtimeSelection';
 import { getProviderService } from '../services/providerManager';
 import { getSmartPerfettoVersion } from '../version';
 import {
-  EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
   getPiAgentCoreRuntimeDiagnostics,
-  PI_AGENT_CORE_RUNTIME_KIND,
 } from './piAgentCoreRuntime';
 import {
-  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
   getOpenCodeRuntimeDiagnostics,
-  OPENCODE_RUNTIME_KIND,
 } from './openCodeRuntime';
+import {
+  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
+  EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
+  OPENCODE_RUNTIME_KIND,
+  PI_AGENT_CORE_RUNTIME_KIND,
+} from './runtimeKinds';
 
 export function buildRuntimeHealthPayload(now: Date = new Date()) {
   const runtimeSelection = resolveAgentRuntimeSelection();

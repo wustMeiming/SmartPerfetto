@@ -12,13 +12,9 @@ import type {
   RuntimeFactoryInput,
 } from './runtimeDescriptorTypes';
 import {
-  createPiAgentCoreRuntimeDefinition,
   EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
-} from './piAgentCoreRuntime';
-import {
-  createOpenCodeRuntimeDefinition,
   EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
-} from './openCodeRuntime';
+} from './runtimeKinds';
 export type { RuntimeEngineDefinition, RuntimeFactoryInput } from './runtimeDescriptorTypes';
 
 export class RuntimeRegistry {
@@ -87,12 +83,16 @@ export const productionRuntimeRegistry = createProductionRuntimeRegistry();
 
 export function createRuntimeRegistryForSelection(kind: string): RuntimeRegistry {
   if (kind === EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createPiAgentCoreRuntimeDefinition } = require('./piAgentCoreRuntime') as typeof import('./piAgentCoreRuntime');
     return createRuntimeRegistry([
       ...productionRuntimeDefinitions,
       createPiAgentCoreRuntimeDefinition(EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND),
     ]);
   }
   if (kind === EXPERIMENTAL_OPENCODE_RUNTIME_KIND) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createOpenCodeRuntimeDefinition } = require('./openCodeRuntime') as typeof import('./openCodeRuntime');
     return createRuntimeRegistry([
       ...productionRuntimeDefinitions,
       createOpenCodeRuntimeDefinition(EXPERIMENTAL_OPENCODE_RUNTIME_KIND),

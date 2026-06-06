@@ -6,6 +6,8 @@ export const CLAUDE_AGENT_RUNTIME_KIND = 'claude-agent-sdk' as const;
 export const OPENAI_AGENT_RUNTIME_KIND = 'openai-agents-sdk' as const;
 export const PI_AGENT_CORE_RUNTIME_KIND = 'pi-agent-core' as const;
 export const OPENCODE_RUNTIME_KIND = 'opencode' as const;
+export const EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND = 'experimental-pi-agent-core' as const;
+export const EXPERIMENTAL_OPENCODE_RUNTIME_KIND = 'experimental-opencode' as const;
 
 export const PRODUCTION_RUNTIME_KINDS = [
   CLAUDE_AGENT_RUNTIME_KIND,
@@ -16,6 +18,13 @@ export const PRODUCTION_RUNTIME_KINDS = [
 
 export type AgentRuntimeKind = typeof PRODUCTION_RUNTIME_KINDS[number];
 
+export const EXPERIMENTAL_RUNTIME_KINDS = [
+  EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
+  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
+] as const;
+
+export type ExperimentalAgentRuntimeKind = typeof EXPERIMENTAL_RUNTIME_KINDS[number];
+
 export function listProductionRuntimeKinds(): readonly AgentRuntimeKind[] {
   return PRODUCTION_RUNTIME_KINDS;
 }
@@ -23,4 +32,13 @@ export function listProductionRuntimeKinds(): readonly AgentRuntimeKind[] {
 export function isProductionAgentRuntimeKind(value: unknown): value is AgentRuntimeKind {
   return typeof value === 'string'
     && PRODUCTION_RUNTIME_KINDS.includes(value as AgentRuntimeKind);
+}
+
+export function listExperimentalRuntimeKinds(): readonly ExperimentalAgentRuntimeKind[] {
+  return EXPERIMENTAL_RUNTIME_KINDS;
+}
+
+export function isExperimentalAgentRuntimeKind(value: unknown): value is ExperimentalAgentRuntimeKind {
+  return typeof value === 'string'
+    && EXPERIMENTAL_RUNTIME_KINDS.includes(value as ExperimentalAgentRuntimeKind);
 }

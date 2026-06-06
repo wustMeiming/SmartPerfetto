@@ -8,8 +8,6 @@ import type { StreamingUpdate } from '../../agent/types';
 import {
   completePiAgentCoreFinalReportPhaseIfDelivered,
   createPiAgentCoreToolFromSharedSpec,
-  EXPERIMENTAL_AGENT_RUNTIME_ENABLED_ENV,
-  EXPERIMENTAL_AGENT_RUNTIME_ENV,
   EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
   getPiAgentCorePlanCompletionStatus,
   getPiAgentCoreEngineCapabilities,
@@ -17,7 +15,6 @@ import {
   PI_AGENT_CORE_MODEL_JSON_ENV,
   PiAgentCoreRuntime,
   projectPiAgentCoreEventToStreamingUpdate,
-  resolveExperimentalAgentRuntimeSelection,
   sanitizePiAgentCoreConclusionText,
   type PiAgentCoreEvent,
 } from '../piAgentCoreRuntime';
@@ -136,26 +133,6 @@ function createSharedSpec(handler?: SharedToolSpec['handler']): SharedToolSpec {
 }
 
 describe('experimental Pi agent-core runtime contract', () => {
-  it('keeps the runtime hidden behind explicit experiment env vars', () => {
-    expect(resolveExperimentalAgentRuntimeSelection({})).toBeUndefined();
-    expect(() => resolveExperimentalAgentRuntimeSelection({
-      [EXPERIMENTAL_AGENT_RUNTIME_ENV]: EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
-    })).toThrow(
-      `${EXPERIMENTAL_AGENT_RUNTIME_ENV} requires ${EXPERIMENTAL_AGENT_RUNTIME_ENABLED_ENV}=1`,
-    );
-    expect(() => resolveExperimentalAgentRuntimeSelection({
-      [EXPERIMENTAL_AGENT_RUNTIME_ENABLED_ENV]: '1',
-      [EXPERIMENTAL_AGENT_RUNTIME_ENV]: 'other-runtime',
-    })).toThrow(`Unsupported ${EXPERIMENTAL_AGENT_RUNTIME_ENV}="other-runtime"`);
-    expect(resolveExperimentalAgentRuntimeSelection({
-      [EXPERIMENTAL_AGENT_RUNTIME_ENABLED_ENV]: '1',
-      [EXPERIMENTAL_AGENT_RUNTIME_ENV]: EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
-    })).toEqual({
-      kind: EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
-      source: 'env',
-    });
-  });
-
   it('describes Pi agent-core as hidden, optional, sequential, and no shell/file tool runtime', () => {
     expect(getPiAgentCoreEngineCapabilities()).toEqual({
       kind: EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,

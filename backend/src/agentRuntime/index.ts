@@ -25,6 +25,15 @@ export {
   type AgentRuntimeKind,
 } from './runtimeDescriptors';
 export {
+  EXPERIMENTAL_AGENT_RUNTIME_ENABLED_ENV,
+  EXPERIMENTAL_AGENT_RUNTIME_ENV,
+  isExperimentalAgentRuntimeKind,
+  listExperimentalRuntimeKinds,
+  resolveExperimentalAgentRuntimeSelection,
+  type ExperimentalAgentRuntimeKind,
+  type ExperimentalRuntimeSelection,
+} from './experimentalRuntime';
+export {
   type EngineCapabilities,
   type RuntimeDiagnosticsInput,
   type RuntimeEngineDescriptor,

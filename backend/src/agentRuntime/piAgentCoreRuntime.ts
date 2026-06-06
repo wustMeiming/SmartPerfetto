@@ -65,9 +65,9 @@ import type { RuntimeEngineDefinition, RuntimeFactoryInput } from './runtimeRegi
 import type { EngineCapabilities } from './runtimeDescriptorTypes';
 import { createAnalysisRunSpec, type AnalysisRunSpec } from './analysisRunSpec';
 import {
-  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
-  type ExperimentalOpenCodeRuntimeKind,
-} from './openCodeRuntime';
+  EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
+  PI_AGENT_CORE_RUNTIME_KIND,
+} from './runtimeKinds';
 import {
   buildEntityContext,
   captureSkillDisplayEntities,
@@ -75,14 +75,14 @@ import {
   knowledgeScopeFromAnalysisOptions,
 } from './runtimeCommon';
 
-export const EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND = 'experimental-pi-agent-core' as const;
-export const PI_AGENT_CORE_RUNTIME_KIND = 'pi-agent-core' as const;
 export type ExperimentalPiAgentCoreRuntimeKind = typeof EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND;
 export type PublicPiAgentCoreRuntimeKind = typeof PI_AGENT_CORE_RUNTIME_KIND;
 export type PiAgentCoreRuntimeKind = ExperimentalPiAgentCoreRuntimeKind | PublicPiAgentCoreRuntimeKind;
+export {
+  EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
+  PI_AGENT_CORE_RUNTIME_KIND,
+};
 
-export const EXPERIMENTAL_AGENT_RUNTIME_ENABLED_ENV = 'SMARTPERFETTO_ENABLE_EXPERIMENTAL_AGENT_RUNTIME';
-export const EXPERIMENTAL_AGENT_RUNTIME_ENV = 'SMARTPERFETTO_EXPERIMENTAL_AGENT_RUNTIME';
 export const PI_AGENT_CORE_MODULE_PATH_ENV = 'SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH';
 export const PI_AGENT_CORE_FAKE_STREAM_ENV = 'SMARTPERFETTO_PI_AGENT_CORE_FAKE_STREAM';
 export const PI_AGENT_CORE_MODEL_JSON_ENV = 'SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON';
@@ -99,10 +99,6 @@ const PI_AGENT_CORE_PREVIEW_CLAIM_VERIFICATION: ClaimVerificationResult = {
   claimResults: [],
   issues: [],
 };
-
-export type ExperimentalAgentRuntimeKind =
-  | ExperimentalPiAgentCoreRuntimeKind
-  | ExperimentalOpenCodeRuntimeKind;
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -210,31 +206,6 @@ interface PiAnalysisPreparation {
 function truthyEnv(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
   return normalized === '1' || normalized === 'true' || normalized === 'on' || normalized === 'yes';
-}
-
-export function resolveExperimentalAgentRuntimeSelection(
-  env: EnvLike = process.env,
-): RuntimeSelection<ExperimentalAgentRuntimeKind> | undefined {
-  const requestedRuntime = env[EXPERIMENTAL_AGENT_RUNTIME_ENV]?.trim();
-  const enabled = truthyEnv(env[EXPERIMENTAL_AGENT_RUNTIME_ENABLED_ENV]);
-
-  if (!requestedRuntime) return undefined;
-  if (!enabled) {
-    throw new Error(
-      `${EXPERIMENTAL_AGENT_RUNTIME_ENV} requires ${EXPERIMENTAL_AGENT_RUNTIME_ENABLED_ENV}=1`,
-    );
-  }
-  const supportedRuntimes = [
-    EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
-    EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
-  ] as const;
-  if (!supportedRuntimes.includes(requestedRuntime as ExperimentalAgentRuntimeKind)) {
-    throw new Error(
-      `Unsupported ${EXPERIMENTAL_AGENT_RUNTIME_ENV}="${requestedRuntime}". ` +
-      `Use "${EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND}" or "${EXPERIMENTAL_OPENCODE_RUNTIME_KIND}".`,
-    );
-  }
-  return { kind: requestedRuntime as ExperimentalAgentRuntimeKind, source: 'env' };
 }
 
 export function getPiAgentCoreEngineCapabilities(
