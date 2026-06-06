@@ -25,6 +25,16 @@ export interface RuntimeEngineDefinition {
   createOrchestrator(input: RuntimeFactoryInput): IOrchestrator;
 }
 
+export interface RuntimeDiagnosticsPayload {
+  runtime: string;
+  configured: boolean;
+  model?: unknown;
+  providerMode?: unknown;
+  modelConfigured?: unknown;
+  sdkBinary?: unknown;
+  [key: string]: unknown;
+}
+
 export interface RuntimeDiagnosticsInput<K extends string = string> {
   env: Record<string, string | undefined>;
   kind: K;
@@ -43,5 +53,5 @@ export interface RuntimeEngineDescriptor<K extends AgentRuntimeKind = AgentRunti
     production: true;
     publicRuntime: true;
   };
-  getDiagnostics(input: RuntimeDiagnosticsInput<K>): unknown;
+  getDiagnostics(input: RuntimeDiagnosticsInput<K>): RuntimeDiagnosticsPayload;
 }

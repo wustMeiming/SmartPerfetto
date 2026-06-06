@@ -10,19 +10,16 @@ import {
   type RuntimeSelection,
 } from '../../agentRuntime/runtimeSelection';
 import {
-  getPiAgentCoreRuntimeDiagnostics,
-} from '../../agentRuntime/piAgentCoreRuntime';
-import {
-  getOpenCodeRuntimeDiagnostics,
-} from '../../agentRuntime/openCodeRuntime';
+  getRuntimeDiagnostics,
+} from '../../agentRuntime/runtimeDiagnostics';
+import type { RuntimeDiagnosticsPayload } from '../../agentRuntime/runtimeDescriptorTypes';
 import {
   EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
   EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
   OPENCODE_RUNTIME_KIND,
   PI_AGENT_CORE_RUNTIME_KIND,
 } from '../../agentRuntime/runtimeKinds';
-import { getClaudeRuntimeDiagnostics } from '../../agentv3/claudeConfig';
-import { getOpenAIRuntimeDiagnostics, hasOpenAICredentials } from '../../agentOpenAI/openAiConfig';
+import { hasOpenAICredentials } from '../../agentOpenAI/openAiConfig';
 import { getTraceProcessorPath } from '../../services/workingTraceProcessor';
 import { getProviderService } from '../../services/providerManager';
 import { parseAdbDevices } from './androidCapture';
@@ -31,7 +28,7 @@ import type { CaptureToolResolution } from '../types';
 
 export interface RuntimeGuardResult {
   selection: RuntimeSelection;
-  diagnostics: any;
+  diagnostics: RuntimeDiagnosticsPayload;
 }
 
 export interface RuntimeGuardOptions {
@@ -43,12 +40,18 @@ function providerIdFor(selection: RuntimeSelection): string | null {
   return selection.source === 'provider' ? selection.providerId ?? null : null;
 }
 
+function chosenSdkBinaryPath(sdkBinary: unknown): string | undefined {
+  if (typeof sdkBinary !== 'object' || sdkBinary === null) return undefined;
+  const chosenPath = (sdkBinary as { chosenPath?: unknown }).chosenPath;
+  return typeof chosenPath === 'string' ? chosenPath : undefined;
+}
+
 export function assertAnalysisRuntimeReady(options: RuntimeGuardOptions = {}): RuntimeGuardResult {
   const selection = resolveAgentRuntimeSelection(options.providerId, options.runtimeOverride);
   const providerId = providerIdFor(selection);
+  const diagnostics = getRuntimeDiagnostics(selection);
 
   if (selection.kind === 'openai-agents-sdk') {
-    const diagnostics = getOpenAIRuntimeDiagnostics(providerId);
     if (!hasOpenAICredentials(providerId)) {
       throw new Error(
         [
@@ -65,26 +68,20 @@ export function assertAnalysisRuntimeReady(options: RuntimeGuardOptions = {}): R
     selection.kind === EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND ||
     selection.kind === PI_AGENT_CORE_RUNTIME_KIND
   ) {
-    return {
-      selection,
-      diagnostics: getPiAgentCoreRuntimeDiagnostics(process.env, selection.kind),
-    };
+    return { selection, diagnostics };
   }
 
   if (selection.kind === EXPERIMENTAL_OPENCODE_RUNTIME_KIND || selection.kind === OPENCODE_RUNTIME_KIND) {
-    return {
-      selection,
-      diagnostics: getOpenCodeRuntimeDiagnostics(process.env, selection.kind),
-    };
+    return { selection, diagnostics };
   }
 
-  const diagnostics = getClaudeRuntimeDiagnostics(providerId);
   if (!isClaudeSdkBinaryUsable(diagnostics.sdkBinary)) {
+    const chosenPath = chosenSdkBinaryPath(diagnostics.sdkBinary);
     throw new Error(
       [
         'Claude Agent SDK runtime is selected but its native binary is not executable.',
-        diagnostics.sdkBinary?.chosenPath
-          ? `Resolved binary: ${diagnostics.sdkBinary.chosenPath}`
+        chosenPath
+          ? `Resolved binary: ${chosenPath}`
           : 'No SDK native binary was resolved.',
         'Reinstall backend dependencies, or set CLAUDE_BINARY_PATH to an executable Claude Agent SDK binary.',
       ].join(' '),
@@ -115,7 +112,7 @@ export interface DoctorReport {
   };
   cliHome: string;
   runtime: RuntimeSelection;
-  runtimeDiagnostics: any;
+  runtimeDiagnostics: RuntimeDiagnosticsPayload;
   traceProcessor: {
     path: string;
     exists: boolean;
@@ -143,16 +140,7 @@ export interface DoctorReport {
 
 export function collectDoctorReport(cliHome: string): DoctorReport {
   const selection = resolveAgentRuntimeSelection();
-  const providerId = providerIdFor(selection);
-  const runtimeDiagnostics = selection.kind === 'openai-agents-sdk'
-    ? getOpenAIRuntimeDiagnostics(providerId)
-    : selection.kind === EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND ||
-      selection.kind === PI_AGENT_CORE_RUNTIME_KIND
-      ? getPiAgentCoreRuntimeDiagnostics(process.env, selection.kind)
-      : selection.kind === EXPERIMENTAL_OPENCODE_RUNTIME_KIND ||
-        selection.kind === OPENCODE_RUNTIME_KIND
-        ? getOpenCodeRuntimeDiagnostics(process.env, selection.kind)
-        : getClaudeRuntimeDiagnostics(providerId);
+  const runtimeDiagnostics = getRuntimeDiagnostics(selection);
   const traceProcessorPath = getTraceProcessorPath();
   const traceProcessorExists = fs.existsSync(traceProcessorPath);
   const traceProcessorExecutable = traceProcessorExists && isExecutable(traceProcessorPath);

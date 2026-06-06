@@ -45,6 +45,10 @@ describe('runtime guard', () => {
     process.env.CLAUDE_BINARY_PATH = createExecutableStub(tmpDir);
     const result = assertAnalysisRuntimeReady();
     expect(result.selection.kind).toBe('claude-agent-sdk');
+    expect(result.diagnostics).toMatchObject({
+      runtime: 'claude-agent-sdk',
+      configured: expect.any(Boolean),
+    });
   });
 
   test('rejects Claude runtime when explicit SDK binary path is not executable', () => {
@@ -62,6 +66,10 @@ describe('runtime guard', () => {
     process.env.OPENAI_BASE_URL = 'http://localhost:11434/v1';
     const result = assertAnalysisRuntimeReady();
     expect(result.selection.kind).toBe('openai-agents-sdk');
+    expect(result.diagnostics).toMatchObject({
+      runtime: 'openai-agents-sdk',
+      configured: true,
+    });
   });
 
   test('does not treat the hidden experimental runtime as Claude SDK', () => {
@@ -71,6 +79,7 @@ describe('runtime guard', () => {
     const result = assertAnalysisRuntimeReady({ providerId: null });
     expect(result.selection.kind).toBe('experimental-pi-agent-core');
     expect(result.diagnostics).toMatchObject({
+      runtime: 'experimental-pi-agent-core',
       configured: true,
       experimental: true,
       package: '@earendil-works/pi-agent-core',
@@ -84,6 +93,7 @@ describe('runtime guard', () => {
     const result = assertAnalysisRuntimeReady({ providerId: null });
     expect(result.selection.kind).toBe('pi-agent-core');
     expect(result.diagnostics).toMatchObject({
+      runtime: 'pi-agent-core',
       configured: true,
       experimental: false,
       modelConfigured: true,
@@ -100,6 +110,10 @@ describe('runtime guard', () => {
     });
     expect(result.selection.kind).toBe('claude-agent-sdk');
     expect(result.selection.source).toBe('snapshot');
+    expect(result.diagnostics).toMatchObject({
+      runtime: 'claude-agent-sdk',
+      configured: expect.any(Boolean),
+    });
   });
 });
 

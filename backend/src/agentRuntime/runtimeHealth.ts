@@ -3,58 +3,25 @@
 // This file is part of SmartPerfetto. See LICENSE for details.
 
 import { serverConfig } from '../config';
-import { getOpenAIRuntimeDiagnostics } from '../agentOpenAI';
-import { getClaudeRuntimeDiagnostics } from '../agentv3/claudeConfig';
 import { collectEnvCredentialSources } from './envCredentialSources';
 import { resolveAgentRuntimeSelection } from './runtimeSelection';
 import { getProviderService } from '../services/providerManager';
 import { getSmartPerfettoVersion } from '../version';
 import {
-  getPiAgentCoreRuntimeDiagnostics,
-} from './piAgentCoreRuntime';
-import {
-  getOpenCodeRuntimeDiagnostics,
-} from './openCodeRuntime';
-import {
-  EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
-  EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
-  OPENCODE_RUNTIME_KIND,
-  PI_AGENT_CORE_RUNTIME_KIND,
-} from './runtimeKinds';
+  getRuntimeDiagnosticModel,
+  getRuntimeDiagnosticProviderMode,
+  getRuntimeDiagnostics,
+} from './runtimeDiagnostics';
 
 export function buildRuntimeHealthPayload(now: Date = new Date()) {
   const runtimeSelection = resolveAgentRuntimeSelection();
   const providerSvc = getProviderService();
   const activeProvider = providerSvc.list().find(p => p.isActive);
-  const selectedProviderId = runtimeSelection.source === 'provider'
-    ? runtimeSelection.providerId
-    : null;
-  const claudeDiagnostics = getClaudeRuntimeDiagnostics(
-    runtimeSelection.kind === 'claude-agent-sdk' ? selectedProviderId : null,
-  );
-  const openAIDiagnostics = getOpenAIRuntimeDiagnostics(
-    runtimeSelection.kind === 'openai-agents-sdk' ? selectedProviderId : null,
-  );
-  const selectedDiagnostics = runtimeSelection.kind === 'openai-agents-sdk'
-    ? openAIDiagnostics
-    : runtimeSelection.kind === PI_AGENT_CORE_RUNTIME_KIND ||
-      runtimeSelection.kind === EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND
-      ? getPiAgentCoreRuntimeDiagnostics(process.env, runtimeSelection.kind)
-      : runtimeSelection.kind === EXPERIMENTAL_OPENCODE_RUNTIME_KIND ||
-        runtimeSelection.kind === OPENCODE_RUNTIME_KIND
-        ? getOpenCodeRuntimeDiagnostics(process.env, runtimeSelection.kind)
-        : claudeDiagnostics;
-  const selectedModel = 'model' in selectedDiagnostics
-    ? selectedDiagnostics.model
-    : selectedDiagnostics.runtime === EXPERIMENTAL_OPENCODE_RUNTIME_KIND ||
-      selectedDiagnostics.runtime === OPENCODE_RUNTIME_KIND
-      ? 'opencode'
-    : 'modelConfigured' in selectedDiagnostics && selectedDiagnostics.modelConfigured
-      ? 'pi-agent-core'
-      : '';
-  const selectedProviderMode = 'providerMode' in selectedDiagnostics
-    ? selectedDiagnostics.providerMode
-    : selectedDiagnostics.runtime;
+  const selectedDiagnostics = getRuntimeDiagnostics(runtimeSelection, {
+    env: process.env,
+  });
+  const selectedModel = getRuntimeDiagnosticModel(selectedDiagnostics);
+  const selectedProviderMode = getRuntimeDiagnosticProviderMode(selectedDiagnostics);
   const envSources = collectEnvCredentialSources(process.env, 'health');
   const providerOverridesEnv = runtimeSelection.source === 'provider' && envSources.length > 0;
 

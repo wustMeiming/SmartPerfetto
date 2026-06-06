@@ -36,8 +36,16 @@ export {
 export {
   type EngineCapabilities,
   type RuntimeDiagnosticsInput,
+  type RuntimeDiagnosticsPayload,
   type RuntimeEngineDescriptor,
 } from './runtimeDescriptorTypes';
+export {
+  asRuntimeDiagnosticsPayload,
+  getRuntimeDiagnosticModel,
+  getRuntimeDiagnosticProviderMode,
+  getRuntimeDiagnostics,
+  type GetRuntimeDiagnosticsInput,
+} from './runtimeDiagnostics';
 export {
   createRuntimeRegistryForSelection,
   type RuntimeEngineDefinition,

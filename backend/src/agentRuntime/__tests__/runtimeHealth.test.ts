@@ -46,6 +46,15 @@ function restoreEnv(): void {
   }
 }
 
+function expectRuntimeDiagnosticsShape(payload: any, runtime: string): void {
+  expect(payload.aiEngine.diagnostics).toMatchObject({
+    runtime,
+    configured: expect.any(Boolean),
+  });
+  expect(typeof payload.aiEngine.model).toBe('string');
+  expect(typeof payload.aiEngine.providerMode).toBe('string');
+}
+
 describe('buildRuntimeHealthPayload', () => {
   let dir: string;
 
@@ -62,6 +71,33 @@ describe('buildRuntimeHealthPayload', () => {
     await fsp.rm(dir, { recursive: true, force: true });
   });
 
+  it('reports default Claude runtime diagnostics without leaking credentials', () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-claude-secret';
+    process.env.CLAUDE_MODEL = 'claude-test';
+    process.env.CLAUDE_LIGHT_MODEL = 'claude-light';
+
+    const payload = buildRuntimeHealthPayload(new Date('2026-05-20T00:00:00.000Z'));
+
+    expectRuntimeDiagnosticsShape(payload, 'claude-agent-sdk');
+    expect(payload.aiEngine).toMatchObject({
+      runtime: 'claude-agent-sdk',
+      model: 'claude-test',
+      providerMode: 'anthropic_direct',
+      configured: true,
+      source: 'default',
+      credentialSource: 'env-or-default',
+      envCredentialSources: ['anthropic_api_key'],
+      providerOverridesEnv: false,
+    });
+    expect(payload.aiEngine.diagnostics).toMatchObject({
+      runtime: 'claude-agent-sdk',
+      providerMode: 'anthropic_direct',
+      lightModel: 'claude-light',
+      credentialSources: ['anthropic_api_key'],
+    });
+    expect(JSON.stringify(payload)).not.toContain('sk-claude-secret');
+  });
+
   it('reports effective OpenAI env fallback details without leaking URL secrets', () => {
     process.env.SMARTPERFETTO_AGENT_RUNTIME = 'openai-agents-sdk';
     process.env.OPENAI_API_KEY = 'sk-env-secret';
@@ -72,6 +108,7 @@ describe('buildRuntimeHealthPayload', () => {
 
     const payload = buildRuntimeHealthPayload(new Date('2026-05-20T00:00:00.000Z'));
 
+    expectRuntimeDiagnosticsShape(payload, 'openai-agents-sdk');
     expect(payload.version).toMatch(/^\d+\.\d+\.\d+/);
     expect(payload.aiEngine).toMatchObject({
       runtime: 'openai-agents-sdk',
@@ -84,6 +121,8 @@ describe('buildRuntimeHealthPayload', () => {
       providerOverridesEnv: false,
     });
     expect(payload.aiEngine.diagnostics).toMatchObject({
+      runtime: 'openai-agents-sdk',
+      configured: true,
       protocol: 'chat_completions',
       baseUrl: 'https://env.example/v1',
       lightModel: 'glm-4.5-air',
@@ -115,6 +154,7 @@ describe('buildRuntimeHealthPayload', () => {
 
     const payload = buildRuntimeHealthPayload(new Date('2026-05-20T00:00:00.000Z'));
 
+    expectRuntimeDiagnosticsShape(payload, 'openai-agents-sdk');
     expect(payload.aiEngine).toMatchObject({
       runtime: 'openai-agents-sdk',
       model: 'glm-5.1',
@@ -129,6 +169,8 @@ describe('buildRuntimeHealthPayload', () => {
     });
     expect(payload.aiEngine.envCredentialSources).toEqual(['openai_api_key', 'openai_base_url']);
     expect(payload.aiEngine.diagnostics).toMatchObject({
+      runtime: 'openai-agents-sdk',
+      configured: true,
       baseUrl: 'https://provider.example/api/paas/v4',
       protocol: 'chat_completions',
       lightModel: 'glm-4.5-air',
@@ -148,6 +190,7 @@ describe('buildRuntimeHealthPayload', () => {
 
     const payload = buildRuntimeHealthPayload(new Date('2026-05-20T00:00:00.000Z'));
 
+    expectRuntimeDiagnosticsShape(payload, 'pi-agent-core');
     expect(payload.aiEngine).toMatchObject({
       runtime: 'pi-agent-core',
       model: 'pi-agent-core',
@@ -162,6 +205,8 @@ describe('buildRuntimeHealthPayload', () => {
       providerOverridesEnv: false,
     });
     expect(payload.aiEngine.diagnostics).toMatchObject({
+      runtime: 'pi-agent-core',
+      configured: true,
       experimental: false,
       modelConfigured: true,
       modulePath: '/tmp/pi-agent-core/dist/index.js',
@@ -178,6 +223,7 @@ describe('buildRuntimeHealthPayload', () => {
 
     const payload = buildRuntimeHealthPayload(new Date('2026-05-20T00:00:00.000Z'));
 
+    expectRuntimeDiagnosticsShape(payload, 'opencode');
     expect(payload.aiEngine).toMatchObject({
       runtime: 'opencode',
       model: 'opencode',
@@ -192,10 +238,23 @@ describe('buildRuntimeHealthPayload', () => {
       providerOverridesEnv: false,
     });
     expect(payload.aiEngine.diagnostics).toMatchObject({
+      runtime: 'opencode',
+      configured: true,
       experimental: false,
       modelConfigured: true,
       modulePath: '/tmp/opencode-sdk/dist/index.js',
     });
     expect(JSON.stringify(payload)).not.toContain('sk-opencode-secret');
+  });
+
+  it('routes health diagnostics through the shared runtime diagnostics resolver', async () => {
+    const source = await fsp.readFile(path.resolve(__dirname, '..', 'runtimeHealth.ts'), 'utf8');
+
+    expect(source).toContain('getRuntimeDiagnostics');
+    expect(source).not.toMatch(/getClaudeRuntimeDiagnostics/);
+    expect(source).not.toMatch(/getOpenAIRuntimeDiagnostics/);
+    expect(source).not.toMatch(/getPiAgentCoreRuntimeDiagnostics/);
+    expect(source).not.toMatch(/getOpenCodeRuntimeDiagnostics/);
+    expect(source).not.toMatch(/EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND|EXPERIMENTAL_OPENCODE_RUNTIME_KIND/);
   });
 });
