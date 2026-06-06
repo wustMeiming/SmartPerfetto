@@ -148,6 +148,8 @@ describe('AnalysisHarness hidden strangler', () => {
     expect(productionRuntimeRegistry.listRuntimeKinds()).toEqual([
       'claude-agent-sdk',
       'openai-agents-sdk',
+      'pi-agent-core',
+      'opencode',
     ]);
     expect(productionRuntimeRegistry.has('analysis-harness')).toBe(false);
   });
