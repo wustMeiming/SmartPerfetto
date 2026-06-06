@@ -55,6 +55,12 @@ interface VerifyOptions {
   codeAwareMode?: CodeAwareMode;
   /** Registered codebases exposed to this verification run. */
   codebaseIds: string[];
+  /**
+   * undefined = use active Provider Manager profile if configured.
+   * string = use that explicit provider.
+   * null = force env/default fallback and ignore active providers.
+   */
+  providerId?: string | null;
   /** Require semantic source-level code references in the final conclusion. */
   requireCodeRef: boolean;
   /** Require analysis_completed claim verifier output to pass with no unsupported claims. */
@@ -153,6 +159,7 @@ function printUsage(): void {
   console.log('  --code-aware <off|metadata_only|provider_send>');
   console.log('                                      Forward codeAwareMode to the backend');
   console.log('  --codebase-id <id>                 Registered codebase id to expose; repeatable');
+  console.log('  --provider-id <id|env|null>        Provider id, or env/null to ignore active providers');
   console.log('  --require-code-ref                 Require source-level code refs in conclusion/analysis_completed text');
   console.log('  --require-claim-verifier-ok        Require analysis_completed claim verifier to pass with no unsupported claims');
   console.log('  --require-non-partial              Fail if analysis_completed is marked partial');
@@ -445,6 +452,15 @@ function parseArgs(argv: string[]): VerifyOptions {
       continue;
     }
 
+    if (arg === '--provider-id') {
+      if (!next) {
+        throw new Error('--provider-id requires a value');
+      }
+      options.providerId = normalizeProviderIdArg(next);
+      i += 1;
+      continue;
+    }
+
     if (arg === '--require-text') {
       if (!next) {
         throw new Error('--require-text requires a value');
@@ -522,6 +538,17 @@ function parseArgs(argv: string[]): VerifyOptions {
   }
 
   return options;
+}
+
+function normalizeProviderIdArg(value: string): string | null {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'env' || normalized === 'null' || normalized === 'none' || normalized === 'default') {
+    return null;
+  }
+  if (value.trim() === '') {
+    throw new Error('--provider-id must not be empty');
+  }
+  return value;
 }
 
 function createVerificationApp(): express.Express {
@@ -933,9 +960,9 @@ async function main(): Promise<void> {
     throw new Error(`Trace file not found: ${options.tracePath}`);
   }
 
-  const runtimeSelection = resolveAgentRuntimeSelection();
-  if (runtimeSelection.kind === 'openai-agents-sdk' && !hasOpenAICredentials()) {
-    const diagnostics = getOpenAIRuntimeDiagnostics();
+  const runtimeSelection = resolveAgentRuntimeSelection(options.providerId);
+  if (runtimeSelection.kind === 'openai-agents-sdk' && !hasOpenAICredentials(options.providerId)) {
+    const diagnostics = getOpenAIRuntimeDiagnostics(options.providerId);
     throw new Error(
       'OpenAI Agents SDK runtime is selected but no usable OpenAI-compatible credentials were found. ' +
       diagnostics.configHint
@@ -976,6 +1003,7 @@ async function main(): Promise<void> {
       body: JSON.stringify({
         traceId,
         query: options.query,
+        ...(options.providerId !== undefined ? { providerId: options.providerId } : {}),
         options: {
           maxRounds: options.maxRounds,
           confidenceThreshold: options.confidenceThreshold,

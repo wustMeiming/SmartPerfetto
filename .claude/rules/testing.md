@@ -26,6 +26,7 @@ and the 6-trace scene regression gate.
 | Strategy/template Markdown | `cd backend && npm run validate:strategies` plus scene trace regression |
 | Frontend generated types | `cd backend && npm run generate:frontend-types` plus relevant tests |
 | AI plugin UI | Browser verification in `start-dev.sh`, relevant `perfetto/ui` tests/typecheck, then `./scripts/update-frontend.sh` |
+| Perfetto upstream sync, trace processor pin, SQL/stdlib index, or committed UI prebuild | Follow `.claude/rules/perfetto-sync.md`; normally `git diff --check`, `npm run check:frontend-prebuild`, `npm --prefix backend run cli:e2e`, scene trace regression, submodule remote reachability, and Skill/Strategy validation when those files changed |
 | Code-aware analysis, codebase registry, source ingestion, symbol resolution, or CodeRef report/export | `npm --prefix backend run verify:codebase-aware` plus `npm run verify:pr` before landing |
 | npm CLI package/release | `npm --prefix backend run cli:pack-check` plus isolated install smoke |
 | Portable packaging/release | Shell syntax/static checks, Node script syntax checks, launcher cross-compile, full package build, and package manifest verification |
@@ -141,7 +142,10 @@ OPENAI_API_KEY=... npm run verify:e2e:deepseek-startup
 ```
 
 Agent SSE E2E runs that exercise the OpenAI runtime should use Deepseek by
-default, not GLM. The canonical scripts pin:
+default, not GLM. The canonical wrapper is
+`backend/scripts/run-deepseek-agent-e2e.cjs`; it loads `backend/.env`, prefers
+`DEEPSEEK_API_KEY` over `OPENAI_API_KEY`, passes `--provider-id env` so the
+verification request ignores active Provider Manager profiles, and pins:
 
 - `SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk`
 - `OPENAI_BASE_URL=https://api.deepseek.com/v1`
@@ -150,9 +154,10 @@ default, not GLM. The canonical scripts pin:
 - `OPENAI_LIGHT_MODEL=deepseek-v4-flash`
 - `OPENAI_MAX_OUTPUT_TOKENS=8192`
 
-Keep API keys out of committed files. Pass `OPENAI_API_KEY` through the shell
-environment or a local untracked env file only. `npm run verify:e2e:openai-startup`
-is a compatibility alias for the Deepseek startup gate.
+Keep API keys out of committed files. Pass `DEEPSEEK_API_KEY` or
+`OPENAI_API_KEY` through the shell environment or a local untracked env file
+only. `npm run verify:e2e:openai-startup` is a compatibility alias for the
+Deepseek startup gate.
 
 Scrolling:
 
@@ -160,6 +165,18 @@ Scrolling:
 cd backend
 OPENAI_API_KEY=... npm run verify:e2e:deepseek-scrolling
 ```
+
+Startup plus scrolling:
+
+```bash
+cd backend
+OPENAI_API_KEY=... npm run verify:e2e:deepseek
+```
+
+For CI-backed real-provider validation, use the manual GitHub Actions workflow
+`Agent Deepseek E2E`. It requires the repository secret `DEEPSEEK_API_KEY` and
+accepts `suite=all|startup|scrolling`; keep it manual because it consumes
+provider quota and secrets.
 
 Flutter TextureView and SurfaceView must be verified separately because their
 rendering pipelines differ:

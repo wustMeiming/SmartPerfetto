@@ -52,6 +52,9 @@ cd backend && npm run build
   commit.
 - Before feature or bug work, check the affected product surfaces in
   `.claude/rules/product-surface.md`.
+- Before syncing, rebasing, merging, or upgrading official Perfetto code,
+  trace processor prebuilts, SQL docs, stdlib indexes, or committed Perfetto UI
+  prebuilds, read `.claude/rules/perfetto-sync.md`.
 - Before publish, package, tag, npm, Docker, or portable release work, read
   `.claude/rules/release.md` plus `.claude/rules/git.md` and
   `.claude/rules/testing.md`.
@@ -80,6 +83,7 @@ Read the relevant detailed rule before touching that area:
 - `.claude/rules/skills.md`
 - `.claude/rules/codebase-aware.md`
 - `.claude/rules/product-surface.md`
+- `.claude/rules/perfetto-sync.md`
 - `.claude/rules/release.md`
 - `.claude/rules/testing.md`
 - `.claude/rules/git.md`
