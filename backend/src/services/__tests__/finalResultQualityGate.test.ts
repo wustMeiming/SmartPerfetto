@@ -243,6 +243,7 @@ describe('final result quality gate', () => {
     expect(issue?.code).toBe('empty_conclusion');
     expect(target.partial).toBe(true);
     expect(target.confidence).toBe(0.55);
+    expect(target.terminationReason).toBe('plan_incomplete');
     expect(target.terminationMessage).toContain('最终结果质量闸门');
   });
 

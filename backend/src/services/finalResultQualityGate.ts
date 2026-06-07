@@ -424,6 +424,7 @@ export function applyFinalResultQualityGate(input: {
 
   input.result.partial = true;
   input.result.confidence = Math.min(input.result.confidence || 0, 0.55);
+  input.result.terminationReason = input.result.terminationReason ?? 'plan_incomplete';
   input.result.terminationMessage = input.result.terminationMessage
     ? `${input.result.terminationMessage}\n\n${issue.message}`
     : issue.message;

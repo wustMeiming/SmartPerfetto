@@ -28,6 +28,7 @@ import {
 import {
   createClaudeMcpServer,
   loadLearnedSqlFixPairs,
+  MIN_PHASE_SUMMARY_CHARS,
 } from '../../../agentv3/claudeMcpServer';
 import {
   buildQuickSystemPrompt,
@@ -43,6 +44,7 @@ import type {
   AnalysisPlanV3,
   ClaudeAnalysisContext,
   Hypothesis,
+  PlanPhase,
   UncertaintyFlag,
 } from '../../../agentv3/types';
 import {
@@ -55,7 +57,10 @@ import {
 import type { McpToolDefinition } from '../../../agentv3/mcpToolRegistry';
 import type { JsonRpcRequest, JsonRpcResponse } from '../../../agentv3/standaloneMcpServer';
 import { RPC_ERROR_CODES } from '../../../agentv3/standaloneMcpServer';
-import { applyFinalResultQualityGate } from '../../../services/finalResultQualityGate';
+import {
+  applyFinalResultQualityGate,
+  hasDeliverableFinalReportHeading,
+} from '../../../services/finalResultQualityGate';
 import { getExtendedKnowledgeBase } from '../../../services/sqlKnowledgeBase';
 import { sanitizeCodeAwareText } from '../../../services/security/codeAwareOutputRegistry';
 import { getProviderService, type ProviderConfig, type ProviderScope } from '../../../services/providerManager';
@@ -1205,6 +1210,41 @@ export function getOpenCodePlanCompletionStatus(plan: AnalysisPlanV3 | null): { 
   return { complete: pending.length === 0, pending };
 }
 
+function isOpenCodeFinalReportPhase(phase: PlanPhase): boolean {
+  return /(?:综合结论|最终结论|结论|报告|final report|final conclusion|summary|recommendation)/i
+    .test(`${phase.name} ${phase.goal}`);
+}
+
+export function completeOpenCodeFinalReportPhaseIfDelivered(
+  plan: AnalysisPlanV3 | null,
+  conclusion: string,
+  outputLanguage: string,
+  now: () => number = Date.now,
+): PlanPhase | undefined {
+  if (!plan?.phases?.length) return undefined;
+  if (!hasDeliverableFinalReportHeading(conclusion)) return undefined;
+
+  const pendingPhases = plan.phases.filter(
+    (phase: any) => phase.status !== 'completed' && phase.status !== 'skipped',
+  );
+  if (pendingPhases.length !== 1) return undefined;
+
+  const [phase] = pendingPhases;
+  if (!phase || !isOpenCodeFinalReportPhase(phase)) return undefined;
+
+  phase.status = 'completed';
+  phase.completedAt = now();
+  phase.summary = localize(
+    outputLanguage as any,
+    '最终报告已由 OpenCode 直接交付；该最终结论阶段按完整报告自动闭合。',
+    'The final report was delivered by OpenCode; the final-report phase was auto-closed from the complete report.',
+  );
+  if (phase.summary.length < MIN_PHASE_SUMMARY_CHARS) {
+    phase.summary = `${phase.summary} OK`;
+  }
+  return phase;
+}
+
 function formatIncompletePlanMessage(
   status: { pending: string[] },
   outputLanguage: string,
@@ -1546,6 +1586,24 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       conclusion = sanitizeCodeAwareText(sessionId, conclusion);
     }
 
+    const closedFinalPhase = completeOpenCodeFinalReportPhaseIfDelivered(
+      prep.analysisPlan.current,
+      conclusion,
+      prep.analysisRunSpec.outputLanguage,
+    );
+    if (closedFinalPhase) {
+      this.emitUpdate({
+        type: 'plan_phase_updated',
+        content: {
+          phaseId: closedFinalPhase.id,
+          status: closedFinalPhase.status,
+          summary: closedFinalPhase.summary,
+          phaseName: closedFinalPhase.name,
+        },
+        timestamp: Date.now(),
+      });
+    }
+
     const planStatus = getOpenCodePlanCompletionStatus(prep.analysisPlan.current);
     let partial = false;
     let terminationReason: AnalysisResult['terminationReason'];
@@ -1574,11 +1632,9 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       terminationMessage,
     };
 
+    const wasPartialBeforeQualityGate = result.partial === true;
     const gateIssue = applyFinalResultQualityGate({ result, query, sceneType: prep.sceneType });
-    if (gateIssue && !result.partial) {
-      result.partial = true;
-      result.terminationReason = result.terminationReason ?? 'plan_incomplete';
-      result.terminationMessage = gateIssue.message;
+    if (gateIssue && !wasPartialBeforeQualityGate) {
       result.confidence = estimateConfidence(result.findings, true);
       this.emitUpdate({
         type: 'degraded',

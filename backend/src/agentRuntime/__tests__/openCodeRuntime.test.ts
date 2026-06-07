@@ -9,6 +9,7 @@ import path from 'path';
 import {
   EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
   OpenCodeRuntime,
+  completeOpenCodeFinalReportPhaseIfDelivered,
   createOpenCodeHardenedConfig,
   createOpenCodeStandaloneMcpConfig,
   createOpenCodeStandaloneMcpToolNames,
@@ -396,6 +397,67 @@ describe('experimental OpenCode runtime contract', () => {
         { id: 'p2', status: 'in_progress' },
       ],
     } as any)).toEqual({ complete: false, pending: ['p2'] });
+  });
+
+  it('auto-closes only the final OpenCode report phase after a deliverable report is present', () => {
+    const plan = {
+      phases: [
+        {
+          id: 'p1',
+          name: '概览采集',
+          goal: '采集滑动概览',
+          status: 'completed',
+        },
+        {
+          id: 'p3',
+          name: '综合结论',
+          goal: '输出完整分析报告',
+          status: 'in_progress',
+        },
+      ],
+    } as any;
+    const report = [
+      '# 滑动性能分析报告',
+      '',
+      '## 代表帧分析',
+      '- evidence/source: art-frame-detail 显示主线程阻塞 18.2ms。',
+      '',
+      '## 优化建议',
+      '- 将长任务拆分到异步阶段。',
+    ].join('\n');
+
+    const closed = completeOpenCodeFinalReportPhaseIfDelivered(plan, report, 'zh-CN', () => 42);
+
+    expect(closed?.id).toBe('p3');
+    expect(plan.phases[1]).toMatchObject({
+      status: 'completed',
+      completedAt: 42,
+      summary: expect.stringContaining('最终报告已由 OpenCode 直接交付'),
+    });
+    expect(getOpenCodePlanCompletionStatus(plan)).toEqual({ complete: true, pending: [] });
+  });
+
+  it('does not auto-close OpenCode phases when earlier work is still pending', () => {
+    const plan = {
+      phases: [
+        {
+          id: 'p1',
+          name: '概览采集',
+          goal: '采集滑动概览',
+          status: 'in_progress',
+        },
+        {
+          id: 'p3',
+          name: '综合结论',
+          goal: '输出完整分析报告',
+          status: 'in_progress',
+        },
+      ],
+    } as any;
+    const report = '# 滑动性能分析报告\n\n## 代表帧分析\n- evidence/source: art-frame-detail';
+
+    expect(completeOpenCodeFinalReportPhaseIfDelivered(plan, report, 'zh-CN', () => 42)).toBeUndefined();
+    expect(getOpenCodePlanCompletionStatus(plan)).toEqual({ complete: false, pending: ['p1', 'p3'] });
   });
 
   it('projects OpenCode events without synthesizing route terminal events', () => {

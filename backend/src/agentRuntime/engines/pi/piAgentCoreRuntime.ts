@@ -51,6 +51,7 @@ import type {
   UncertaintyFlag,
 } from '../../../agentv3/types';
 import {
+  assessFinalResultQuality,
   applyFinalResultQualityGate,
   hasDeliverableFinalReportHeading,
   looksLikeProcessNarrationConclusion,
@@ -65,6 +66,7 @@ import type { RuntimeSelection } from '../../runtimeSelection';
 import type { RuntimeEngineDefinition, RuntimeFactoryInput } from '../../runtimeRegistry';
 import type { EngineCapabilities } from '../../runtimeDescriptorTypes';
 import { createAnalysisRunSpec, type AnalysisRunSpec } from '../../analysisRunSpec';
+import { loadPromptTemplate } from '../../../agentv3/strategyLoader';
 import {
   EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
   PI_AGENT_CORE_RUNTIME_KIND,
@@ -107,6 +109,7 @@ type EnvLike = Record<string, string | undefined>;
 const MAX_PI_OPAQUE_MESSAGES = 80;
 const MAX_PI_OPAQUE_BYTES = 512 * 1024;
 const SENSITIVE_OPAQUE_KEY_RE = /(?:api[_-]?key|auth|authorization|bearer|password|secret|token)/i;
+const PI_AGENT_CORE_MAX_FINAL_REPORT_CONTINUATIONS = 1;
 
 interface PiAgentCoreAgentState {
   messages?: unknown[];
@@ -473,6 +476,50 @@ function formatIncompletePlanMessage(
   );
 }
 
+export function shouldContinuePiAgentCoreFinalReportAfterPlanComplete(input: {
+  quickMode: boolean;
+  planStatus: ReturnType<typeof getPiAgentCorePlanCompletionStatus>;
+  finalReportContinuations: number;
+  conclusion: string;
+  query: string;
+  sceneType: SceneType;
+}): boolean {
+  if (
+    input.quickMode ||
+    !input.planStatus.complete ||
+    input.finalReportContinuations >= PI_AGENT_CORE_MAX_FINAL_REPORT_CONTINUATIONS
+  ) {
+    return false;
+  }
+
+  const issue = assessFinalResultQuality({
+    result: {
+      sessionId: 'pi-agent-core-final-report-quality-check',
+      success: true,
+      findings: [],
+      hypotheses: [],
+      conclusion: input.conclusion,
+      confidence: 1,
+      rounds: 1,
+      totalDurationMs: 0,
+    },
+    query: input.query,
+    sceneType: input.sceneType,
+  });
+  return Boolean(issue);
+}
+
+function loadPiFinalReportContinuationPrompt(outputLanguage: OutputLanguage): string {
+  const templateName = outputLanguage === 'en'
+    ? 'prompt-openai-final-report-continuation-en'
+    : 'prompt-openai-final-report-continuation-zh';
+  const template = loadPromptTemplate(templateName);
+  if (!template) {
+    throw new Error(`Missing Pi final-report continuation prompt template: ${templateName}`);
+  }
+  return template;
+}
+
 function estimateConfidence(findings: Finding[], partial: boolean): number {
   if (findings.length === 0) return partial ? 0.25 : 0.35;
   const avg = findings.reduce((sum, finding) => sum + (finding.confidence ?? 0.5), 0) / findings.length;
@@ -491,6 +538,17 @@ function summarizePiToolResult(result: unknown): string {
   return text.length > 1200 ? `${text.slice(0, 1200)}...` : text;
 }
 
+function extractPiAssistantErrorMessage(message: unknown): string | undefined {
+  const assistant = message as { role?: unknown; stopReason?: unknown; errorMessage?: unknown } | undefined;
+  if (!assistant || assistant.role !== 'assistant') return undefined;
+  const errorMessage = typeof assistant.errorMessage === 'string' && assistant.errorMessage.trim()
+    ? assistant.errorMessage.trim()
+    : undefined;
+  const stopReason = typeof assistant.stopReason === 'string' ? assistant.stopReason : undefined;
+  if (stopReason !== 'error' && stopReason !== 'aborted' && !errorMessage) return undefined;
+  return errorMessage || `Pi Agent Core assistant stopped with ${stopReason || 'an execution error'}.`;
+}
+
 export function projectPiAgentCoreEventToStreamingUpdate(
   event: PiAgentCoreEvent,
   timestamp = Date.now(),
@@ -506,6 +564,20 @@ export function projectPiAgentCoreEventToStreamingUpdate(
       // SmartPerfetto keeps the final report route-owned, so Pi text deltas are
       // read from agent state after completion instead of emitted live.
       return undefined;
+    case 'message_end':
+    case 'turn_end': {
+      const errorMessage = extractPiAssistantErrorMessage(event.message);
+      return errorMessage
+        ? {
+            type: 'error',
+            content: {
+              module: 'pi-agent-core',
+              message: errorMessage,
+            },
+            timestamp,
+          }
+        : undefined;
+    }
     case 'tool_execution_start':
       return {
         type: 'agent_task_dispatched',
@@ -566,6 +638,57 @@ function stringifyPiToolResult(result: RuntimeToolResult): Array<{ type: 'text';
   }));
 }
 
+function normalizeStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value
+    .map(item => typeof item === 'string' ? item.trim() : '')
+    .filter(Boolean);
+  return items.length > 0 ? items : undefined;
+}
+
+export function repairPiAgentCoreSubmitPlanArgs(args: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(args.phases)) return args;
+
+  const rootGoal = typeof args.goal === 'string' ? args.goal.trim() : undefined;
+  const rootExpectedTools = normalizeStringArray(args.expectedTools);
+  const phases = args.phases.map((phase, index) => {
+    const source = phase && typeof phase === 'object' && !Array.isArray(phase)
+      ? phase as Record<string, unknown>
+      : {};
+    const id = typeof source.id === 'string' && source.id.trim()
+      ? source.id.trim()
+      : `p${index + 1}`;
+    const goal = typeof source.goal === 'string' && source.goal.trim()
+      ? source.goal.trim()
+      : rootGoal;
+    const name = typeof source.name === 'string' && source.name.trim()
+      ? source.name.trim()
+      : id;
+
+    return {
+      ...source,
+      id,
+      name,
+      goal: goal || name,
+      expectedTools: normalizeStringArray(source.expectedTools) ?? rootExpectedTools ?? [],
+      ...(source.expectedCalls !== undefined || args.expectedCalls !== undefined
+        ? { expectedCalls: source.expectedCalls ?? args.expectedCalls }
+        : {}),
+    };
+  });
+  const repaired: Record<string, unknown> = {
+    phases,
+    successCriteria: typeof args.successCriteria === 'string' && args.successCriteria.trim()
+      ? args.successCriteria.trim()
+      : rootGoal || 'analysis_complete',
+  };
+  if (args.waivers !== undefined) {
+    repaired.waivers = args.waivers;
+  }
+
+  return repaired;
+}
+
 export function createPiAgentCoreToolFromSharedSpec(
   spec: SharedToolSpec,
   options: {
@@ -593,7 +716,10 @@ export function createPiAgentCoreToolFromSharedSpec(
       }
       onUpdate?.({ type: 'smartperfetto_tool_started', toolCallId, toolName: spec.name });
       const normalizedArgs = normalizeRuntimeToolArgs(params) as Record<string, unknown>;
-      const result = await spec.handler(normalizedArgs, {
+      const toolArgs = spec.name === 'submit_plan'
+        ? repairPiAgentCoreSubmitPlanArgs(normalizedArgs)
+        : normalizedArgs;
+      const result = await spec.handler(toolArgs, {
         runtime: options.runtimeKind ?? PI_AGENT_CORE_RUNTIME_KIND,
         toolCallId,
         signal,
@@ -923,6 +1049,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     this.activeAgents.set(sessionId, agent);
 
     let rounds = 0;
+    let finalReportContinuations = 0;
     const unsubscribe = agent.subscribe((event) => {
       if (event.type === 'turn_end') rounds++;
       const update = projectPiAgentCoreEventToStreamingUpdate(event);
@@ -945,6 +1072,46 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
         timestamp: Date.now(),
       });
       await agent.prompt(prep.prompt);
+      while (finalReportContinuations < PI_AGENT_CORE_MAX_FINAL_REPORT_CONTINUATIONS) {
+        const latestAssistant = latestAssistantMessage(agent.state.messages);
+        const stopReason = typeof latestAssistant?.stopReason === 'string'
+          ? latestAssistant.stopReason
+          : undefined;
+        const errorMessage = typeof latestAssistant?.errorMessage === 'string'
+          ? latestAssistant.errorMessage
+          : agent.state.errorMessage;
+        if (stopReason === 'error' || stopReason === 'aborted' || errorMessage) break;
+
+        const candidateConclusion = sanitizePiAgentCoreConclusionText(
+          selectAssistantConclusion(agent.state.messages),
+        );
+        const planStatus = getPiAgentCorePlanCompletionStatus(prep.analysisPlan.current);
+        if (!shouldContinuePiAgentCoreFinalReportAfterPlanComplete({
+          quickMode: prep.quickMode,
+          planStatus,
+          finalReportContinuations,
+          conclusion: candidateConclusion,
+          query,
+          sceneType: prep.sceneType,
+        })) {
+          break;
+        }
+
+        finalReportContinuations++;
+        this.emit('update', {
+          type: 'progress',
+          content: {
+            module: 'pi-agent-core',
+            message: localize(
+              prep.analysisRunSpec.outputLanguage,
+              '最终报告仍需补齐 Final Report Contract，继续整理完整结论。',
+              'The final report still needs Final Report Contract completion; continuing to assemble the full conclusion.',
+            ),
+          },
+          timestamp: Date.now(),
+        });
+        await agent.prompt(loadPiFinalReportContinuationPrompt(prep.analysisRunSpec.outputLanguage));
+      }
     } finally {
       this.rememberOpaqueState(sessionId, agent);
       unsubscribe();
@@ -1030,11 +1197,9 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       terminationMessage,
     };
 
+    const wasPartialBeforeQualityGate = result.partial === true;
     const gateIssue = applyFinalResultQualityGate({ result, query, sceneType: prep.sceneType });
-    if (gateIssue && !result.partial) {
-      result.partial = true;
-      result.terminationReason = result.terminationReason ?? 'plan_incomplete';
-      result.terminationMessage = gateIssue.message;
+    if (gateIssue && !wasPartialBeforeQualityGate) {
       result.confidence = estimateConfidence(result.findings, true);
       this.emit('update', {
         type: 'degraded',

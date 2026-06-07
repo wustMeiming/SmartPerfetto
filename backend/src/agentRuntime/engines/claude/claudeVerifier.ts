@@ -25,7 +25,7 @@ import { expectedCallMatchesRecord, expectedToolNames, formatExpectedCall } from
 import type { SceneType } from '../../../agentv3/sceneClassifier';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from '../../../agentv3/outputLanguage';
 import { backendLogPath } from '../../../runtimePaths';
-import { getFinalReportContract } from '../../../agentv3/strategyLoader';
+import { getFinalReportContract, loadPromptTemplate, renderTemplate } from '../../../agentv3/strategyLoader';
 import { assessFinalReportContractCompleteness } from '../../../services/finalReportContractGate';
 
 /** Hardcoded known misdiagnosis patterns — common false positives in performance analysis. */
@@ -953,6 +953,47 @@ export function isConclusionIncomplete(conclusion: string): boolean {
   return false;
 }
 
+function extractMissingFinalReportContractLabels(issues: readonly VerificationIssue[]): string[] {
+  const labels: string[] = [];
+  const patterns = [
+    /Final Report Contract[^：:]*[：:]\s*([^。.\n]+)/i,
+    /required structure[：:]\s*([^。.\n]+)/i,
+  ];
+
+  for (const issue of issues) {
+    for (const pattern of patterns) {
+      const match = issue.message.match(pattern);
+      if (!match?.[1]) continue;
+      labels.push(
+        ...match[1]
+          .split(/[、,，;；]/)
+          .map(label => label.trim())
+          .filter(Boolean),
+      );
+    }
+  }
+
+  return [...new Set(labels)];
+}
+
+function renderMissingFinalReportContractSectionInstructions(
+  issues: readonly VerificationIssue[],
+  outputLanguage: OutputLanguage,
+): string {
+  const labels = extractMissingFinalReportContractLabels(issues);
+  if (labels.length === 0) return '';
+
+  const templateName = outputLanguage === 'en'
+    ? 'prompt-final-report-missing-sections-en'
+    : 'prompt-final-report-missing-sections-zh';
+  const template = loadPromptTemplate(templateName);
+  if (!template) throw new Error(`Missing final-report missing-sections prompt template: ${templateName}`);
+
+  return '\n' + renderTemplate(template, {
+    missing_sections: labels.map(label => `- ${label}`).join('\n'),
+  });
+}
+
 function renderFinalReportContractGuidance(
   sceneType?: SceneType,
   outputLanguage: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE,
@@ -1007,6 +1048,10 @@ export function generateCorrectionPrompt(
   const warningIssues = issues.filter(i => i.severity === 'warning');
   const finalReportContractGuidance = renderFinalReportContractGuidance(sceneType, outputLanguage);
   const originalConclusionForCorrection = originalConclusion.substring(0, 12_000);
+  const missingContractSectionInstructions = renderMissingFinalReportContractSectionInstructions(
+    issues,
+    outputLanguage,
+  );
 
   const issueList = errorIssues
     .map((i, idx) => `${idx + 1}. **[ERROR]** ${i.message}`)
@@ -1035,6 +1080,7 @@ ${issueList ? `Issues to resolve:\n${issueList}\n` : ''}${warningList}
 1. Address unfinished bookkeeping in the report text only: mark unresolved hypotheses as confirmed, rejected, or unknown from the already collected evidence, and explain any skipped phase as a limitation. Do not call tools during correction.
 2. Then output a complete structured analysis report in English. It must satisfy the active scene's Final Report Contract:
 ${finalReportContractGuidance}
+${missingContractSectionInstructions}
 3. Use the data already collected. Do not rerun invoke_skill just to fetch overview data again.
 4. Do not label the report as "corrected", "revised", or "verification feedback". Do not put verifier diagnostics, plan deviations, missing tool lists, tool-not-executed claims, or internal phase IDs at the top of the report; if a limitation is user-relevant, summarize it briefly inside the relevant evidence or limitations section.
 5. Do not claim that a tool or Skill was not executed. If evidence is limited, describe the confidence/limitation without asserting tool execution history.
@@ -1055,6 +1101,7 @@ ${issueList ? `待解决问题：\n${issueList}\n` : ''}${warningList}
 1. **只在报告正文中处理未完成事项**（根据已收集证据把未解决假设标记为 confirmed / rejected / unknown，并把跳过阶段写成限制说明；修正阶段不要调用工具）
 2. **然后直接输出完整的结构化分析报告**，必须满足当前场景的 Final Report Contract：
 ${finalReportContractGuidance}
+${missingContractSectionInstructions}
 3. **使用已收集的数据**，不需要重新调用 invoke_skill 获取概览数据
 4. 报告必须完整但克制；不要逐行复制已展示的大表，只引用关键行和 evidence/source。不要为了压缩长度裁剪关键结论或证据。
 5. 不要把报告标成“修正版/修正后/验证反馈”，不要在报告开头输出 verifier 诊断、计划执行偏差、缺失工具列表、工具未执行断言或内部 phase id；如果限制对用户有意义，只在对应证据/限制小节中简短说明。
@@ -1082,6 +1129,7 @@ ${issueList}${warningList}
    - **unresolved_hypothesis**: Mark every unresolved hypothesis as confirmed, rejected, or unknown from the already collected evidence.
 3. Output the corrected complete conclusion in English and satisfy the active scene's Final Report Contract:
 ${finalReportContractGuidance}
+${missingContractSectionInstructions}
 4. Do not label the report as "corrected", "revised", or "verification feedback". Do not put verifier diagnostics, plan deviations, missing tool lists, tool-not-executed claims, or internal phase IDs at the top of the report; if a limitation is user-relevant, summarize it briefly inside the relevant evidence or limitations section.
 5. Do not claim that a tool or Skill was not executed. If evidence is limited, describe the confidence/limitation without asserting tool execution history.
 
@@ -1106,6 +1154,7 @@ ${issueList}${warningList}
    - **unresolved_hypothesis**: 根据已收集证据把未解决假设标记为 confirmed / rejected / unknown
 3. 输出修正后的完整结论，并满足当前场景的 Final Report Contract：
 ${finalReportContractGuidance}
+${missingContractSectionInstructions}
 4. 结论必须完整但克制；不要逐行复制已展示的大表，只引用关键行和 evidence/source。不要为了压缩长度裁剪关键结论或证据。
 5. 不要把报告标成“修正版/修正后/验证反馈”，不要在报告开头输出 verifier 诊断、计划执行偏差、缺失工具列表、工具未执行断言或内部 phase id；如果限制对用户有意义，只在对应证据/限制小节中简短说明。
 6. 不要声称某个工具或 Skill 未执行；如果证据有限，只说明置信度或限制，不要编造工具执行历史。

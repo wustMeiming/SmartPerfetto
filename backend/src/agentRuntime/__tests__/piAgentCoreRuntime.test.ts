@@ -15,7 +15,9 @@ import {
   PI_AGENT_CORE_MODEL_JSON_ENV,
   PiAgentCoreRuntime,
   projectPiAgentCoreEventToStreamingUpdate,
+  repairPiAgentCoreSubmitPlanArgs,
   sanitizePiAgentCoreConclusionText,
+  shouldContinuePiAgentCoreFinalReportAfterPlanComplete,
   type PiAgentCoreEvent,
 } from '../piAgentCoreRuntime';
 import type { RuntimeToolResult, SharedToolSpec } from '../runtimeToolSpec';
@@ -207,6 +209,46 @@ describe('experimental Pi agent-core runtime contract', () => {
     ]);
   });
 
+  it('repairs recoverable Pi submit_plan argument drift before shared tool validation', () => {
+    const repaired = repairPiAgentCoreSubmitPlanArgs({
+      phases: [
+        {
+          id: 'p1',
+          name: '架构确认 + 概览采集',
+          goal: '确认渲染架构并采集滑动帧概览',
+          expectedTools: ['invoke_skill'],
+        },
+        { id: 'p2' },
+      ],
+      goal: '对主要掉帧根因类型进行机制级深钻',
+      expectedTools: ['invoke_skill', 'fetch_artifact'],
+      expectedCalls: [{ tool: 'invoke_skill', skillId: 'jank_frame_detail' }],
+      waivers: [{ aspectId: 'unsupported', reason: 'trace 不包含该场景所需的可验证事件，因此本轮无法覆盖。' }],
+    });
+
+    expect(repaired).toEqual({
+      phases: [
+        {
+          id: 'p1',
+          name: '架构确认 + 概览采集',
+          goal: '确认渲染架构并采集滑动帧概览',
+          expectedTools: ['invoke_skill'],
+          expectedCalls: [{ tool: 'invoke_skill', skillId: 'jank_frame_detail' }],
+        },
+        {
+          id: 'p2',
+          name: 'p2',
+          goal: '对主要掉帧根因类型进行机制级深钻',
+          expectedTools: ['invoke_skill', 'fetch_artifact'],
+          expectedCalls: [{ tool: 'invoke_skill', skillId: 'jank_frame_detail' }],
+        },
+      ],
+      successCriteria: '对主要掉帧根因类型进行机制级深钻',
+      waivers: [{ aspectId: 'unsupported', reason: 'trace 不包含该场景所需的可验证事件，因此本轮无法覆盖。' }],
+    });
+    expect(repaired).not.toHaveProperty('goal');
+  });
+
   it('fails closed when a shared tool is not request-allowed', () => {
     expect(() => createPiAgentCoreToolFromSharedSpec(createSharedSpec(), {
       allowedToolNames: new Set(['other_tool']),
@@ -290,6 +332,25 @@ describe('experimental Pi agent-core runtime contract', () => {
         },
       },
     })).toBeUndefined();
+  });
+
+  it('projects Pi assistant execution errors from terminal SDK messages', () => {
+    expect(projectPiAgentCoreEventToStreamingUpdate({
+      type: 'turn_end',
+      message: {
+        role: 'assistant',
+        stopReason: 'error',
+        errorMessage: 'No API provider registered for api: openai-compatible',
+      },
+      toolResults: [],
+    }, 7)).toEqual({
+      type: 'error',
+      content: {
+        module: 'pi-agent-core',
+        message: 'No API provider registered for api: openai-compatible',
+      },
+      timestamp: 7,
+    });
   });
 
   it('runs a hidden smoke analysis with an injected Pi agent-core module', async () => {
@@ -576,6 +637,69 @@ describe('experimental Pi agent-core runtime contract', () => {
     });
     expect(plan.phases[1].summary.length).toBeGreaterThanOrEqual(15);
     expect(getPiAgentCorePlanCompletionStatus(plan).complete).toBe(true);
+  });
+
+  it('continues Pi final report generation when completed plan still misses the scene contract', () => {
+    const planStatus = {
+      complete: true,
+      hasPlan: true,
+      pendingPhases: [],
+    };
+
+    expect(shouldContinuePiAgentCoreFinalReportAfterPlanComplete({
+      quickMode: false,
+      planStatus,
+      finalReportContinuations: 0,
+      query: '分析滑动性能',
+      sceneType: 'scrolling',
+      conclusion: [
+        '# 滑动性能分析报告',
+        '',
+        '## 1. 概览',
+        '真实掉帧 7 帧，最长帧 62.73ms。',
+        '',
+        '### 全帧根因分布',
+        '| 根因 | 帧数 | 占比 |',
+        '| --- | ---: | ---: |',
+        '| animation 同步阻塞 | 6 | 86% |',
+      ].join('\n'),
+    })).toBe(true);
+  });
+
+  it('does not continue Pi final report generation once the scene contract is satisfied', () => {
+    const planStatus = {
+      complete: true,
+      hasPlan: true,
+      pendingPhases: [],
+    };
+
+    expect(shouldContinuePiAgentCoreFinalReportAfterPlanComplete({
+      quickMode: false,
+      planStatus,
+      finalReportContinuations: 0,
+      query: '分析滑动性能',
+      sceneType: 'scrolling',
+      conclusion: [
+        '# 滑动性能分析报告',
+        '',
+        '## 1. 概览',
+        '真实掉帧 7 帧，最长帧 62.73ms。',
+        '',
+        '### 全帧根因分布',
+        '| 根因 | 帧数 | 占比 |',
+        '| --- | ---: | ---: |',
+        '| animation 同步阻塞 | 6 | 86% |',
+        '',
+        '### 代表帧分析',
+        '- 代表帧 frame_id=59665219：帧耗时 62.73ms，vsync_missed=7，超预算 54.4ms。关键 slice 为 CustomScroll_longFrameLoad 59.01ms。[Evidence:data:skill:scrolling_analysis:batch_frame_root_cause:test]',
+        '',
+        '### 峰值/口径指标',
+        '- 真实掉帧 7 帧，最长帧 62.73ms。',
+        '',
+        '### 优化建议',
+        '- 将 animation 回调里的同步重活拆分到后台线程，并用分帧提交结果；该建议直接覆盖 6/7 个掉帧样本。',
+      ].join('\n'),
+    })).toBe(false);
   });
 
   it('does not auto-close Pi final phase while earlier phases remain pending', () => {

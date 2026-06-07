@@ -575,6 +575,20 @@ describe('generateCorrectionPrompt', () => {
     expect(prompt).toContain('峰值/口径指标');
   });
 
+  it('should spell out missing Final Report Contract sections during correction', () => {
+    const issues = [
+      {
+        type: 'missing_reasoning' as const,
+        severity: 'error' as const,
+        message: 'Final Report Contract required structure missing: 代表帧分析',
+      },
+    ];
+    const prompt = generateCorrectionPrompt(issues, '正在分析滑动帧。', 'zh-CN', 'scrolling');
+    expect(prompt).toContain('必须补齐的缺失小节');
+    expect(prompt).toContain('- 代表帧分析');
+    expect(prompt).toContain('清晰同名小节');
+  });
+
   it('should inject startup final report contract instead of scrolling-specific requirements', () => {
     const issues = [
       { type: 'missing_reasoning' as const, severity: 'error' as const, message: '结论不完整' },
