@@ -2216,6 +2216,95 @@ describe('createClaudeMcpServer', () => {
       expect(analysisPlan.current?.phases[0].expectedTools).toEqual(['invoke_skill', 'fetch_artifact']);
     });
 
+    it('accepts provider schema aliases without dropping expected calls', async () => {
+      const { tools, analysisPlan } = createTestServer();
+      const toolDef = tools.get('submit_plan');
+      const aliasedPhase = {
+        phase_id: 1,
+        title: 'Collect',
+        objective: 'Get startup data',
+        expected_tools: 'invoke_skill, fetch_artifact',
+        expected_calls: 'invoke_skill:startup_analysis, fetch_artifact',
+      };
+
+      expect(toolDef?.schema?.phases?.safeParse(JSON.stringify([aliasedPhase])).success).toBe(true);
+      expect(toolDef?.schema?.phases?.safeParse([aliasedPhase]).success).toBe(true);
+      expect(toolDef?.schema?.success_criteria?.safeParse('Identify startup root cause').success).toBe(true);
+
+      const result = await callTool(tools, 'submit_plan', {
+        phases: [aliasedPhase],
+        success_criteria: 'Identify startup root cause',
+      });
+
+      expect(result.success).toBe(true);
+      expect(analysisPlan.current?.successCriteria).toBe('Identify startup root cause');
+      expect(analysisPlan.current?.phases[0]).toMatchObject({
+        id: '1',
+        name: 'Collect',
+        goal: 'Get startup data',
+        expectedTools: ['invoke_skill', 'fetch_artifact'],
+        expectedCalls: [
+          { tool: 'invoke_skill', skillId: 'startup_analysis' },
+          { tool: 'fetch_artifact' },
+        ],
+      });
+    });
+
+    it('rejects informational expectations even when submitted via aliases and strings', async () => {
+      const { tools, analysisPlan } = createTestServer();
+      const result = await callTool(tools, 'submit_plan', {
+        phases: [{
+          id: 'p1',
+          name: 'Detail lookup',
+          goal: 'Read strategy detail only',
+          expected_tools: 'lookup_strategy_detail',
+          expected_calls: 'lookup_strategy_detail',
+        }],
+        successCriteria: 'Informational tools must not count as evidence',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.invalidExpectations).toEqual([
+        'p1.expectedTools includes informational tool "lookup_strategy_detail"',
+        'p1.expectedCalls includes informational tool "lookup_strategy_detail"',
+      ]);
+      expect(analysisPlan.current).toBeNull();
+    });
+
+    it('rejects malformed expectedCalls instead of silently deleting them', async () => {
+      const badCalls = [
+        { skill_id: 'startup_analysis' },
+        {},
+        { tool: '' },
+      ];
+
+      for (const badCall of badCalls) {
+        const { tools, analysisPlan } = createTestServer();
+        const toolDef = tools.get('submit_plan');
+        const phase = {
+          id: 'p1',
+          name: 'Collect',
+          goal: 'Get startup data',
+          expectedTools: ['invoke_skill'],
+          expected_calls: [badCall],
+        };
+
+        expect(toolDef?.schema?.phases?.safeParse([phase]).success).toBe(false);
+
+        const result = await callTool(tools, 'submit_plan', {
+          phases: JSON.stringify([phase]),
+          successCriteria: 'Malformed expectedCalls must be rejected',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.action_required).toBe('submit_plan');
+        expect(result.invalidExpectedCalls).toEqual([
+          'p1.expectedCalls[0] must include a non-empty tool/toolName/tool_name/name',
+        ]);
+        expect(analysisPlan.current).toBeNull();
+      }
+    });
+
     it('treats null-like waiver strings as empty waivers from OpenAI-compatible callers', async () => {
       const { tools, analysisPlan } = createTestServer();
       const result = await callTool(tools, 'submit_plan', {
@@ -2780,6 +2869,96 @@ describe('createClaudeMcpServer', () => {
 
       expect(result.success).toBe(true);
       expect(analysisPlan.current?.phases[0].expectedTools).toEqual(['execute_sql', 'fetch_artifact']);
+    });
+
+    it('accepts provider aliases while preserving revised expected calls', async () => {
+      const { tools, analysisPlan } = createTestServer();
+      await callTool(tools, 'submit_plan', {
+        phases: [
+          { id: 'p1', name: 'Phase 1', goal: 'G1', expectedTools: ['execute_sql'] },
+        ],
+        successCriteria: 'Initial success criteria',
+      });
+
+      const toolDef = tools.get('revise_plan');
+      const revisedPhase = {
+        phaseId: 'p1',
+        phaseName: 'Phase 1 revised',
+        description: 'Collect SQL and startup evidence',
+        expected_tools: 'execute_sql, invoke_skill',
+        expected_calls: [
+          { tool_name: 'execute_sql' },
+          { tool: 'invoke_skill', skill_id: 'startup_analysis' },
+        ],
+      };
+      expect(toolDef?.schema?.updatedPhases?.safeParse(JSON.stringify([revisedPhase])).success).toBe(true);
+      expect(toolDef?.schema?.updated_phases?.safeParse([revisedPhase]).success).toBe(true);
+
+      const result = await callTool(tools, 'revise_plan', {
+        updated_phases: [revisedPhase],
+        updated_success_criteria: 'Revised success criteria',
+        reason_text: 'Provider emitted snake_case arguments',
+      });
+
+      expect(result.success).toBe(true);
+      expect(analysisPlan.current?.successCriteria).toBe('Revised success criteria');
+      expect(analysisPlan.current?.revisionHistory?.[0].reason).toBe('Provider emitted snake_case arguments');
+      expect(analysisPlan.current?.phases[0]).toMatchObject({
+        id: 'p1',
+        name: 'Phase 1 revised',
+        goal: 'Collect SQL and startup evidence',
+        expectedTools: ['execute_sql', 'invoke_skill'],
+        expectedCalls: [
+          { tool: 'execute_sql' },
+          { tool: 'invoke_skill', skillId: 'startup_analysis' },
+        ],
+      });
+    });
+
+    it('rejects malformed revised expectedCalls instead of applying a weakened plan', async () => {
+      const badCalls = [
+        { skill_id: 'startup_analysis' },
+        {},
+        { tool: '' },
+      ];
+
+      for (const badCall of badCalls) {
+        const { tools, analysisPlan } = createTestServer();
+        await callTool(tools, 'submit_plan', {
+          phases: [
+            { id: 'p1', name: 'Phase 1', goal: 'G1', expectedTools: ['execute_sql'] },
+          ],
+          successCriteria: 'Initial success criteria',
+        });
+
+        const toolDef = tools.get('revise_plan');
+        const revisedPhase = {
+          id: 'p1',
+          name: 'Phase 1 revised',
+          goal: 'Collect startup evidence',
+          expectedTools: ['invoke_skill'],
+          expected_calls: [badCall],
+        };
+
+        expect(toolDef?.schema?.updatedPhases?.safeParse([revisedPhase]).success).toBe(false);
+
+        const result = await callTool(tools, 'revise_plan', {
+          updatedPhases: JSON.stringify([revisedPhase]),
+          reason: 'Malformed expectedCalls should not weaken the plan',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.action_required).toBe('revise_plan');
+        expect(result.invalidExpectedCalls).toEqual([
+          'p1.expectedCalls[0] must include a non-empty tool/toolName/tool_name/name',
+        ]);
+        expect(analysisPlan.current?.phases[0]).toMatchObject({
+          id: 'p1',
+          name: 'Phase 1',
+          expectedTools: ['execute_sql'],
+        });
+        expect(analysisPlan.current?.revisionHistory).toBeUndefined();
+      }
     });
 
     it('rejects revisions that try to make strategy detail lookup an expected evidence call', async () => {

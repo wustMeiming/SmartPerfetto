@@ -260,7 +260,9 @@ export function normalizeOptionalToolString(value: unknown): string | undefined 
 
 function parseToolStringArrayInput(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+    return value
+      .map(entry => typeof entry === 'string' || typeof entry === 'number' ? String(entry).trim() : '')
+      .filter(Boolean);
   }
   if (typeof value !== 'string') return [];
 
@@ -274,6 +276,26 @@ function parseToolStringArrayInput(value: unknown): string[] {
     .split(',')
     .map(entry => entry.trim())
     .filter(Boolean);
+}
+
+function readAliasedField(source: unknown, names: string[]): unknown {
+  if (!source || typeof source !== 'object') return undefined;
+  const record = source as Record<string, unknown>;
+  for (const name of names) {
+    if (record[name] !== undefined) return record[name];
+  }
+  return undefined;
+}
+
+function coercePlanString(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return undefined;
 }
 
 function coerceOptionalInteger(
@@ -304,12 +326,67 @@ function coerceOptionalInteger(
 
 type PlanPhaseToolInput = Omit<PlanPhase, 'status' | 'expectedTools' | 'expectedCalls'> & {
   expectedTools?: unknown;
+  expected_tools?: unknown;
   expectedCalls?: unknown;
-  status?: PlanPhase['status'];
+  expected_calls?: unknown;
+  phaseId?: unknown;
+  phase_id?: unknown;
+  phaseName?: unknown;
+  phase_name?: unknown;
+  title?: unknown;
+  objective?: unknown;
+  description?: unknown;
+  status?: unknown;
 };
 type NormalizedPlanPhaseToolInput = Omit<PlanPhase, 'status'> & {
   status?: PlanPhase['status'];
 };
+
+const PLAN_STRING_ARRAY_OR_STRING_SCHEMA = z.union([z.array(z.union([z.string(), z.number()])), z.string()]);
+const PLAN_EXPECTED_CALL_ARG_SCHEMA = z.union([
+  z.string(),
+  z.object({
+    tool: z.union([z.string(), z.number()]).optional(),
+    toolName: z.union([z.string(), z.number()]).optional(),
+    tool_name: z.union([z.string(), z.number()]).optional(),
+    name: z.union([z.string(), z.number()]).optional(),
+    skillId: z.union([z.string(), z.number()]).optional(),
+    skill_id: z.union([z.string(), z.number()]).optional(),
+    skill: z.union([z.string(), z.number()]).optional(),
+    skillName: z.union([z.string(), z.number()]).optional(),
+    skill_name: z.union([z.string(), z.number()]).optional(),
+  }).passthrough().refine(
+    value => Boolean(coercePlanString(readAliasedField(value, ['tool', 'toolName', 'tool_name', 'name']))),
+    { message: 'expectedCalls entries require tool/toolName/tool_name/name' },
+  ),
+]);
+const PLAN_EXPECTED_CALLS_ARG_SCHEMA = z.union([z.array(PLAN_EXPECTED_CALL_ARG_SCHEMA), z.string()]);
+const PLAN_PHASE_ARG_SCHEMA = z.object({
+  id: z.union([z.string(), z.number()]).optional(),
+  phaseId: z.union([z.string(), z.number()]).optional(),
+  phase_id: z.union([z.string(), z.number()]).optional(),
+  name: z.union([z.string(), z.number()]).optional(),
+  phaseName: z.union([z.string(), z.number()]).optional(),
+  phase_name: z.union([z.string(), z.number()]).optional(),
+  title: z.union([z.string(), z.number()]).optional(),
+  goal: z.union([z.string(), z.number()]).optional(),
+  objective: z.union([z.string(), z.number()]).optional(),
+  description: z.union([z.string(), z.number()]).optional(),
+  expectedTools: PLAN_STRING_ARRAY_OR_STRING_SCHEMA.optional(),
+  expected_tools: PLAN_STRING_ARRAY_OR_STRING_SCHEMA.optional(),
+  expectedCalls: PLAN_EXPECTED_CALLS_ARG_SCHEMA.optional(),
+  expected_calls: PLAN_EXPECTED_CALLS_ARG_SCHEMA.optional(),
+  status: z.string().optional(),
+}).passthrough();
+const PLAN_PHASES_ARG_SCHEMA = z.union([z.array(PLAN_PHASE_ARG_SCHEMA), z.string()]);
+const PLAN_WAIVER_ARG_SCHEMA = z.object({
+  aspectId: z.string().optional(),
+  aspect_id: z.string().optional(),
+  aspect: z.string().optional(),
+  reason: z.string().optional(),
+  justification: z.string().optional(),
+}).passthrough();
+const PLAN_WAIVERS_ARG_SCHEMA = z.union([z.array(PLAN_WAIVER_ARG_SCHEMA), z.string()]);
 
 const CORE_EXPECTED_CALL_TOOL_NAMES = new Set([
   'detect_architecture',
@@ -328,33 +405,62 @@ function shortExpectedToolName(toolName: string): string {
   return toolName.startsWith(MCP_PREFIX) ? toolName.slice(MCP_PREFIX.length) : toolName;
 }
 
-function normalizeExpectedCall(call: NonNullable<PlanPhase['expectedCalls']>[number]): NonNullable<PlanPhase['expectedCalls']>[number] | undefined {
-  if (!call || typeof call.tool !== 'string') return undefined;
-  const tool = shortExpectedToolName(call.tool.trim());
-  const skillId = typeof call.skillId === 'string' ? call.skillId.trim() : undefined;
-  if (!tool) return undefined;
-  if (tool === 'invoke_skill' && skillId && CORE_EXPECTED_CALL_TOOL_NAMES.has(shortExpectedToolName(skillId))) {
-    return { tool: shortExpectedToolName(skillId) };
+function normalizeExpectedCall(call: unknown): NonNullable<PlanPhase['expectedCalls']>[number] | undefined {
+  if (typeof call === 'string') {
+    return normalizeExpectedCall(parseExpectedCallShorthand(call));
   }
-  return skillId ? { tool, skillId } : { tool };
+  if (!call || typeof call !== 'object') return undefined;
+  const tool = coercePlanString(readAliasedField(call, ['tool', 'toolName', 'tool_name', 'name']));
+  const skillId = coercePlanString(readAliasedField(call, ['skillId', 'skill_id', 'skill', 'skillName', 'skill_name']));
+  if (!tool) return undefined;
+  const normalizedTool = shortExpectedToolName(tool.trim());
+  const normalizedSkillId = skillId ? shortExpectedToolName(skillId.trim()) : undefined;
+  if (!normalizedTool) return undefined;
+  if (normalizedTool === 'invoke_skill' && normalizedSkillId && CORE_EXPECTED_CALL_TOOL_NAMES.has(normalizedSkillId)) {
+    return { tool: normalizedSkillId };
+  }
+  return normalizedSkillId ? { tool: normalizedTool, skillId: normalizedSkillId } : { tool: normalizedTool };
+}
+
+function parseExpectedCallShorthand(value: string): Record<string, unknown> | undefined {
+  const text = value.trim();
+  if (!text) return undefined;
+  const functionMatch = text.match(/^([A-Za-z0-9_.:-]+)\(([^)]+)\)$/);
+  if (functionMatch) {
+    return { tool: functionMatch[1], skillId: functionMatch[2] };
+  }
+  const colonIndex = text.indexOf(':');
+  if (colonIndex > 0) {
+    const tool = text.slice(0, colonIndex).trim();
+    const skillId = text.slice(colonIndex + 1).trim();
+    return skillId ? { tool, skillId } : { tool };
+  }
+  return { tool: text };
+}
+
+function parseExpectedCallStringList(value: string): unknown[] {
+  return value
+    .split(/[,;\n]+/)
+    .map(part => parseExpectedCallShorthand(part))
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
 }
 
 function collectInformationalExpectationErrors(input: PlanPhaseToolInput, phaseIndex: number): string[] {
-  const label = typeof input.id === 'string' && input.id.trim()
-    ? input.id.trim()
+  const normalizedId = coercePlanString(readAliasedField(input, ['id', 'phaseId', 'phase_id']));
+  const label = normalizedId
+    ? normalizedId
     : `phase#${phaseIndex + 1}`;
   const errors: string[] = [];
 
-  for (const tool of parseToolStringArrayInput(input.expectedTools)) {
+  for (const tool of parseToolStringArrayInput(readAliasedField(input, ['expectedTools', 'expected_tools']))) {
     const shortTool = shortExpectedToolName(tool.trim());
     if (shortTool && !isEvidenceCapableToolName(shortTool)) {
       errors.push(`${label}.expectedTools includes informational tool "${shortTool}"`);
     }
   }
 
-  const expectedCalls = parseToolArrayInput<NonNullable<PlanPhase['expectedCalls']>[number]>(input.expectedCalls);
+  const expectedCalls = normalizeExpectedCallsInput(readAliasedField(input, ['expectedCalls', 'expected_calls']));
   for (const call of expectedCalls ?? []) {
-    if (!call || typeof call.tool !== 'string') continue;
     const tool = shortExpectedToolName(call.tool.trim());
     const skillId = typeof call.skillId === 'string' ? shortExpectedToolName(call.skillId.trim()) : undefined;
     const evidenceTool = tool === 'invoke_skill' && skillId && CORE_EXPECTED_CALL_TOOL_NAMES.has(skillId)
@@ -374,8 +480,40 @@ function collectPlanExpectationErrors(inputs: PlanPhaseToolInput[]): string[] {
   return inputs.flatMap((input, index) => collectInformationalExpectationErrors(input, index));
 }
 
+function parseExpectedCallsInput(input: unknown): unknown[] | null {
+  const parsed = parseToolArrayInput<unknown>(input);
+  if (parsed) return parsed;
+  if (typeof input === 'string') return parseExpectedCallStringList(input);
+  return null;
+}
+
+function collectExpectedCallShapeErrors(input: PlanPhaseToolInput, phaseIndex: number): string[] {
+  const rawExpectedCalls = readAliasedField(input, ['expectedCalls', 'expected_calls']);
+  if (rawExpectedCalls === undefined || rawExpectedCalls === null) return [];
+  if (typeof rawExpectedCalls === 'string') {
+    const trimmed = rawExpectedCalls.trim().toLowerCase();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return [];
+  }
+  const label = coercePlanString(readAliasedField(input, ['id', 'phaseId', 'phase_id'])) || `phase#${phaseIndex + 1}`;
+  const parsed = parseExpectedCallsInput(rawExpectedCalls);
+  if (!parsed) {
+    return [`${label}.expectedCalls must be an array, JSON array string, or shorthand string`];
+  }
+  const errors: string[] = [];
+  parsed.forEach((call, index) => {
+    if (!normalizeExpectedCall(call)) {
+      errors.push(`${label}.expectedCalls[${index}] must include a non-empty tool/toolName/tool_name/name`);
+    }
+  });
+  return errors;
+}
+
+function collectPlanExpectedCallShapeErrors(inputs: PlanPhaseToolInput[]): string[] {
+  return inputs.flatMap((input, index) => collectExpectedCallShapeErrors(input, index));
+}
+
 function normalizeExpectedCallsInput(input: unknown): PlanPhase['expectedCalls'] | undefined {
-  const parsed = parseToolArrayInput<NonNullable<PlanPhase['expectedCalls']>[number]>(input);
+  const parsed = parseExpectedCallsInput(input);
   if (!parsed) return undefined;
   const normalized = parsed
     .map(normalizeExpectedCall)
@@ -391,14 +529,43 @@ function normalizeExpectedCallsInput(input: unknown): PlanPhase['expectedCalls']
 }
 
 function normalizePlanPhaseToolInput(input: PlanPhaseToolInput): Omit<PlanPhase, 'status'> {
-  const expectedCalls = normalizeExpectedCallsInput(input.expectedCalls);
+  const expectedCalls = normalizeExpectedCallsInput(readAliasedField(input, ['expectedCalls', 'expected_calls']));
   return {
-    id: input.id,
-    name: input.name,
-    goal: input.goal,
-    expectedTools: parseToolStringArrayInput(input.expectedTools),
+    id: coercePlanString(readAliasedField(input, ['id', 'phaseId', 'phase_id'])) || '',
+    name: coercePlanString(readAliasedField(input, ['name', 'phaseName', 'phase_name', 'title'])) || '',
+    goal: coercePlanString(readAliasedField(input, ['goal', 'objective', 'description'])) || '',
+    expectedTools: parseToolStringArrayInput(readAliasedField(input, ['expectedTools', 'expected_tools'])),
     ...(expectedCalls ? { expectedCalls } : {}),
   };
+}
+
+function normalizePlanWaivers(inputs: PlanAspectWaiver[]): PlanAspectWaiver[] {
+  return inputs
+    .map(input => {
+      const aspectId = coercePlanString(readAliasedField(input, ['aspectId', 'aspect_id', 'aspect']));
+      const reason = coercePlanString(readAliasedField(input, ['reason', 'justification']));
+      return aspectId && reason ? { aspectId, reason } : undefined;
+    })
+    .filter((entry): entry is PlanAspectWaiver => Boolean(entry));
+}
+
+function normalizePlanPhaseStatus(input: unknown): PlanPhase['status'] | undefined {
+  const status = coercePlanString(input);
+  if (status === 'pending' || status === 'in_progress' || status === 'completed' || status === 'skipped') {
+    return status;
+  }
+  return undefined;
+}
+
+function collectPlanPhaseShapeErrors(phases: Pick<PlanPhase, 'id' | 'name' | 'goal'>[]): string[] {
+  const errors: string[] = [];
+  phases.forEach((phase, index) => {
+    const label = phase.id || `phase#${index + 1}`;
+    if (!phase.id) errors.push(`${label}.id is required`);
+    if (!phase.name) errors.push(`${label}.name is required`);
+    if (!phase.goal) errors.push(`${label}.goal is required`);
+  });
+  return errors;
 }
 
 function moveConclusionPhasesLast<T extends Pick<PlanPhase, 'id' | 'name' | 'goal'>>(phases: T[]): T[] {
@@ -3957,24 +4124,16 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     '{id:"p3", name:"深入验证", goal:"验证根因假设", expectedTools:["execute_sql","fetch_artifact"]}], ' +
     'successCriteria="识别卡顿根因并提供量化证据"',
     {
-      phases: z.array(z.object({
-        id: z.string().describe('Phase identifier (e.g. "p1", "p2")'),
-        name: z.string().describe('Phase name (e.g. "Overview Collection")'),
-        goal: z.string().describe('What this phase aims to achieve'),
-        expectedTools: z.array(z.string()).describe('Tool names this phase will use (e.g. ["invoke_skill", "execute_sql"])'),
-        expectedCalls: z.array(z.object({
-          tool: z.string().describe('Short tool name without prefix (e.g. "invoke_skill")'),
-          skillId: z.string().optional().describe('For invoke_skill, the required skillId'),
-        })).optional().describe('Optional structured matchers for calls that need a specific skillId. They narrow matching for that same tool, while expectedTools can still list generic support tools such as execute_sql/fetch_artifact. Example: [{tool:"invoke_skill", skillId:"startup_slow_reasons"}].'),
-      })).min(1).describe('Ordered list of analysis phases (at least 1 phase required)'),
-      successCriteria: z.string().describe('What constitutes a successful analysis (e.g. "Identify root cause of jank frames with evidence")'),
-      waivers: z.array(z.object({
-        aspectId: z.string().describe('Mandatory aspect id to opt out of (matches a `missingAspectIds` entry from a prior reject).'),
-        reason: z.string().describe(`Justification for why this aspect cannot be covered. MUST be at least ${MIN_WAIVER_REASON_CHARS} characters.`),
-      })).optional().describe('Optional opt-outs for scene-template aspects when the trace genuinely cannot support them.'),
+      phases: PLAN_PHASES_ARG_SCHEMA.optional().describe('Ordered list of analysis phases, or a JSON string encoding that list.'),
+      phase_list: PLAN_PHASES_ARG_SCHEMA.optional().describe('Alias for phases for OpenAI-compatible callers.'),
+      successCriteria: z.string().optional().describe('What constitutes a successful analysis (e.g. "Identify root cause of jank frames with evidence")'),
+      success_criteria: z.string().optional().describe('Alias for successCriteria for OpenAI-compatible callers.'),
+      waivers: PLAN_WAIVERS_ARG_SCHEMA.optional().describe('Optional opt-outs for scene-template aspects when the trace genuinely cannot support them.'),
     },
-    async ({ phases, successCriteria, waivers }) => {
-      const phaseInputs = parseToolArrayInput<PlanPhaseToolInput>(phases);
+    async (args: any) => {
+      const phaseInputs = parseToolArrayInput<PlanPhaseToolInput>(
+        readAliasedField(args, ['phases', 'phase_list', 'phaseList']),
+      );
       if (!phaseInputs) {
         return {
           content: [{
@@ -3988,7 +4147,8 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         };
       }
 
-      const waiverInputs = parseOptionalToolArrayInput<PlanAspectWaiver>(waivers);
+      const rawWaiverInputs = parseOptionalToolArrayInput<PlanAspectWaiver>(args.waivers);
+      const waiverInputs = rawWaiverInputs ? normalizePlanWaivers(rawWaiverInputs) : null;
       if (!waiverInputs) {
         return {
           content: [{
@@ -3996,6 +4156,38 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             text: JSON.stringify({
               success: false,
               error: localize(outputLanguage, 'submit_plan 参数 waivers 必须是数组或 JSON 数组字符串。', 'submit_plan argument waivers must be an array or JSON array string.'),
+            }),
+          }],
+          isError: true,
+        };
+      }
+      const normalizedSuccessCriteria = coercePlanString(readAliasedField(args, ['successCriteria', 'success_criteria']));
+      if (!normalizedSuccessCriteria) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              error: localize(outputLanguage, 'submit_plan 参数 successCriteria 必须是字符串。', 'submit_plan argument successCriteria must be a string.'),
+            }),
+          }],
+          isError: true,
+        };
+      }
+      const expectedCallShapeErrors = collectPlanExpectedCallShapeErrors(phaseInputs);
+      if (expectedCallShapeErrors.length > 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              error: localize(
+                outputLanguage,
+                'submit_plan 的 expectedCalls 形状无效；不会静默删除已声明的证据要求。',
+                'submit_plan expectedCalls shape is invalid; declared evidence requirements will not be silently removed.',
+              ),
+              invalidExpectedCalls: expectedCallShapeErrors,
+              action_required: 'submit_plan',
             }),
           }],
           isError: true,
@@ -4025,6 +4217,24 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       const normalizedPhases = moveConclusionPhasesLast(
         phaseInputs.map(normalizePlanPhaseToolInput),
       );
+      const phaseShapeErrors = collectPlanPhaseShapeErrors(normalizedPhases);
+      if (phaseShapeErrors.length > 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              error: localize(
+                outputLanguage,
+                'submit_plan 阶段缺少必填字段 id/name/goal。',
+                'submit_plan phases are missing required id/name/goal fields.',
+              ),
+              invalidPhases: phaseShapeErrors,
+            }),
+          }],
+          isError: true,
+        };
+      }
 
       // P1-G11: Validate against the scene template, honouring agent waivers.
       const validation = validatePhasesAgainstSceneTemplate(normalizedPhases, waiverInputs);
@@ -4070,7 +4280,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           ...p,
           status: 'pending' as const,
         })),
-        successCriteria,
+        successCriteria: normalizedSuccessCriteria,
         submittedAt: Date.now(),
         toolCallLog: [],
         ...(acceptedWaivers.length > 0 ? { waivers: acceptedWaivers } : {}),
@@ -4089,7 +4299,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         type: 'plan_submitted',
         content: {
           phases: plan.phases.map(p => ({ id: p.id, name: p.name, goal: p.goal, status: p.status })),
-          successCriteria,
+          successCriteria: normalizedSuccessCriteria,
         },
         timestamp: Date.now(),
       });
@@ -4366,27 +4576,18 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     'Use this when initial data reveals unexpected conditions (e.g., discovered Flutter architecture but planned for Standard, ' +
     'or found ANR signals in a scrolling query). Preserves completed phases and audit trail.',
     {
-      reason: z.string().describe('Why the plan needs revision (what new information triggered this)'),
-      updatedPhases: z.array(z.object({
-        id: z.string().describe('Phase identifier (keep existing IDs for unchanged phases, use new IDs for added phases)'),
-        name: z.string().describe('Phase name'),
-        goal: z.string().describe('What this phase aims to achieve'),
-        expectedTools: z.array(z.string()).describe('Tool names this phase will use'),
-        expectedCalls: z.array(z.object({
-          tool: z.string(),
-          skillId: z.string().optional(),
-        })).optional().describe('Optional structured matchers — see submit_plan for semantics.'),
-        status: z.enum(['pending', 'in_progress', 'completed', 'skipped']).optional()
-          .describe('Phase status. Omit for new/pending phases. Completed/skipped phases from original plan are preserved.'),
-      })).describe('The revised phase list. Must include all completed/in-progress phases from original plan.'),
+      reason: z.string().optional().describe('Why the plan needs revision (what new information triggered this)'),
+      reason_text: z.string().optional().describe('Alias for reason for OpenAI-compatible callers.'),
+      updatedPhases: PLAN_PHASES_ARG_SCHEMA.optional().describe('The revised phase list, or a JSON string encoding it. Must include all completed/in-progress phases from original plan.'),
+      updated_phases: PLAN_PHASES_ARG_SCHEMA.optional().describe('Alias for updatedPhases for OpenAI-compatible callers.'),
       updatedSuccessCriteria: z.string().optional().describe('Updated success criteria (only if the goal changed)'),
-      waivers: z.array(z.object({
-        aspectId: z.string().describe('Mandatory aspect id to opt out of (matches a `missingAspectIds` entry from a prior reject).'),
-        reason: z.string().describe(`Justification for why this aspect cannot be covered. MUST be at least ${MIN_WAIVER_REASON_CHARS} characters.`),
-      })).optional().describe('Optional opt-outs for waivable scene-template aspects when the trace genuinely cannot support them.'),
+      updated_success_criteria: z.string().optional().describe('Alias for updatedSuccessCriteria for OpenAI-compatible callers.'),
+      waivers: PLAN_WAIVERS_ARG_SCHEMA.optional().describe('Optional opt-outs for waivable scene-template aspects when the trace genuinely cannot support them.'),
     },
-    async ({ reason, updatedPhases, updatedSuccessCriteria, waivers }) => {
-      const updatedPhaseInputs = parseToolArrayInput<PlanPhaseToolInput>(updatedPhases);
+    async (args: any) => {
+      const updatedPhaseInputs = parseToolArrayInput<PlanPhaseToolInput>(
+        readAliasedField(args, ['updatedPhases', 'updated_phases']),
+      );
       if (!updatedPhaseInputs) {
         return {
           content: [{
@@ -4400,7 +4601,8 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         };
       }
 
-      const waiverInputs = parseOptionalToolArrayInput<PlanAspectWaiver>(waivers);
+      const rawWaiverInputs = parseOptionalToolArrayInput<PlanAspectWaiver>(args.waivers);
+      const waiverInputs = rawWaiverInputs ? normalizePlanWaivers(rawWaiverInputs) : null;
       if (!waiverInputs) {
         return {
           content: [{
@@ -4408,6 +4610,38 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             text: JSON.stringify({
               success: false,
               error: localize(outputLanguage, 'revise_plan 参数 waivers 必须是数组或 JSON 数组字符串。', 'revise_plan argument waivers must be an array or JSON array string.'),
+            }),
+          }],
+          isError: true,
+        };
+      }
+      const normalizedReason = coercePlanString(readAliasedField(args, ['reason', 'reason_text']));
+      if (!normalizedReason) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              error: localize(outputLanguage, 'revise_plan 参数 reason 必须是字符串。', 'revise_plan argument reason must be a string.'),
+            }),
+          }],
+          isError: true,
+        };
+      }
+      const expectedCallShapeErrors = collectPlanExpectedCallShapeErrors(updatedPhaseInputs);
+      if (expectedCallShapeErrors.length > 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              error: localize(
+                outputLanguage,
+                'revise_plan 的 expectedCalls 形状无效；不会静默删除已声明的证据要求。',
+                'revise_plan expectedCalls shape is invalid; declared evidence requirements will not be silently removed.',
+              ),
+              invalidExpectedCalls: expectedCallShapeErrors,
+              action_required: 'revise_plan',
             }),
           }],
           isError: true,
@@ -4437,9 +4671,27 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       const normalizedUpdatedPhases = moveConclusionPhasesLast(
         updatedPhaseInputs.map((p): NormalizedPlanPhaseToolInput => ({
           ...normalizePlanPhaseToolInput(p),
-          status: p.status,
+          status: normalizePlanPhaseStatus(readAliasedField(p, ['status'])),
         })),
       );
+      const phaseShapeErrors = collectPlanPhaseShapeErrors(normalizedUpdatedPhases);
+      if (phaseShapeErrors.length > 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              error: localize(
+                outputLanguage,
+                'revise_plan 阶段缺少必填字段 id/name/goal。',
+                'revise_plan phases are missing required id/name/goal fields.',
+              ),
+              invalidPhases: phaseShapeErrors,
+            }),
+          }],
+          isError: true,
+        };
+      }
 
       const plan = analysisPlanRef.current;
       if (!plan) {
@@ -4527,7 +4779,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       // Save revision history for audit trail
       const revision: PlanRevision = {
         revisedAt: Date.now(),
-        reason,
+        reason: normalizedReason,
         previousPhases: plan.phases.map(p => ({ ...p })),
       };
       if (!plan.revisionHistory) plan.revisionHistory = [];
@@ -4537,8 +4789,11 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       plan.phases = candidatePhases;
       clearPendingPlanRevisionGate(plan);
 
-      if (updatedSuccessCriteria) {
-        plan.successCriteria = updatedSuccessCriteria;
+      const normalizedUpdatedSuccessCriteria = coercePlanString(
+        readAliasedField(args, ['updatedSuccessCriteria', 'updated_success_criteria']),
+      );
+      if (normalizedUpdatedSuccessCriteria) {
+        plan.successCriteria = normalizedUpdatedSuccessCriteria;
       }
       if (acceptedWaivers.length > 0) {
         plan.waivers = acceptedWaivers;
@@ -4557,7 +4812,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       emitUpdate?.({
         type: 'plan_revised',
         content: {
-          reason,
+          reason: normalizedReason,
           phases: plan.phases.map(p => ({ id: p.id, name: p.name, goal: p.goal, status: p.status })),
           revisionCount: plan.revisionHistory.length,
         },
@@ -4569,8 +4824,8 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         success: true,
         message: localize(
           outputLanguage,
-          `Plan 已修订（第 ${plan.revisionHistory.length} 次）: ${reason}`,
-          `Plan revised (revision #${plan.revisionHistory.length}): ${reason}`,
+          `Plan 已修订（第 ${plan.revisionHistory.length} 次）: ${normalizedReason}`,
+          `Plan revised (revision #${plan.revisionHistory.length}): ${normalizedReason}`,
         ),
         totalPhases: plan.phases.length,
         pendingPhases: pending.length,
