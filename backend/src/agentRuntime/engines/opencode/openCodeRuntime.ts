@@ -1867,6 +1867,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     const { toolDefinitions } = createClaudeMcpServer({
       sessionId,
       traceId,
+      userQuery: query,
       traceProcessorService: this.input.traceProcessorService,
       skillExecutor,
       packageName: effectivePackageName,

@@ -1432,6 +1432,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     const { toolDefinitions } = createClaudeMcpServer({
       sessionId,
       traceId,
+      userQuery: query,
       traceProcessorService: this.traceProcessorService,
       skillExecutor,
       packageName: effectivePackageName,

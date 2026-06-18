@@ -2,62 +2,25 @@
 // Copyright (C) 2024-2026 Gracker (Chris)
 // This file is part of SmartPerfetto. See LICENSE for details.
 
-import { describe, expect, it, jest } from '@jest/globals';
+import { describe, expect, it } from '@jest/globals';
 import type { ArchitectureInfo } from '../../agent/detectors/types';
 import type {
   AnalysisPlanV3,
   ClaudeAnalysisContext,
   TraceCompleteness,
 } from '../types';
-import { buildSystemPromptParts, estimatePromptTokens, type PromptSegment } from '../claudeSystemPrompt';
+import {
+  buildSystemPromptParts,
+  estimatePromptTokens,
+  MAX_PROMPT_TOKENS,
+  MAX_SCENE_CORE_TOKENS,
+  type PromptSegment,
+} from '../claudeSystemPrompt';
 
-const RAW_BASELINE_BUDGET_TOKENS = 1_000_000;
-
-const FUTURE_TOKEN_TARGETS = {
-  fullPromptTokens: 12_000,
-  sceneCoreTokens: 4_000,
+const M2_TOKEN_GATES = {
+  fullPromptTokens: MAX_PROMPT_TOKENS,
+  sceneCoreTokens: MAX_SCENE_CORE_TOKENS,
 };
-
-const EXPECTED_SEGMENT_LABELS = [
-  'role',
-  'output_language',
-  'output_format',
-  'architecture',
-  'focus_apps',
-  'trace_completeness',
-  'knowledge_base',
-  'base_methodology',
-  'scene_strategy_core',
-  'report_contract',
-  'base_methodology_reference',
-  'code_aware',
-  'sub_agents',
-  'selection_context',
-  'comparison_context',
-  'comparison_methodology',
-  'pattern_context',
-  'negative_pattern_context',
-  'plan_history',
-];
-
-const M1_BASELINE_RANGES = {
-  startup: {
-    fullPromptTokens: [39_000, 41_000],
-    stablePrefixTokens: [35_500, 37_500],
-    volatileSuffixTokens: [3_300, 3_700],
-    baseMethodologyTokens: [8_100, 8_700],
-    sceneCoreTokens: [20_000, 21_500],
-    reportContractTokens: [300, 500],
-  },
-  scrolling: {
-    fullPromptTokens: [33_000, 35_000],
-    stablePrefixTokens: [29_500, 31_500],
-    volatileSuffixTokens: [3_300, 3_700],
-    baseMethodologyTokens: [8_100, 8_700],
-    sceneCoreTokens: [14_000, 15_500],
-    reportContractTokens: [200, 400],
-  },
-} satisfies Record<'startup' | 'scrolling', Record<string, [number, number]>>;
 
 function makeArchitecture(): ArchitectureInfo {
   return {
@@ -238,18 +201,15 @@ function segmentTokens(segments: PromptSegment[], label: string): number {
 }
 
 function buildTokenReport(sceneType: 'startup' | 'scrolling') {
-  const parts = buildSystemPromptParts(
-    makeWorstCaseContext(sceneType),
-    RAW_BASELINE_BUDGET_TOKENS,
-  );
+  const parts = buildSystemPromptParts(makeWorstCaseContext(sceneType));
   const baseMethodologyTokens =
     segmentTokens(parts.segments, 'base_methodology')
     + segmentTokens(parts.segments, 'base_methodology_reference');
 
   return {
     sceneType,
-    mode: 'M1_BASELINE_NO_HARD_GATE',
-    targets: FUTURE_TOKEN_TARGETS,
+    mode: 'M2_HARD_GATE',
+    targets: M2_TOKEN_GATES,
     fullPromptTokens: estimatePromptTokens(parts.fullPrompt),
     stablePrefixTokens: estimatePromptTokens(parts.stablePrefix),
     volatileSuffixTokens: estimatePromptTokens(parts.volatileSuffix),
@@ -271,70 +231,56 @@ function buildTokenReport(sceneType: 'startup' | 'scrolling') {
   };
 }
 
-function expectInRange(value: number, [min, max]: [number, number]): void {
-  expect(value).toBeGreaterThanOrEqual(min);
-  expect(value).toBeLessThanOrEqual(max);
-}
-
 describe('system prompt token regression with real strategy files', () => {
   it.each(['startup', 'scrolling'] as const)(
-    'records M1 raw full-mode baseline for %s without mocking strategyLoader',
+    'enforces M2 full-mode token hard gate for %s without mocking strategyLoader',
     sceneType => {
       const report = buildTokenReport(sceneType);
       const labels = report.segments.map(segment => segment.label);
-      const ranges = M1_BASELINE_RANGES[sceneType];
 
-      expect(labels).toEqual(EXPECTED_SEGMENT_LABELS);
-      expect(report.droppedLabels).toEqual([]);
+      for (const label of ['role', 'output_language', 'output_format', 'base_methodology', 'scene_strategy_core', 'report_contract']) {
+        expect(labels).toContain(label);
+      }
+      for (const droppedLabel of report.droppedLabels) {
+        expect(['base_methodology', 'scene_strategy_core', 'report_contract']).not.toContain(droppedLabel);
+      }
       expect(report.truncatedLabels).toEqual([]);
-      expect(report.targets.fullPromptTokens).toBe(FUTURE_TOKEN_TARGETS.fullPromptTokens);
-      expect(report.targets.sceneCoreTokens).toBe(FUTURE_TOKEN_TARGETS.sceneCoreTokens);
-      expect(report.fullPromptTokens).toBeGreaterThan(FUTURE_TOKEN_TARGETS.fullPromptTokens);
-      expect(report.methodology.sceneCoreTokens).toBeGreaterThan(FUTURE_TOKEN_TARGETS.sceneCoreTokens);
-      expectInRange(report.fullPromptTokens, ranges.fullPromptTokens);
-      expectInRange(report.stablePrefixTokens, ranges.stablePrefixTokens);
-      expectInRange(report.volatileSuffixTokens, ranges.volatileSuffixTokens);
-      expectInRange(report.methodology.baseMethodologyTokens, ranges.baseMethodologyTokens);
-      expectInRange(report.methodology.sceneCoreTokens, ranges.sceneCoreTokens);
-      expectInRange(report.methodology.reportContractTokens, ranges.reportContractTokens);
+      expect(report.fullPromptTokens).toBeLessThanOrEqual(M2_TOKEN_GATES.fullPromptTokens);
+      expect(report.methodology.sceneCoreTokens).toBeLessThanOrEqual(M2_TOKEN_GATES.sceneCoreTokens);
+      expect(report.methodology.reportContractTokens).toBeGreaterThan(0);
 
-      console.info(`[SystemPromptTokenBaseline] ${JSON.stringify(report)}`);
+      console.info(`[SystemPromptTokenGate] ${JSON.stringify(report)}`);
     },
   );
 
-  it('keeps scene core intact in M1 baseline mode while isolating the report contract', () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const parts = (() => {
-      try {
-        return buildSystemPromptParts(makeWorstCaseContext('startup'));
-      } finally {
-        warnSpy.mockRestore();
-      }
-    })();
+  it('injects only startup core while keeping detail out of the system prompt', () => {
+    const parts = buildSystemPromptParts(makeWorstCaseContext('startup'));
     const sceneCore = parts.segments.find(segment => segment.label === 'scene_strategy_core');
     const reportContract = parts.segments.find(segment => segment.label === 'report_contract');
 
     expect(parts.truncatedLabels).toEqual([]);
     expect(sceneCore?.truncatable).toBe(true);
-    expect(sceneCore?.estimatedTokens).toBeGreaterThan(FUTURE_TOKEN_TARGETS.sceneCoreTokens);
+    expect(sceneCore?.estimatedTokens).toBeLessThanOrEqual(M2_TOKEN_GATES.sceneCoreTokens);
     expect(reportContract?.droppable).toBe(false);
     expect(reportContract?.truncatable).toBeFalsy();
-    expect(parts.fullPrompt).toContain('启动场景关键 Stdlib 表');
+    expect(parts.fullPrompt).toContain('Startup Core Strategy');
+    expect(parts.fullPrompt).toContain('startup:overview_timing');
+    expect(parts.fullPrompt).not.toContain('启动场景关键 Stdlib 表');
     expect(parts.fullPrompt).toContain('Final Report Contract');
     expect(parts.fullPrompt).toContain('启动类型与 TTID/TTFD');
   });
 
-  it('can truncate scene core in opt-in budget mode without dropping the report contract', () => {
+  it('keeps report contract when scene core is forcibly truncated under an artificial budget', () => {
     const parts = buildSystemPromptParts(
       makeWorstCaseContext('startup'),
-      25_000,
+      9_000,
       { truncateSceneCore: true },
     );
     const sceneCore = parts.segments.find(segment => segment.label === 'scene_strategy_core');
     const reportContract = parts.segments.find(segment => segment.label === 'report_contract');
 
     expect(parts.truncatedLabels).toEqual(['scene_strategy_core']);
-    expect(estimatePromptTokens(parts.fullPrompt)).toBeLessThanOrEqual(25_000);
+    expect(estimatePromptTokens(parts.fullPrompt)).toBeLessThanOrEqual(9_000);
     expect(sceneCore?.truncated).toBe(true);
     expect(sceneCore?.originalEstimatedTokens).toBeGreaterThan(sceneCore?.estimatedTokens ?? 0);
     expect(reportContract?.droppable).toBe(false);

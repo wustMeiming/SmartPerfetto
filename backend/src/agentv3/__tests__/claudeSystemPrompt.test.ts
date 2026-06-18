@@ -77,7 +77,7 @@ jest.mock('../focusAppDetector', () => ({
   formatDurationNs: jest.fn((ns: number) => `${(ns / 1e6).toFixed(1)}ms`),
 }));
 
-import { buildQuickSystemPrompt, buildSystemPrompt, buildSystemPromptParts } from '../claudeSystemPrompt';
+import { buildQuickSystemPrompt, buildSystemPrompt, buildSystemPromptParts, estimatePromptTokens } from '../claudeSystemPrompt';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -554,6 +554,17 @@ describe('buildSystemPrompt', () => {
       // Default fixture is comfortably under MAX_PROMPT_TOKENS (4500), so
       // nothing should be dropped.
       expect(parts.droppedLabels).toEqual([]);
+    });
+
+    it('truncates oversized dynamic context instead of exceeding the hard budget', () => {
+      const parts = buildSystemPromptParts(makeContext({
+        sceneType: 'scrolling',
+        conversationSummary: 'previous analysis '.repeat(10_000),
+      }), 12_000);
+
+      expect(parts.truncatedLabels).toContain('conversation_context');
+      expect(estimatePromptTokens(parts.fullPrompt)).toBeLessThanOrEqual(12_000);
+      expect(parts.fullPrompt).toContain('全帧根因分布');
     });
   });
 });

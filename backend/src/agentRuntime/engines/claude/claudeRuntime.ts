@@ -2219,6 +2219,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
       const { server: mcpServer, allowedTools } = createClaudeMcpServer({
         sessionId,
         traceId,
+        userQuery: query,
         traceProcessorService: this.traceProcessorService,
         skillExecutor,
         packageName: effectivePackageName,
@@ -3068,6 +3069,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
     const { server: mcpServer, allowedTools } = createClaudeMcpServer({
       sessionId,
       traceId,
+      userQuery: query,
       traceProcessorService: this.traceProcessorService,
       skillExecutor,
       packageName: effectivePackageName,

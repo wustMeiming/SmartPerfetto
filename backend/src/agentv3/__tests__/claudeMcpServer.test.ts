@@ -173,12 +173,19 @@ import {
   normalizeOptionalToolString,
 } from '../claudeMcpServer';
 import { ArtifactStore } from '../artifactStore';
+import { createArchitectureDetector } from '../../agent/detectors/architectureDetector';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 type ToolDef = { name: string; schema?: Record<string, any>; handler: (...args: any[]) => any };
 
-function createTestServer(options: { referenceTraceId?: string; sceneType?: any; lightweight?: boolean } = {}) {
+function createTestServer(options: {
+  referenceTraceId?: string;
+  sceneType?: any;
+  lightweight?: boolean;
+  userQuery?: string;
+  cachedArchitecture?: any;
+} = {}) {
   const analysisNotes: AnalysisNote[] = [];
   const hypotheses: Hypothesis[] = [];
   const uncertaintyFlags: UncertaintyFlag[] = [];
@@ -218,6 +225,7 @@ function createTestServer(options: { referenceTraceId?: string; sceneType?: any;
 
   const { server, allowedTools } = createClaudeMcpServer({
     traceId: 'test-trace-123',
+    userQuery: options.userQuery,
     traceProcessorService: mockTpService as any,
     skillExecutor: mockSkillExecutor as any,
     analysisNotes,
@@ -227,6 +235,7 @@ function createTestServer(options: { referenceTraceId?: string; sceneType?: any;
     artifactStore: new ArtifactStore() as any,
     emitUpdate: (u: any) => emittedUpdates.push(u),
     sceneType: options.sceneType,
+    cachedArchitecture: options.cachedArchitecture,
     ...(options.lightweight ? { lightweight: true } : { analysisPlan }),
     ...(options.referenceTraceId ? {
       referenceTraceId: options.referenceTraceId,
@@ -2123,6 +2132,28 @@ describe('createClaudeMcpServer', () => {
       ]);
     });
 
+    it('rejects informational tools in submitted expected calls', async () => {
+      const { tools, analysisPlan } = createTestServer();
+      const result = await callTool(tools, 'submit_plan', {
+        phases: [{
+          id: 'p1',
+          name: 'Detail lookup',
+          goal: 'Read strategy detail only',
+          expectedTools: ['lookup_strategy_detail'],
+          expectedCalls: [{ tool: 'lookup_strategy_detail' }],
+        }],
+        successCriteria: 'Informational tools must not count as evidence',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.invalidExpectations).toEqual([
+        'p1.expectedTools includes informational tool "lookup_strategy_detail"',
+        'p1.expectedCalls includes informational tool "lookup_strategy_detail"',
+      ]);
+      expect(result.action_required).toBe('submit_plan');
+      expect(analysisPlan.current).toBeNull();
+    });
+
     it('moves conclusion-like phases after later data-collection phases', async () => {
       const { tools, analysisPlan } = createTestServer();
       const result = await callTool(tools, 'submit_plan', {
@@ -2186,8 +2217,23 @@ describe('createClaudeMcpServer', () => {
       const { tools } = createTestServer({ sceneType: 'scrolling' });
       await callTool(tools, 'submit_plan', {
         phases: [
-          { id: 'p1', name: 'TextureView 架构检测', goal: '确认混合渲染架构类型，判断是否为 TextureView producer 场景', expectedTools: ['invoke_skill'] },
-          { id: 'p2', name: '滑动帧卡顿概览', goal: '获取 scroll frame jank 帧统计和掉帧分布', expectedTools: ['invoke_skill'], expectedCalls: [{ tool: 'invoke_skill', skillId: 'scrolling_analysis' }] },
+          {
+            id: 'p1',
+            name: 'TextureView 架构检测',
+            goal: '确认混合渲染架构类型，判断是否为 TextureView producer 场景',
+            expectedTools: ['invoke_skill'],
+            expectedCalls: [{ tool: 'invoke_skill', skillId: 'textureview_producer_frame_timing' }],
+          },
+          {
+            id: 'p2',
+            name: '滑动帧卡顿概览',
+            goal: '获取 scroll frame jank 帧统计和掉帧分布并读取 artifact',
+            expectedTools: ['invoke_skill', 'fetch_artifact'],
+            expectedCalls: [
+              { tool: 'invoke_skill', skillId: 'scrolling_analysis' },
+              { tool: 'fetch_artifact' },
+            ],
+          },
           {
             id: 'p3',
             name: '根因诊断深钻',
@@ -2580,6 +2626,263 @@ describe('createClaudeMcpServer', () => {
 
       expect(result.success).toBe(true);
       expect(analysisPlan.current?.phases[0].expectedTools).toEqual(['execute_sql', 'fetch_artifact']);
+    });
+
+    it('rejects revisions that try to make strategy detail lookup an expected evidence call', async () => {
+      const { tools, analysisPlan } = createTestServer();
+      await callTool(tools, 'submit_plan', {
+        phases: [
+          { id: 'p1', name: 'Phase 1', goal: 'Collect SQL evidence', expectedTools: ['execute_sql'] },
+        ],
+        successCriteria: 'Done',
+      });
+
+      const result = await callTool(tools, 'revise_plan', {
+        updatedPhases: [{
+          id: 'p1',
+          name: 'Phase 1',
+          goal: 'Read detail instead of collecting evidence',
+          expectedTools: ['execute_sql'],
+          expectedCalls: [{ tool: 'invoke_skill', skillId: 'lookup_strategy_detail' }],
+        }],
+        reason: 'Attempt to count detail lookup as evidence',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.invalidExpectations).toEqual([
+        'p1.expectedCalls references informational tool "lookup_strategy_detail" as skillId',
+      ]);
+      expect(result.action_required).toBe('revise_plan');
+      expect(analysisPlan.current?.phases[0].expectedCalls).toBeUndefined();
+    });
+
+    it('rejects revisions that remove non-waivable architecture expectedCalls', async () => {
+      const { tools, analysisPlan } = createTestServer({
+        sceneType: 'scrolling',
+        cachedArchitecture: {
+          type: 'FLUTTER',
+          confidence: 0.95,
+          evidence: [{ type: 'slice', value: 'Flutter TextureView', weight: 0.9 }],
+          flutter: { engine: 'SKIA', surfaceType: 'TEXTUREVIEW' },
+        },
+      });
+
+      const validPhases = [
+        {
+          id: 'p1',
+          name: '帧渲染分析',
+          goal: '调用 scrolling_analysis 获取卡顿帧分布',
+          expectedTools: ['invoke_skill', 'fetch_artifact'],
+          expectedCalls: [
+            { tool: 'invoke_skill', skillId: 'scrolling_analysis' },
+            { tool: 'fetch_artifact' },
+          ],
+        },
+        {
+          id: 'p2',
+          name: '根因诊断',
+          goal: '使用 jank_frame_detail + frame_blocking_calls + blocking_chain_analysis 深入',
+          expectedTools: ['invoke_skill'],
+          expectedCalls: [
+            { tool: 'invoke_skill', skillId: 'jank_frame_detail' },
+            { tool: 'invoke_skill', skillId: 'frame_blocking_calls' },
+            { tool: 'invoke_skill', skillId: 'blocking_chain_analysis' },
+          ],
+        },
+        {
+          id: 'p3',
+          name: '架构专项',
+          goal: '拆 Flutter TextureView producer 链路',
+          expectedTools: ['invoke_skill'],
+          expectedCalls: [{ tool: 'invoke_skill', skillId: 'flutter_scrolling_analysis' }],
+        },
+      ];
+
+      const submit = await callTool(tools, 'submit_plan', {
+        phases: validPhases,
+        successCriteria: 'Complete scrolling analysis with Flutter producer evidence',
+      });
+      expect(submit.success).toBe(true);
+
+      const revised = await callTool(tools, 'revise_plan', {
+        updatedPhases: validPhases.map(phase => phase.id === 'p3'
+          ? {
+              ...phase,
+              goal: '用通用 SQL 手工查看架构，不声明 Flutter 专属 expectedCall',
+              expectedCalls: [],
+            }
+          : phase),
+        reason: 'Attempt to simplify the plan after overview collection',
+      });
+
+      expect(revised.success).toBe(false);
+      expect(revised.missingAspectIds).toContain('architecture_specific_jank');
+      expect(revised.nonWaivableMissingAspectIds).toEqual(['architecture_specific_jank']);
+      expect(analysisPlan.current?.revisionHistory).toBeUndefined();
+      expect(analysisPlan.current?.phases.find(p => p.id === 'p3')?.expectedCalls)
+        .toEqual([{ tool: 'invoke_skill', skillId: 'flutter_scrolling_analysis' }]);
+    });
+
+    it('blocks evidence tools after standalone architecture detection triggers a non-waivable missing aspect', async () => {
+      const { tools, analysisPlan } = createTestServer({ sceneType: 'scrolling' });
+      const basePhases = [
+        {
+          id: 'p1',
+          name: '帧渲染分析',
+          goal: '调用 scrolling_analysis 获取卡顿帧分布并读取 artifact',
+          expectedTools: ['invoke_skill', 'fetch_artifact'],
+          expectedCalls: [
+            { tool: 'invoke_skill', skillId: 'scrolling_analysis' },
+            { tool: 'fetch_artifact' },
+          ],
+        },
+        {
+          id: 'p2',
+          name: '根因诊断',
+          goal: '使用 jank_frame_detail + frame_blocking_calls + blocking_chain_analysis 深入',
+          expectedTools: ['invoke_skill'],
+          expectedCalls: [
+            { tool: 'invoke_skill', skillId: 'jank_frame_detail' },
+            { tool: 'invoke_skill', skillId: 'frame_blocking_calls' },
+            { tool: 'invoke_skill', skillId: 'blocking_chain_analysis' },
+          ],
+        },
+      ];
+      await callTool(tools, 'submit_plan', {
+        phases: basePhases,
+        successCriteria: 'Complete scrolling analysis',
+      });
+      jest.mocked(createArchitectureDetector).mockReturnValueOnce({
+        detect: jest.fn(async () => ({
+          type: 'FLUTTER',
+          confidence: 0.95,
+          evidence: [{ type: 'slice', value: 'Flutter TextureView', weight: 0.9 }],
+          flutter: { engine: 'SKIA', surfaceType: 'TEXTUREVIEW' },
+        })),
+      } as any);
+
+      const detected = await callTool(tools, 'detect_architecture');
+      expect(detected.planRevisionRequired).toBe(true);
+      expect(detected.nonWaivableMissingAspectIds).toEqual(['architecture_specific_jank']);
+      expect(analysisPlan.current?.unresolvedAspects).toContain('architecture_specific_jank');
+
+      const blockedSql = await callTool(tools, 'execute_sql', { sql: 'SELECT 1 AS ok' });
+      expect(blockedSql.success).toBe(false);
+      expect(blockedSql.action_required).toBe('revise_plan');
+
+      const revised = await callTool(tools, 'revise_plan', {
+        updatedPhases: [
+          ...basePhases,
+          {
+            id: 'p3',
+            name: 'Flutter TextureView 架构专项',
+            goal: '拆 Flutter producer 和 TextureView 上屏链路',
+            expectedTools: ['invoke_skill'],
+            expectedCalls: [{ tool: 'invoke_skill', skillId: 'flutter_scrolling_analysis' }],
+          },
+        ],
+        reason: 'Architecture detection found Flutter TextureView and requires producer-path evidence',
+      });
+      expect(revised.success).toBe(true);
+      expect(analysisPlan.current?.unresolvedAspects ?? []).not.toContain('architecture_specific_jank');
+
+      const unblockedSql = await callTool(tools, 'execute_sql', { sql: 'SELECT 1 AS ok' });
+      expect(unblockedSql.success).toBe(true);
+    });
+
+    it('uses architecture evidence values to trigger TextureView gates when the primary type is STANDARD', async () => {
+      const { tools } = createTestServer({ sceneType: 'scrolling' });
+      await callTool(tools, 'submit_plan', {
+        phases: [
+          {
+            id: 'p1',
+            name: '帧渲染分析',
+            goal: '调用 scrolling_analysis 获取卡顿帧分布并读取 artifact',
+            expectedTools: ['invoke_skill', 'fetch_artifact'],
+            expectedCalls: [
+              { tool: 'invoke_skill', skillId: 'scrolling_analysis' },
+              { tool: 'fetch_artifact' },
+            ],
+          },
+          {
+            id: 'p2',
+            name: '根因诊断',
+            goal: '使用 jank_frame_detail + frame_blocking_calls + blocking_chain_analysis 深入',
+            expectedTools: ['invoke_skill'],
+            expectedCalls: [
+              { tool: 'invoke_skill', skillId: 'jank_frame_detail' },
+              { tool: 'invoke_skill', skillId: 'frame_blocking_calls' },
+              { tool: 'invoke_skill', skillId: 'blocking_chain_analysis' },
+            ],
+          },
+        ],
+        successCriteria: 'Complete scrolling analysis',
+      });
+      jest.mocked(createArchitectureDetector).mockReturnValueOnce({
+        detect: jest.fn(async () => ({
+          type: 'STANDARD',
+          confidence: 0.84,
+          evidence: [{ type: 'slice', value: 'TEXTUREVIEW_STANDARD', weight: 0.84 }],
+          additionalInfo: { pipelineId: 'TEXTUREVIEW_STANDARD' },
+        })),
+      } as any);
+
+      const detected = await callTool(tools, 'detect_architecture');
+
+      expect(detected.evidence).toEqual([
+        expect.objectContaining({ value: 'TEXTUREVIEW_STANDARD' }),
+      ]);
+      expect(detected.additionalInfo).toEqual({ pipelineId: 'TEXTUREVIEW_STANDARD' });
+      expect(detected.planRevisionRequired).toBe(true);
+      expect(detected.nonWaivableMissingAspectIds).toEqual(['architecture_specific_jank']);
+    });
+
+    it('applies the same architecture gate through invoke_skill detect_architecture compatibility path', async () => {
+      const { tools } = createTestServer({ sceneType: 'scrolling' });
+      await callTool(tools, 'submit_plan', {
+        phases: [
+          {
+            id: 'p1',
+            name: '帧渲染分析',
+            goal: '调用 scrolling_analysis 获取卡顿帧分布并读取 artifact',
+            expectedTools: ['invoke_skill', 'fetch_artifact'],
+            expectedCalls: [
+              { tool: 'invoke_skill', skillId: 'scrolling_analysis' },
+              { tool: 'fetch_artifact' },
+            ],
+          },
+          {
+            id: 'p2',
+            name: '根因诊断',
+            goal: '使用 jank_frame_detail + frame_blocking_calls + blocking_chain_analysis 深入',
+            expectedTools: ['invoke_skill'],
+            expectedCalls: [
+              { tool: 'invoke_skill', skillId: 'jank_frame_detail' },
+              { tool: 'invoke_skill', skillId: 'frame_blocking_calls' },
+              { tool: 'invoke_skill', skillId: 'blocking_chain_analysis' },
+            ],
+          },
+        ],
+        successCriteria: 'Complete scrolling analysis',
+      });
+      jest.mocked(createArchitectureDetector).mockReturnValueOnce({
+        detect: jest.fn(async () => ({
+          type: 'FLUTTER',
+          confidence: 0.95,
+          evidence: [{ type: 'slice', value: 'Flutter TextureView', weight: 0.9 }],
+          flutter: { engine: 'SKIA', surfaceType: 'TEXTUREVIEW' },
+        })),
+      } as any);
+
+      const detected = await callTool(tools, 'invoke_skill', {
+        skillId: 'detect_architecture',
+        params: {},
+      });
+
+      expect(detected.planRevisionRequired).toBe(true);
+      expect(detected.nonWaivableMissingAspectIds).toEqual(['architecture_specific_jank']);
+      const blockedSql = await callTool(tools, 'execute_sql', { sql: 'SELECT 1 AS ok' });
+      expect(blockedSql.action_required).toBe('revise_plan');
     });
   });
 });

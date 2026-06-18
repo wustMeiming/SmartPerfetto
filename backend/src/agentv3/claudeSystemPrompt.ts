@@ -34,8 +34,10 @@ export function estimatePromptTokens(text: string): number {
   return Math.ceil(tokens);
 }
 
-/** Maximum system prompt token budget. Sections are progressively dropped if exceeded. */
-const MAX_PROMPT_TOKENS = 8000;
+/** M2 hard gate: full-mode system prompt target after core/detail split. */
+export const MAX_PROMPT_TOKENS = 12_000;
+/** M2 hard gate: always-injected scene strategy core budget. */
+export const MAX_SCENE_CORE_TOKENS = 4_000;
 
 function buildOutputLanguageSection(language: OutputLanguage): string {
   const templateName = language === 'en' ? 'prompt-language-en' : 'prompt-language-zh';
@@ -407,8 +409,8 @@ function nearestMarkdownBoundary(text: string): string {
 
 export interface SystemPromptBuildOptions {
   /**
-   * M1 keeps the default runtime path in baseline mode. M2 can enable this
-   * once strategy core/detail split and hard gates are ready.
+   * Enabled by default in M2 after strategy core/detail split. Tests can turn
+   * it off to inspect raw strategy-core size.
    */
   truncateSceneCore?: boolean;
 }
@@ -423,6 +425,7 @@ export function buildSystemPromptParts(
   options: SystemPromptBuildOptions = {},
 ): SystemPromptParts {
   const effectiveMaxTokens = maxTokens ?? MAX_PROMPT_TOKENS;
+  const shouldTruncateSceneCore = options.truncateSceneCore ?? true;
   const segments: PromptSegment[] = [];
 
   const push = (
@@ -455,6 +458,30 @@ export function buildSystemPromptParts(
     segment.content = content;
     segment.charCount = content.length;
     segment.estimatedTokens = estimatePromptTokens(content);
+  };
+
+  const truncateSegmentToTokenBudget = (index: number, tokenBudget: number): boolean => {
+    const segment = segments[index];
+    if (!segment || !segment.truncatable || segment.estimatedTokens <= tokenBudget) return false;
+    const originalContent = segment.content;
+    let bestFit = '';
+    let low = 0;
+    let high = originalContent.length;
+
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const candidate = originalContent.slice(0, mid).trimEnd();
+      if (estimatePromptTokens(candidate) <= tokenBudget) {
+        bestFit = candidate;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    const boundedFit = bestFit ? nearestMarkdownBoundary(bestFit) : '';
+    replaceSegmentContent(index, boundedFit, boundedFit.length < originalContent.length);
+    return Boolean(segments[index]?.truncated);
   };
 
   // ── Tier 1: STATIC ───────────────────────────────────────────────────────
@@ -534,7 +561,7 @@ export function buildSystemPromptParts(
       push(3, 'code_aware', renderTemplate(codeAwareTemplate, {
         codeAwareMode: context.codeAwareMode,
         codebaseIds: context.codebaseIds.join(', '),
-      }));
+      }), false, { truncatable: true });
     }
   }
 
@@ -572,13 +599,13 @@ export function buildSystemPromptParts(
   // ── Tier 4: PER-INTERACTION DYNAMIC ──────────────────────────────────────
   // User selection — never droppable; user's explicit intent.
   if (context.selectionContext) {
-    push(4, 'selection_context', buildSelectionContextSection(context.selectionContext));
+    push(4, 'selection_context', buildSelectionContextSection(context.selectionContext), false, { truncatable: true });
   }
 
   if (context.comparison) {
-    push(4, 'comparison_context', buildComparisonContextSection(context.comparison, context.packageName));
+    push(4, 'comparison_context', buildComparisonContextSection(context.comparison, context.packageName), false, { truncatable: true });
     const compMethodology = loadPromptTemplate('comparison-methodology');
-    if (compMethodology) push(4, 'comparison_methodology', compMethodology);
+    if (compMethodology) push(4, 'comparison_methodology', compMethodology, false, { truncatable: true });
   }
 
   const hasConversationContext = (context.previousFindings && context.previousFindings.length > 0)
@@ -619,7 +646,7 @@ export function buildSystemPromptParts(
       contextParts.push(`### 对话摘要\n${context.conversationSummary}`);
     }
 
-    push(4, 'conversation_context', contextParts.join('\n\n'));
+    push(4, 'conversation_context', contextParts.join('\n\n'), false, { truncatable: true });
   }
 
   if (context.sqlErrorFixPairs && context.sqlErrorFixPairs.length > 0) {
@@ -674,6 +701,12 @@ export function buildSystemPromptParts(
     'plan_history',
   ];
   const truncatedLabels: string[] = [];
+  if (shouldTruncateSceneCore) {
+    const sceneCoreIndex = segments.findIndex(s => s.label === 'scene_strategy_core' && s.truncatable);
+    if (sceneCoreIndex >= 0 && truncateSegmentToTokenBudget(sceneCoreIndex, MAX_SCENE_CORE_TOKENS)) {
+      truncatedLabels.push('scene_strategy_core');
+    }
+  }
   let prompt = joinSegments(segments);
   let tokens = estimatePromptTokens(prompt);
 
@@ -688,7 +721,7 @@ export function buildSystemPromptParts(
         tokens = estimatePromptTokens(prompt);
       }
     }
-    if (tokens > effectiveMaxTokens && options.truncateSceneCore) {
+    if (tokens > effectiveMaxTokens && shouldTruncateSceneCore) {
       const idx = segments.findIndex(s => s.label === 'scene_strategy_core' && s.truncatable);
       if (idx >= 0) {
         const originalContent = segments[idx].content;
@@ -710,13 +743,33 @@ export function buildSystemPromptParts(
 
         const boundedFit = bestFit ? nearestMarkdownBoundary(bestFit) : '';
         replaceSegmentContent(idx, boundedFit, boundedFit.length < originalContent.length);
-        if (segments[idx].truncated) truncatedLabels.push('scene_strategy_core');
+        if (segments[idx].truncated && !truncatedLabels.includes('scene_strategy_core')) {
+          truncatedLabels.push('scene_strategy_core');
+        }
         prompt = joinSegments(segments);
         tokens = estimatePromptTokens(prompt);
       }
     }
     if (tokens > effectiveMaxTokens) {
-      console.warn(`[SystemPrompt] Prompt exceeds budget after trimming: ~${tokens} tokens (budget: ${effectiveMaxTokens})`);
+      const dynamicCaps: Array<{ label: string; tokenBudget: number }> = [
+        { label: 'selection_context', tokenBudget: 1_000 },
+        { label: 'conversation_context', tokenBudget: 1_000 },
+        { label: 'comparison_context', tokenBudget: 800 },
+        { label: 'comparison_methodology', tokenBudget: 800 },
+        { label: 'code_aware', tokenBudget: 700 },
+      ];
+      for (const { label, tokenBudget } of dynamicCaps) {
+        if (tokens <= effectiveMaxTokens) break;
+        const idx = segments.findIndex(s => s.label === label && s.truncatable);
+        if (idx >= 0 && truncateSegmentToTokenBudget(idx, tokenBudget)) {
+          if (!truncatedLabels.includes(label)) truncatedLabels.push(label);
+          prompt = joinSegments(segments);
+          tokens = estimatePromptTokens(prompt);
+        }
+      }
+    }
+    if (tokens > effectiveMaxTokens) {
+      throw new Error(`[SystemPrompt] Prompt exceeds hard budget after trimming: ~${tokens} tokens (budget: ${effectiveMaxTokens})`);
     }
   }
 

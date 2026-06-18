@@ -1491,6 +1491,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     const { allowedTools, toolDefinitions } = createClaudeMcpServer({
       sessionId,
       traceId,
+      userQuery: query,
       traceProcessorService: this.traceProcessorService,
       skillExecutor,
       packageName: effectivePackageName,
