@@ -75,6 +75,7 @@ import {
 } from '../services/baselineDiffer';
 import {ProjectMemory} from './projectMemory';
 import {CaseLibrary} from '../services/caseLibrary';
+import { createCaseRetriever } from '../services/caseEvolution/caseRecommendationRetriever';
 import {
   enterpriseKnowledgeStoreEnabled,
   type KnowledgeScope,
@@ -1011,6 +1012,10 @@ export interface ClaudeMcpServerOptions {
   codebaseRegistry?: CodebaseRegistry;
   /** Test hook / alternate code lookup ledger. */
   codeLookupLedger?: CodeLookupLedger;
+  /** Test hook / alternate case library. */
+  caseLibrary?: CaseLibrary;
+  /** Test hook / alternate case RAG store. */
+  ragStore?: RagStore;
 }
 
 /**
@@ -3919,11 +3924,41 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       cuj: z.string().optional().describe('Restrict to cases whose key.cuj matches.'),
       include_unpublished: z.boolean().optional().describe('Include reviewed/draft cases (default false — only published surface to the agent).'),
       top_k: z.number().int().min(1).max(20).optional().describe('Maximum cases returned (1-20, default 5).'),
+      scene: z.string().optional().describe('Optional scene for evidence-gated case retrieval (for example scrolling).'),
+      domain_pack: z.string().optional().describe('Optional case domain pack for evidence-gated retrieval (default scrolling.v1 for scrolling).'),
+      root_cause: z.string().optional().describe('Optional primary root cause for evidence-gated retrieval.'),
+      evidence_signatures: z.record(z.string(), z.unknown()).optional().describe('Optional evidence signatures gathered in this run. When present, retrieval returns strong/partial/background matchStrength.'),
     },
-    async ({ tags, app_id, device_id, cuj, include_unpublished, top_k }) => {
-      const library = getCaseLibrary();
+    async ({ tags, app_id, device_id, cuj, include_unpublished, top_k, scene, domain_pack, root_cause, evidence_signatures }) => {
+      const library = options.caseLibrary ?? getCaseLibrary();
       const wantedTags = tags ? new Set(tags) : null;
       const limit = top_k ?? 5;
+
+      if (evidence_signatures && typeof evidence_signatures === 'object') {
+        const retriever = createCaseRetriever({
+          library,
+          ragStore: options.ragStore ?? getRagStore(),
+          scope: knowledgeScope,
+        });
+        const effectiveScene = scene || options.sceneType || 'scrolling';
+        const effectiveRootCause = root_cause || tags?.[0] || 'unknown';
+        const hits = retriever.retrieve({
+          scene: effectiveScene,
+          domainPack: domain_pack || (effectiveScene === 'scrolling' ? 'scrolling.v1' : effectiveScene),
+          rootCause: effectiveRootCause,
+          audiences: ['app', 'oem'],
+          evidenceSignatures: evidence_signatures as Record<string, unknown>,
+          textQuery: [effectiveRootCause, ...(tags ?? [])].join(' '),
+          topK: limit,
+          includeStatuses: include_unpublished ? ['published', 'reviewed'] : ['published'],
+        });
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({success: true, hits, count: hits.length}),
+          }],
+        };
+      }
 
       // Pull either published-only or published+reviewed depending on the
       // include_unpublished flag. Drafts and private cases never surface

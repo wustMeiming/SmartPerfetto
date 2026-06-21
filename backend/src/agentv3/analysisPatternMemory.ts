@@ -41,6 +41,7 @@ import {
   type KnowledgeScope,
   resolveKnowledgeScope,
 } from '../services/scopedKnowledgeStore';
+import { bucketPackageDomain } from '../services/caseEvolution/domainBucket';
 
 const PATTERNS_FILE = backendLogPath('analysis_patterns.json');
 const NEGATIVE_PATTERNS_FILE = backendLogPath('analysis_negative_patterns.json');
@@ -362,9 +363,7 @@ export function extractTraceFeatures(context: {
   if (context.architectureType) features.push(`arch:${context.architectureType}`);
   if (context.sceneType) features.push(`scene:${context.sceneType}`);
   if (context.packageName) {
-    // Extract app domain from package name (e.g. "com.tencent.mm" → "tencent")
-    const parts = context.packageName.split('.');
-    if (parts.length >= 2) features.push(`domain:${parts[1]}`);
+    features.push(`domain:${bucketPackageDomain(context.packageName)}`);
   }
 
   // Add finding categories and key titles as features

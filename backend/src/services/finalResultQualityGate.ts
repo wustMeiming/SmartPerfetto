@@ -400,6 +400,7 @@ export function assessFinalResultQuality(input: {
       query,
       sceneType,
       contractSceneId: result.conclusionContract?.metadata?.sceneId,
+      caseRecommendations: result.conclusionContract?.caseRecommendations as Array<Record<string, unknown>> | undefined,
     });
     if (contractIssue) {
       const missingText = contractIssue.missingLabels.join('、');

@@ -130,5 +130,14 @@ export interface CaseKnowledgeReportRecommendation {
   matchStrength: CaseKnowledgeMatchStrength;
   evidenceGap?: string;
   evidenceRefs?: string[];
+  matchedSignatures?: string[];
+  missingRequiredSignatures?: string[];
   recommendations: CaseKnowledgeFrontmatter['recommendations'];
+  /** Present only when the hit traces to a runtime-learned case. */
+  learnedProvenance?: {
+    candidateId: string;
+    supportingEvidence: number;
+    contradictingEvidence: number;
+    supported: boolean;
+  };
 }

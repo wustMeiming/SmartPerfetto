@@ -102,6 +102,8 @@ export interface ClaudeAnalysisContext {
   patternContext?: string;
   /** Cross-session negative pattern context (P1: 负面记忆) */
   negativePatternContext?: string;
+  /** Background-only case library hints; must be evidence-verified before use */
+  caseBackgroundContext?: string;
   /** Previous turn's analysis plan for multi-turn context (P1-G12) */
   previousPlan?: AnalysisPlanV3;
   /** Recent plan history (max 3) for deeper cross-turn context (P1-B1) */

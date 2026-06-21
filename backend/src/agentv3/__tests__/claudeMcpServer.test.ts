@@ -209,6 +209,8 @@ function createTestServer(options: {
   cachedArchitecture?: any;
   codeAwareMode?: any;
   codebaseIds?: string[];
+  caseLibrary?: any;
+  ragStore?: any;
 } = {}) {
   const analysisNotes: AnalysisNote[] = [];
   const hypotheses: Hypothesis[] = [];
@@ -262,6 +264,8 @@ function createTestServer(options: {
     cachedArchitecture: options.cachedArchitecture,
     codeAwareMode: options.codeAwareMode,
     codebaseIds: options.codebaseIds,
+    caseLibrary: options.caseLibrary,
+    ragStore: options.ragStore,
     ...(options.lightweight ? { lightweight: true } : { analysisPlan }),
     ...(options.referenceTraceId ? {
       referenceTraceId: options.referenceTraceId,
@@ -373,6 +377,70 @@ describe('createClaudeMcpServer', () => {
       for (const required of ['execute_sql', 'invoke_skill', 'lookup_sql_schema', 'submit_plan']) {
         expect(tools.has(required)).toBe(true);
       }
+    });
+
+    it('enhances recall_similar_case with optional evidence signatures while preserving the old tag path', async () => {
+      const caseNode = {
+        schemaVersion: 1,
+        source: 'curated_markdown_case',
+        createdAt: 1,
+        caseId: 'case-shader',
+        title: 'Shader case',
+        status: 'published',
+        redactionState: 'redacted',
+        tags: ['shader_compile', 'scrolling'],
+        findings: [],
+        knowledge: {
+          sourceFile: 'cases/case-shader.md',
+          body: '',
+          quality: 'curated',
+          scene: 'scrolling',
+          domainPack: 'scrolling.v1',
+          taxonomy: {
+            primary_root_cause: 'shader_compile',
+            secondary_root_causes: [],
+            responsibility: 'app',
+            severity: 'warning',
+          },
+          context: {},
+          evidenceSignatures: {
+            required: [{ field: 'reason_code', op: 'eq', value: 'shader_compile' }],
+            supportive: [{ field: 'render_slices', op: 'contains_any', value: ['makePipeline'] }],
+          },
+          recommendations: { app: [], oem: [] },
+        },
+      };
+      const caseLibrary = {
+        listCases: jest.fn(() => [caseNode]),
+      };
+      const ragStore = {
+        search: jest.fn(() => ({
+          results: [{
+            score: 1,
+            chunk: {
+              uri: 'case://case-shader',
+            },
+          }],
+        })),
+      };
+      const { tools } = createTestServer({ sceneType: 'scrolling', caseLibrary, ragStore });
+
+      const legacy = await callTool(tools, 'recall_similar_case', { tags: ['shader_compile'] });
+      expect(legacy.hits[0]).toMatchObject({ caseId: 'case-shader', score: 1 });
+
+      const structured = await callTool(tools, 'recall_similar_case', {
+        scene: 'scrolling',
+        domain_pack: 'scrolling.v1',
+        root_cause: 'shader_compile',
+        evidence_signatures: {
+          reason_code: 'shader_compile',
+          render_slices: ['makePipeline'],
+        },
+      });
+      expect(structured.hits[0]).toMatchObject({
+        caseId: 'case-shader',
+        matchStrength: 'strong',
+      });
     });
 
     it('should auto-derive allowedTools matching registered tools (P2-G1)', () => {

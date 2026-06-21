@@ -665,6 +665,12 @@ describe('HTMLReportGenerator', () => {
               primaryRootCause: 'shader_compile',
               matchStrength: 'strong',
               evidenceRefs: ['ev_shader_compile'],
+              learnedProvenance: {
+                candidateId: 'cand-html-1',
+                supportingEvidence: 3,
+                contradictingEvidence: 0,
+                supported: true,
+              },
               recommendations: {
                 app: [{
                   id: 'app.precompile_shader',
@@ -713,6 +719,8 @@ describe('HTMLReportGenerator', () => {
     expect(html).toContain('相似案例与优化建议');
     expect(html).toContain('case_id');
     expect(html).toContain('scroll_shader_compile_pixel8_001');
+    expect(html).toContain('学习案例');
+    expect(html).toContain('3 次正向反馈');
     expect(html).toContain('strong 匹配');
     expect(html).toContain('可作为直接建议');
     expect(html).toContain('App 侧建议');

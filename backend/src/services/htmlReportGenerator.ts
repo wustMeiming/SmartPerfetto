@@ -5012,6 +5012,10 @@ export class HTMLReportGenerator {
       'evidenceRefIds',
       'evidence_ref_ids',
     ]);
+    const learnedBadge = this.renderLearnedCaseProvenanceBadge(
+      this.asReportRecord(this.readReportAliasedValue(hit, ['learnedProvenance', 'learned_provenance'])),
+      outputLanguage,
+    );
 
     const matchLabel = this.caseMatchLabel(matchStrength, outputLanguage);
     const guidanceLabel = matchStrength === 'strong'
@@ -5020,6 +5024,7 @@ export class HTMLReportGenerator {
     const metaParts = [
       `<span class="case-rec-pill ${matchStrength}">${this.escapeHtml(matchLabel)}</span>`,
       `<span class="case-rec-pill">${this.escapeHtml(guidanceLabel)}</span>`,
+      learnedBadge,
       scene ? `<span>${this.escapeHtml(localize(outputLanguage, '场景', 'Scene'))}: ${this.escapeHtml(scene)}</span>` : '',
       rootCause ? `<span>${this.escapeHtml(localize(outputLanguage, '根因', 'Root cause'))}: ${this.escapeHtml(rootCause)}</span>` : '',
       evidenceRefs.length ? `<span>${this.escapeHtml(localize(outputLanguage, '证据', 'Evidence'))}: ${evidenceRefs.map(ref => `<code>${this.escapeHtml(ref)}</code>`).join(', ')}</span>` : '',
@@ -5057,6 +5062,19 @@ export class HTMLReportGenerator {
           )}
         </div>
       </div>`;
+  }
+
+  private renderLearnedCaseProvenanceBadge(
+    provenance: Record<string, unknown> | null,
+    outputLanguage: OutputLanguage,
+  ): string {
+    if (!provenance) return '';
+    const supportingEvidence = Number(provenance.supportingEvidence ?? provenance.supporting_evidence ?? 0);
+    const supported = provenance.supported === true;
+    const label = supported && Number.isFinite(supportingEvidence) && supportingEvidence > 0
+      ? localize(outputLanguage, `学习案例 · ${supportingEvidence} 次正向反馈`, `Learned case · ${supportingEvidence} positive feedback`)
+      : localize(outputLanguage, '学习案例（未验证）', 'Learned case (unverified)');
+    return `<span class="case-rec-pill">${this.escapeHtml(label)}</span>`;
   }
 
   private renderCaseRecommendationAudience(

@@ -95,6 +95,7 @@ import {
   buildNegativePatternSection,
   setSupersedeStoreForTesting,
 } from '../analysisPatternMemory';
+import { bucketPackageDomain } from '../../services/caseEvolution/domainBucket';
 
 // ── Setup ────────────────────────────────────────────────────────────────
 
@@ -131,6 +132,7 @@ describe('extractTraceFeatures', () => {
   it('should extract domain from package name', () => {
     const features = extractTraceFeatures({ packageName: 'com.tencent.mm' });
     expect(features).toContain('domain:tencent');
+    expect(features).toContain(`domain:${bucketPackageDomain('com.tencent.mm')}`);
   });
 
   it('should extract category tags from finding categories', () => {

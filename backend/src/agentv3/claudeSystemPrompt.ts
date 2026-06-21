@@ -664,6 +664,10 @@ export function buildSystemPromptParts(
     push(4, 'negative_pattern_context', context.negativePatternContext, true);
   }
 
+  if (context.caseBackgroundContext) {
+    push(4, 'case_background_context', context.caseBackgroundContext, true);
+  }
+
   const allPlans: Array<{ plan: typeof context.previousPlan; label: string }> = [];
   if (context.planHistory) {
     context.planHistory.forEach((p, i) => allPlans.push({ plan: p, label: `第 ${i + 1} 轮` }));
@@ -696,6 +700,7 @@ export function buildSystemPromptParts(
     'trace_completeness',
     'pattern_context',
     'negative_pattern_context',
+    'case_background_context',
     'sql_error_pairs',
     'sub_agents',
     'plan_history',

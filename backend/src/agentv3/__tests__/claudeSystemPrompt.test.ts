@@ -385,6 +385,36 @@ describe('buildSystemPrompt', () => {
       }));
       expect(prompt).toContain('历史踩坑记录');
     });
+
+    it('should inject case background context as a droppable prompt segment', () => {
+      const parts = buildSystemPromptParts(makeContext({
+        caseBackgroundContext: '## 可能相关的历史案例（case library — 待证据验证）\n\n- learned:case-1 — shader compile',
+      }));
+
+      expect(parts.fullPrompt).toContain('可能相关的历史案例');
+      expect(parts.segments.find(segment => segment.label === 'case_background_context')).toMatchObject({
+        droppable: true,
+      });
+    });
+
+    it('should drop case background before SQL error pairs when both exceed budget', () => {
+      const oversizedCaseContext = `## 可能相关的历史案例（case library — 待证据验证）\n\n${'case hint '.repeat(6000)}`;
+      const parts = buildSystemPromptParts(makeContext({
+        caseBackgroundContext: oversizedCaseContext,
+        sqlErrorFixPairs: Array.from({ length: 10 }, (_, i) => ({
+          errorSql: `SELECT * FROM bad_${i}`,
+          errorMessage: `no such table: bad_${i}`,
+          fixedSql: `SELECT * FROM good_${i}`,
+        })),
+      }), 4500);
+
+      const caseDropIndex = parts.droppedLabels.indexOf('case_background_context');
+      const sqlDropIndex = parts.droppedLabels.indexOf('sql_error_pairs');
+      expect(caseDropIndex).toBeGreaterThanOrEqual(0);
+      if (sqlDropIndex >= 0) {
+        expect(caseDropIndex).toBeLessThan(sqlDropIndex);
+      }
+    });
   });
 
   /**

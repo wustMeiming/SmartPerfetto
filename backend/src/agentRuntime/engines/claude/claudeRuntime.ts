@@ -92,6 +92,7 @@ import {
   looksLikeProcessNarrationConclusion,
   looksLikePhaseSummaryFallback,
 } from '../../../services/finalResultQualityGate';
+import { buildCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
 import { getProductionEngineCapabilities } from '../../runtimeDescriptors';
 import type { EngineCapabilities } from '../../runtimeDescriptorTypes';
 
@@ -3053,6 +3054,11 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
       traceFeatures,
       knowledgeScope,
     );
+    const caseBackgroundContext = buildCaseBackgroundContext(
+      sceneType,
+      architecture?.type,
+      knowledgeScope,
+    );
 
     // Phase 6: Session-scoped artifact store + analysis notes
     if (!this.artifactStores.has(sessionId)) {
@@ -3187,6 +3193,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
       sqlErrorFixPairs: sqlErrorFixPairs.length > 0 ? sqlErrorFixPairs : undefined,
       patternContext,
       negativePatternContext,
+      caseBackgroundContext,
       previousPlan,
       planHistory: analysisPlan.history.length > 0 ? analysisPlan.history : undefined,
       selectionContext: options.selectionContext,
