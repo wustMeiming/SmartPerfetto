@@ -23,6 +23,10 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 let mockPatterns: any[] = [];
 let mockNegativePatterns: any[] = [];
 let mockQuickPatterns: any[] = [];
+let mockPatternFileRaw: string | undefined;
+let mockNegativePatternFileRaw: string | undefined;
+let mockQuickPatternFileRaw: string | undefined;
+let mockCorruptBackups: Array<{ src: string; dest: string }> = [];
 const originalEnterprise = process.env.SMARTPERFETTO_ENTERPRISE;
 
 // Temporary storage for atomic write simulation (writeFile to .tmp, then rename)
@@ -40,20 +44,34 @@ jest.mock('fs', () => {
     ...actual,
     existsSync: jest.fn((...args: unknown[]) => {
       const p = args[0] as string;
-      if (typeof p !== 'string' || p.endsWith('.tmp')) return false;
-      if (isNegativeFile(p)) return mockNegativePatterns.length > 0;
-      if (isQuickFile(p)) return mockQuickPatterns.length > 0;
-      if (isPositiveFile(p)) return mockPatterns.length > 0;
+      if (typeof p !== 'string' || p.includes('.tmp')) return false;
+      if (isNegativeFile(p)) return mockNegativePatternFileRaw !== undefined || mockNegativePatterns.length > 0;
+      if (isQuickFile(p)) return mockQuickPatternFileRaw !== undefined || mockQuickPatterns.length > 0;
+      if (isPositiveFile(p)) return mockPatternFileRaw !== undefined || mockPatterns.length > 0;
       return false;
     }),
     readFileSync: jest.fn((...args: unknown[]) => {
       const p = args[0] as string;
-      if (typeof p === 'string' && isNegativeFile(p)) return JSON.stringify(mockNegativePatterns);
-      if (typeof p === 'string' && isQuickFile(p)) return JSON.stringify(mockQuickPatterns);
-      if (typeof p === 'string' && isPositiveFile(p)) return JSON.stringify(mockPatterns);
+      if (typeof p === 'string' && isNegativeFile(p)) {
+        return mockNegativePatternFileRaw ?? JSON.stringify(mockNegativePatterns);
+      }
+      if (typeof p === 'string' && isQuickFile(p)) {
+        return mockQuickPatternFileRaw ?? JSON.stringify(mockQuickPatterns);
+      }
+      if (typeof p === 'string' && isPositiveFile(p)) {
+        return mockPatternFileRaw ?? JSON.stringify(mockPatterns);
+      }
       return '[]';
     }),
     mkdirSync: jest.fn(),
+    renameSync: jest.fn((...args: unknown[]) => {
+      const src = args[0] as string;
+      const dest = args[1] as string;
+      mockCorruptBackups.push({ src, dest });
+      if (isNegativeFile(src)) mockNegativePatternFileRaw = undefined;
+      if (isQuickFile(src)) mockQuickPatternFileRaw = undefined;
+      if (isPositiveFile(src)) mockPatternFileRaw = undefined;
+    }),
     promises: {
       writeFile: jest.fn(async (...args: unknown[]) => {
         const p = args[0] as string;
@@ -67,10 +85,13 @@ jest.mock('fs', () => {
         if (data) {
           if (typeof dest === 'string' && isNegativeFile(dest)) {
             mockNegativePatterns = JSON.parse(data);
+            mockNegativePatternFileRaw = undefined;
           } else if (typeof dest === 'string' && isQuickFile(dest)) {
             mockQuickPatterns = JSON.parse(data);
+            mockQuickPatternFileRaw = undefined;
           } else if (typeof dest === 'string' && isPositiveFile(dest)) {
             mockPatterns = JSON.parse(data);
+            mockPatternFileRaw = undefined;
           }
           tmpWriteBuffer.delete(src);
         }
@@ -103,6 +124,11 @@ beforeEach(() => {
   mockPatterns = [];
   mockNegativePatterns = [];
   mockQuickPatterns = [];
+  mockPatternFileRaw = undefined;
+  mockNegativePatternFileRaw = undefined;
+  mockQuickPatternFileRaw = undefined;
+  mockCorruptBackups = [];
+  tmpWriteBuffer = new Map();
   // Disable the real SQLite supersede store for fs-mocked tests; PR9b's
   // own integration tests cover the live store behaviour.
   setSupersedeStoreForTesting(null);
@@ -402,6 +428,51 @@ describe('saveAnalysisPattern', () => {
     expect(mockPatterns[0].keyInsights).toContain('Old insight');
     expect(mockPatterns[0].keyInsights).toContain('New insight');
   });
+
+  it('serializes concurrent writes so both new patterns survive', async () => {
+    const fs = require('fs');
+
+    await Promise.all([
+      saveAnalysisPattern(['arch:STANDARD', 'scene:startup'], ['startup insight'], 'startup', 'STANDARD'),
+      saveAnalysisPattern(['arch:FLUTTER', 'scene:scrolling'], ['scrolling insight'], 'scrolling', 'FLUTTER'),
+    ]);
+
+    expect(mockPatterns.map(p => p.keyInsights[0]).sort()).toEqual([
+      'scrolling insight',
+      'startup insight',
+    ]);
+    expect(() => JSON.parse(JSON.stringify(mockPatterns))).not.toThrow();
+
+    const tmpPaths = fs.promises.writeFile.mock.calls.map((call: unknown[]) => call[0]);
+    expect(new Set(tmpPaths).size).toBe(tmpPaths.length);
+    expect(tmpPaths.every((p: string) => p.includes(`.tmp-${process.pid}-`))).toBe(true);
+  });
+
+  it('backs up corrupt positive store, logs an error, and falls back to last known good patterns', () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const features = ['arch:STANDARD', 'scene:scrolling'];
+    mockPatterns = [{
+      id: 'pat-good',
+      traceFeatures: features,
+      sceneType: 'scrolling',
+      keyInsights: ['cached insight'],
+      confidence: 0.8,
+      createdAt: Date.now(),
+      matchCount: 0,
+      status: 'confirmed',
+    }];
+
+    expect(matchPatterns(features)).toHaveLength(1);
+
+    mockPatternFileRaw = '{"not valid json"';
+    const matches = matchPatterns(features);
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0].id).toBe('pat-good');
+    expect(mockCorruptBackups.some(b => b.dest.includes('analysis_patterns.json.corrupt-'))).toBe(true);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
 });
 
 describe('saveNegativePattern', () => {
@@ -434,6 +505,17 @@ describe('saveNegativePattern', () => {
     expect(mockNegativePatterns.length).toBe(1);
     expect(mockNegativePatterns[0].failedApproaches).toHaveLength(2);
     expect(mockNegativePatterns[0].matchCount).toBe(1);
+  });
+
+  it('backs up corrupt negative store, logs an error, and returns an empty cold-cache result', () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    expect(matchNegativePatterns(['arch:NO_FILE', 'scene:missing'])).toEqual([]);
+    mockNegativePatternFileRaw = '{definitely not json';
+
+    expect(matchNegativePatterns(['arch:STANDARD', 'scene:scrolling'])).toEqual([]);
+    expect(mockCorruptBackups.some(b => b.dest.includes('analysis_negative_patterns.json.corrupt-'))).toBe(true);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });
 

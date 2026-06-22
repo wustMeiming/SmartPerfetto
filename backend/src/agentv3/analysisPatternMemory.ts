@@ -77,6 +77,115 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 /** Provisional → confirmed promotion when no negative feedback within this window. */
 const AUTO_CONFIRM_AFTER_MS = ONE_DAY_MS;
 
+class Mutex {
+  private tail: Promise<void> = Promise.resolve();
+
+  async runExclusive<T>(fn: () => Promise<T> | T): Promise<T> {
+    const previous = this.tail;
+    let release: () => void = () => {};
+    this.tail = new Promise<void>(resolve => {
+      release = resolve;
+    });
+
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+}
+
+interface PatternStoreCache<T> {
+  lastGood: T[];
+}
+
+const patternStoreMutex = new Mutex();
+const patternStoreLogger = {
+  error: (...args: unknown[]) => console.error(...args),
+  warn: (...args: unknown[]) => console.warn(...args),
+};
+const positivePatternCache: PatternStoreCache<AnalysisPatternEntry> = { lastGood: [] };
+const negativePatternCache: PatternStoreCache<NegativePatternEntry> = { lastGood: [] };
+const quickPatternCache: PatternStoreCache<AnalysisPatternEntry> = { lastGood: [] };
+
+function cloneStoreEntries<T>(entries: T[]): T[] {
+  return JSON.parse(JSON.stringify(entries)) as T[];
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function uniqueTempPath(filePath: string): string {
+  const suffix = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${filePath}.tmp-${suffix}`;
+}
+
+function backupCorruptStore(filePath: string, label: string, err: unknown): void {
+  const backupPath = `${filePath}.corrupt-${Date.now()}`;
+  try {
+    fs.renameSync(filePath, backupPath);
+    patternStoreLogger.error(
+      `[PatternMemory] Failed to parse ${label}; backed up corrupt store`,
+      { filePath, backupPath, error: errorMessage(err) },
+    );
+  } catch (backupErr) {
+    patternStoreLogger.error(
+      `[PatternMemory] Failed to parse ${label}; corrupt backup failed`,
+      {
+        filePath,
+        backupPath,
+        error: errorMessage(err),
+        backupError: errorMessage(backupErr),
+      },
+    );
+  }
+}
+
+function loadPatternStore<T>(
+  filePath: string,
+  label: string,
+  cache: PatternStoreCache<T>,
+): T[] {
+  if (!fs.existsSync(filePath)) {
+    cache.lastGood = [];
+    return [];
+  }
+
+  try {
+    const data = fs.readFileSync(filePath, 'utf-8');
+    const parsed = JSON.parse(data);
+    if (!Array.isArray(parsed)) {
+      throw new Error(`${label} store root must be an array`);
+    }
+    const entries = parsed as T[];
+    cache.lastGood = cloneStoreEntries(entries);
+    return cloneStoreEntries(entries);
+  } catch (err) {
+    backupCorruptStore(filePath, label, err);
+    return cloneStoreEntries(cache.lastGood);
+  }
+}
+
+async function writePatternStore<T>(
+  filePath: string,
+  label: string,
+  patterns: T[],
+  cache: PatternStoreCache<T>,
+): Promise<void> {
+  try {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const tmpFile = uniqueTempPath(filePath);
+    await fs.promises.writeFile(tmpFile, JSON.stringify(patterns, null, 2));
+    await fs.promises.rename(tmpFile, filePath);
+    cache.lastGood = cloneStoreEntries(patterns);
+  } catch (err) {
+    patternStoreLogger.warn(`[PatternMemory] Failed to save ${label}:`, errorMessage(err));
+  }
+}
+
 /**
  * Tag category weights for weighted Jaccard similarity.
  * Higher weight = more influence on similarity score.
@@ -277,50 +386,31 @@ function patternMatchesKnowledgeScope(
 
 /** Load patterns from disk. */
 function loadPatterns(): AnalysisPatternEntry[] {
-  try {
-    if (!fs.existsSync(PATTERNS_FILE)) return [];
-    const data = fs.readFileSync(PATTERNS_FILE, 'utf-8');
-    return JSON.parse(data) as AnalysisPatternEntry[];
-  } catch {
-    return [];
-  }
+  return loadPatternStore(PATTERNS_FILE, 'analysis patterns', positivePatternCache);
 }
 
 /** Load negative patterns from disk. */
 function loadNegativePatterns(): NegativePatternEntry[] {
-  try {
-    if (!fs.existsSync(NEGATIVE_PATTERNS_FILE)) return [];
-    const data = fs.readFileSync(NEGATIVE_PATTERNS_FILE, 'utf-8');
-    return JSON.parse(data) as NegativePatternEntry[];
-  } catch {
-    return [];
-  }
+  return loadPatternStore(
+    NEGATIVE_PATTERNS_FILE,
+    'negative analysis patterns',
+    negativePatternCache,
+  );
 }
 
 /** Save patterns to disk (atomic write). */
 async function savePatterns(patterns: AnalysisPatternEntry[]): Promise<void> {
-  try {
-    const dir = path.dirname(PATTERNS_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const tmpFile = PATTERNS_FILE + '.tmp';
-    await fs.promises.writeFile(tmpFile, JSON.stringify(patterns, null, 2));
-    await fs.promises.rename(tmpFile, PATTERNS_FILE);
-  } catch (err) {
-    console.warn('[PatternMemory] Failed to save patterns:', (err as Error).message);
-  }
+  await writePatternStore(PATTERNS_FILE, 'analysis patterns', patterns, positivePatternCache);
 }
 
 /** Save negative patterns to disk (atomic write). */
 async function saveNegativePatterns(patterns: NegativePatternEntry[]): Promise<void> {
-  try {
-    const dir = path.dirname(NEGATIVE_PATTERNS_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const tmpFile = NEGATIVE_PATTERNS_FILE + '.tmp';
-    await fs.promises.writeFile(tmpFile, JSON.stringify(patterns, null, 2));
-    await fs.promises.rename(tmpFile, NEGATIVE_PATTERNS_FILE);
-  } catch (err) {
-    console.warn('[PatternMemory] Failed to save negative patterns:', (err as Error).message);
-  }
+  await writePatternStore(
+    NEGATIVE_PATTERNS_FILE,
+    'negative analysis patterns',
+    patterns,
+    negativePatternCache,
+  );
 }
 
 /**
@@ -423,58 +513,60 @@ export async function saveAnalysisPattern(
 ): Promise<void> {
   if (features.length === 0 || insights.length === 0) return;
 
-  const patterns = loadPatterns();
-  const now = Date.now();
-  const provenance = withKnowledgeScopeProvenance(
-    extras.provenance,
-    extras.knowledgeScope,
-  );
+  await patternStoreMutex.runExclusive(async () => {
+    const patterns = loadPatterns();
+    const now = Date.now();
+    const provenance = withKnowledgeScopeProvenance(
+      extras.provenance,
+      extras.knowledgeScope,
+    );
 
-  // Deduplicate: check if a very similar pattern already exists (>70% similarity)
-  const existingIdx = patterns.findIndex(p =>
-    patternMatchesKnowledgeScope(p, extras.knowledgeScope) &&
-    weightedJaccardSimilarity(p.traceFeatures, features) > 0.7,
-  );
+    // Deduplicate: check if a very similar pattern already exists (>70% similarity)
+    const existingIdx = patterns.findIndex(p =>
+      patternMatchesKnowledgeScope(p, extras.knowledgeScope) &&
+      weightedJaccardSimilarity(p.traceFeatures, features) > 0.7,
+    );
 
-  if (existingIdx >= 0) {
-    // Update existing pattern: merge insights, bump match count
-    const existing = patterns[existingIdx];
-    const uniqueInsights = new Set([...existing.keyInsights, ...insights]);
-    existing.keyInsights = Array.from(uniqueInsights).slice(0, 10);
-    existing.matchCount++;
-    existing.createdAt = now; // Refresh timestamp
-    if (confidence !== undefined) existing.confidence = confidence;
-    if (extras.failureModeHash) existing.failureModeHash = extras.failureModeHash;
-    if (extras.bucketKey) existing.bucketKey = extras.bucketKey;
-    if (provenance) existing.provenance = provenance;
-    // Re-saves don't downgrade status — a provisional pattern that has
-    // already auto-confirmed must not slip back to provisional.
-  } else {
-    const id = `pat-${now}-${Math.random().toString(36).substring(2, 6)}`;
-    patterns.push({
-      id,
-      traceFeatures: features,
-      sceneType,
-      keyInsights: insights.slice(0, 10),
-      architectureType,
-      confidence: confidence ?? 0.5,
-      createdAt: now,
-      matchCount: 0,
-      status: extras.status ?? 'provisional',
-      failureModeHash: extras.failureModeHash,
-      bucketKey: extras.bucketKey,
-      provenance,
-    });
-  }
+    if (existingIdx >= 0) {
+      // Update existing pattern: merge insights, bump match count
+      const existing = patterns[existingIdx];
+      const uniqueInsights = new Set([...existing.keyInsights, ...insights]);
+      existing.keyInsights = Array.from(uniqueInsights).slice(0, 10);
+      existing.matchCount++;
+      existing.createdAt = now; // Refresh timestamp
+      if (confidence !== undefined) existing.confidence = confidence;
+      if (extras.failureModeHash) existing.failureModeHash = extras.failureModeHash;
+      if (extras.bucketKey) existing.bucketKey = extras.bucketKey;
+      if (provenance) existing.provenance = provenance;
+      // Re-saves don't downgrade status — a provisional pattern that has
+      // already auto-confirmed must not slip back to provisional.
+    } else {
+      const id = `pat-${now}-${Math.random().toString(36).substring(2, 6)}`;
+      patterns.push({
+        id,
+        traceFeatures: features,
+        sceneType,
+        keyInsights: insights.slice(0, 10),
+        architectureType,
+        confidence: confidence ?? 0.5,
+        createdAt: now,
+        matchCount: 0,
+        status: extras.status ?? 'provisional',
+        failureModeHash: extras.failureModeHash,
+        bucketKey: extras.bucketKey,
+        provenance,
+      });
+    }
 
-  // Prune expired + enforce max size (P1-G10: frequency-aware eviction)
-  const cutoff = now - PATTERN_TTL_MS;
-  const active = patterns
-    .filter(p => p.createdAt >= cutoff)
-    .sort((a, b) => evictionScore(b) - evictionScore(a))
-    .slice(0, MAX_PATTERNS);
+    // Prune expired + enforce max size (P1-G10: frequency-aware eviction)
+    const cutoff = now - PATTERN_TTL_MS;
+    const active = patterns
+      .filter(p => p.createdAt >= cutoff)
+      .sort((a, b) => evictionScore(b) - evictionScore(a))
+      .slice(0, MAX_PATTERNS);
 
-  await savePatterns(active);
+    await savePatterns(active);
+  });
 }
 
 /**
@@ -490,65 +582,68 @@ export async function saveNegativePattern(
 ): Promise<void> {
   if (features.length === 0 || failedApproaches.length === 0) return;
 
-  const patterns = loadNegativePatterns();
-  const provenance = withKnowledgeScopeProvenance(
-    extras.provenance,
-    extras.knowledgeScope,
-  );
-
-  // Deduplicate: merge into existing pattern if >70% similar
-  const existingIdx = patterns.findIndex(p =>
-    patternMatchesKnowledgeScope(p, extras.knowledgeScope) &&
-    weightedJaccardSimilarity(p.traceFeatures, features) > 0.7,
-  );
-
-  const now = Date.now();
   // Recurrence detection: a fresh negative on a hash that's currently being
   // canary-watched means the alleged fix didn't work. Fire-and-forget.
   if (extras.failureModeHash) {
     checkAndRecordRecurrence(extras.failureModeHash);
   }
-  if (existingIdx >= 0) {
-    const existing = patterns[existingIdx];
-    const existingKeys = new Set(existing.failedApproaches.map(a => `${a.type}:${a.approach}`));
-    for (const approach of failedApproaches) {
-      const key = `${approach.type}:${approach.approach}`;
-      if (!existingKeys.has(key)) {
-        existing.failedApproaches.push(approach);
-        existingKeys.add(key);
+
+  await patternStoreMutex.runExclusive(async () => {
+    const patterns = loadNegativePatterns();
+    const provenance = withKnowledgeScopeProvenance(
+      extras.provenance,
+      extras.knowledgeScope,
+    );
+
+    // Deduplicate: merge into existing pattern if >70% similar
+    const existingIdx = patterns.findIndex(p =>
+      patternMatchesKnowledgeScope(p, extras.knowledgeScope) &&
+      weightedJaccardSimilarity(p.traceFeatures, features) > 0.7,
+    );
+
+    const now = Date.now();
+    if (existingIdx >= 0) {
+      const existing = patterns[existingIdx];
+      const existingKeys = new Set(existing.failedApproaches.map(a => `${a.type}:${a.approach}`));
+      for (const approach of failedApproaches) {
+        const key = `${approach.type}:${approach.approach}`;
+        if (!existingKeys.has(key)) {
+          existing.failedApproaches.push(approach);
+          existingKeys.add(key);
+        }
       }
+      existing.failedApproaches = existing.failedApproaches.slice(-10);
+      existing.matchCount++;
+      existing.createdAt = now;
+      if (extras.failureModeHash) existing.failureModeHash = extras.failureModeHash;
+      if (extras.bucketKey) existing.bucketKey = extras.bucketKey;
+      if (provenance) existing.provenance = provenance;
+    } else {
+      const id = `neg-${now}-${Math.random().toString(36).substring(2, 6)}`;
+      patterns.push({
+        id,
+        traceFeatures: features,
+        sceneType,
+        failedApproaches: failedApproaches.slice(0, 10),
+        architectureType,
+        createdAt: now,
+        matchCount: 0,
+        status: extras.status ?? 'provisional',
+        failureModeHash: extras.failureModeHash,
+        bucketKey: extras.bucketKey,
+        provenance,
+      });
     }
-    existing.failedApproaches = existing.failedApproaches.slice(-10);
-    existing.matchCount++;
-    existing.createdAt = now;
-    if (extras.failureModeHash) existing.failureModeHash = extras.failureModeHash;
-    if (extras.bucketKey) existing.bucketKey = extras.bucketKey;
-    if (provenance) existing.provenance = provenance;
-  } else {
-    const id = `neg-${now}-${Math.random().toString(36).substring(2, 6)}`;
-    patterns.push({
-      id,
-      traceFeatures: features,
-      sceneType,
-      failedApproaches: failedApproaches.slice(0, 10),
-      architectureType,
-      createdAt: now,
-      matchCount: 0,
-      status: extras.status ?? 'provisional',
-      failureModeHash: extras.failureModeHash,
-      bucketKey: extras.bucketKey,
-      provenance,
-    });
-  }
 
-  // Prune expired + enforce max size (P1-G10: frequency-aware eviction)
-  const cutoff = Date.now() - NEGATIVE_PATTERN_TTL_MS;
-  const active = patterns
-    .filter(p => p.createdAt >= cutoff)
-    .sort((a, b) => evictionScore(b) - evictionScore(a))
-    .slice(0, MAX_NEGATIVE_PATTERNS);
+    // Prune expired + enforce max size (P1-G10: frequency-aware eviction)
+    const cutoff = Date.now() - NEGATIVE_PATTERN_TTL_MS;
+    const active = patterns
+      .filter(p => p.createdAt >= cutoff)
+      .sort((a, b) => evictionScore(b) - evictionScore(a))
+      .slice(0, MAX_NEGATIVE_PATTERNS);
 
-  await saveNegativePatterns(active);
+    await saveNegativePatterns(active);
+  });
 }
 
 /**
@@ -643,24 +738,11 @@ export function checkAndRecordRecurrence(failureModeHash: string | undefined): v
 
 /** Load entries from the 7-day quick-path bucket. */
 function loadQuickPatterns(): AnalysisPatternEntry[] {
-  try {
-    if (!fs.existsSync(QUICK_PATTERNS_FILE)) return [];
-    return JSON.parse(fs.readFileSync(QUICK_PATTERNS_FILE, 'utf-8')) as AnalysisPatternEntry[];
-  } catch {
-    return [];
-  }
+  return loadPatternStore(QUICK_PATTERNS_FILE, 'quick analysis patterns', quickPatternCache);
 }
 
 async function saveQuickPatterns(patterns: AnalysisPatternEntry[]): Promise<void> {
-  try {
-    const dir = path.dirname(QUICK_PATTERNS_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const tmp = QUICK_PATTERNS_FILE + '.tmp';
-    await fs.promises.writeFile(tmp, JSON.stringify(patterns, null, 2));
-    await fs.promises.rename(tmp, QUICK_PATTERNS_FILE);
-  } catch (err) {
-    console.warn('[PatternMemory] Failed to save quick patterns:', (err as Error).message);
-  }
+  await writePatternStore(QUICK_PATTERNS_FILE, 'quick analysis patterns', patterns, quickPatternCache);
 }
 
 /**
@@ -678,35 +760,37 @@ export async function saveQuickPathPattern(
 ): Promise<void> {
   if (features.length === 0 || insights.length === 0) return;
 
-  const patterns = loadQuickPatterns();
-  const now = Date.now();
-  const id = `qp-${now}-${Math.random().toString(36).substring(2, 6)}`;
-  const provenance = withKnowledgeScopeProvenance(
-    extras.provenance,
-    extras.knowledgeScope,
-  );
-  patterns.push({
-    id,
-    traceFeatures: features,
-    sceneType,
-    keyInsights: insights.slice(0, 5),
-    architectureType,
-    confidence: 0.3,
-    createdAt: now,
-    matchCount: 0,
-    status: extras.status ?? 'provisional',
-    failureModeHash: extras.failureModeHash,
-    bucketKey: extras.bucketKey,
-    provenance,
+  await patternStoreMutex.runExclusive(async () => {
+    const patterns = loadQuickPatterns();
+    const now = Date.now();
+    const id = `qp-${now}-${Math.random().toString(36).substring(2, 6)}`;
+    const provenance = withKnowledgeScopeProvenance(
+      extras.provenance,
+      extras.knowledgeScope,
+    );
+    patterns.push({
+      id,
+      traceFeatures: features,
+      sceneType,
+      keyInsights: insights.slice(0, 5),
+      architectureType,
+      confidence: 0.3,
+      createdAt: now,
+      matchCount: 0,
+      status: extras.status ?? 'provisional',
+      failureModeHash: extras.failureModeHash,
+      bucketKey: extras.bucketKey,
+      provenance,
+    });
+
+    const cutoff = now - QUICK_PATTERN_TTL_MS;
+    const active = patterns
+      .filter(p => p.createdAt >= cutoff)
+      .sort((a, b) => evictionScore(b) - evictionScore(a))
+      .slice(0, MAX_QUICK_PATTERNS);
+
+    await saveQuickPatterns(active);
   });
-
-  const cutoff = now - QUICK_PATTERN_TTL_MS;
-  const active = patterns
-    .filter(p => p.createdAt >= cutoff)
-    .sort((a, b) => evictionScore(b) - evictionScore(a))
-    .slice(0, MAX_QUICK_PATTERNS);
-
-  await saveQuickPatterns(active);
 }
 
 /**
@@ -818,30 +902,32 @@ export async function applyFeedbackToPattern(
   rating: FeedbackRating,
   now: number = Date.now(),
 ): Promise<PatternStatus | null> {
-  const positives = loadPatterns();
-  const quick = loadQuickPatterns();
-  const negatives = loadNegativePatterns();
+  return patternStoreMutex.runExclusive(async () => {
+    const positives = loadPatterns();
+    const quick = loadQuickPatterns();
+    const negatives = loadNegativePatterns();
 
-  const allBuckets: Array<{ entry: AnalysisPatternEntry | NegativePatternEntry; bucket: 'positive' | 'quick' | 'negative' }> = [];
-  for (const p of positives) allBuckets.push({ entry: p, bucket: 'positive' });
-  for (const p of quick) allBuckets.push({ entry: p, bucket: 'quick' });
-  for (const p of negatives) allBuckets.push({ entry: p, bucket: 'negative' });
+    const allBuckets: Array<{ entry: AnalysisPatternEntry | NegativePatternEntry; bucket: 'positive' | 'quick' | 'negative' }> = [];
+    for (const p of positives) allBuckets.push({ entry: p, bucket: 'positive' });
+    for (const p of quick) allBuckets.push({ entry: p, bucket: 'quick' });
+    for (const p of negatives) allBuckets.push({ entry: p, bucket: 'negative' });
 
-  const target = allBuckets.find(b => b.entry.id === patternId);
-  if (!target) return null;
+    const target = allBuckets.find(b => b.entry.id === patternId);
+    if (!target) return null;
 
-  const next = transitionStatus(target.entry, rating, now);
-  target.entry.status = next;
-  target.entry.lastFeedbackAt = now;
-  if (target.entry.firstFeedbackAt === undefined) {
-    target.entry.firstFeedbackAt = now;
-  }
+    const next = transitionStatus(target.entry, rating, now);
+    target.entry.status = next;
+    target.entry.lastFeedbackAt = now;
+    if (target.entry.firstFeedbackAt === undefined) {
+      target.entry.firstFeedbackAt = now;
+    }
 
-  if (target.bucket === 'positive') await savePatterns(positives);
-  if (target.bucket === 'quick') await saveQuickPatterns(quick);
-  if (target.bucket === 'negative') await saveNegativePatterns(negatives);
+    if (target.bucket === 'positive') await savePatterns(positives);
+    if (target.bucket === 'quick') await saveQuickPatterns(quick);
+    if (target.bucket === 'negative') await saveNegativePatterns(negatives);
 
-  return next;
+    return next;
+  });
 }
 
 /**
@@ -887,19 +973,21 @@ function transitionStatus(
  * cost is amortized across normal traffic.
  */
 export async function sweepAutoConfirm(now: number = Date.now()): Promise<void> {
-  const positives = loadPatterns();
-  let positiveDirty = false;
-  for (const p of positives) {
-    if (autoConfirmIfRipe(p, now)) positiveDirty = true;
-  }
-  if (positiveDirty) await savePatterns(positives);
+  await patternStoreMutex.runExclusive(async () => {
+    const positives = loadPatterns();
+    let positiveDirty = false;
+    for (const p of positives) {
+      if (autoConfirmIfRipe(p, now)) positiveDirty = true;
+    }
+    if (positiveDirty) await savePatterns(positives);
 
-  const negatives = loadNegativePatterns();
-  let negativeDirty = false;
-  for (const p of negatives) {
-    if (autoConfirmIfRipe(p, now)) negativeDirty = true;
-  }
-  if (negativeDirty) await saveNegativePatterns(negatives);
+    const negatives = loadNegativePatterns();
+    let negativeDirty = false;
+    for (const p of negatives) {
+      if (autoConfirmIfRipe(p, now)) negativeDirty = true;
+    }
+    if (negativeDirty) await saveNegativePatterns(negatives);
+  });
 }
 
 /**
