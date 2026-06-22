@@ -473,6 +473,31 @@ describe('saveAnalysisPattern', () => {
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
   });
+
+  it('keeps last known good patterns after a corrupt store is quarantined and then missing', () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const features = ['arch:STANDARD', 'scene:scrolling'];
+    mockPatterns = [{
+      id: 'pat-good',
+      traceFeatures: features,
+      sceneType: 'scrolling',
+      keyInsights: ['cached insight'],
+      confidence: 0.8,
+      createdAt: Date.now(),
+      matchCount: 0,
+      status: 'confirmed',
+    }];
+
+    expect(matchPatterns(features)).toHaveLength(1);
+
+    mockPatternFileRaw = '{"not valid json"';
+    expect(matchPatterns(features).map(match => match.id)).toEqual(['pat-good']);
+
+    mockPatterns = [];
+    expect(matchPatterns(features).map(match => match.id)).toEqual(['pat-good']);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
 });
 
 describe('saveNegativePattern', () => {
@@ -968,6 +993,41 @@ describe('sweepAutoConfirm', () => {
     await sweepAutoConfirm(now);
     expect(mockPatterns.find(p => p.id === 'conf').status).toBe('confirmed');
     expect(mockPatterns.find(p => p.id === 'rej').status).toBe('rejected');
+  });
+
+  it('promotes only patterns in the requested enterprise scope', async () => {
+    process.env.SMARTPERFETTO_ENTERPRISE = 'true';
+    const now = 1_700_000_000_000;
+    const old = now - 2 * 24 * 60 * 60 * 1000;
+    const scopeA = {tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'user-a'};
+    mockPatterns = [
+      { id: 'pos-a', traceFeatures: ['x'], sceneType: 's', keyInsights: ['a'], confidence: 0.5,
+        createdAt: old, matchCount: 0, status: 'provisional',
+        provenance: {sourceTenantId: 'tenant-a', sourceWorkspaceId: 'workspace-a'} },
+      { id: 'pos-b', traceFeatures: ['x'], sceneType: 's', keyInsights: ['b'], confidence: 0.5,
+        createdAt: old, matchCount: 0, status: 'provisional',
+        provenance: {sourceTenantId: 'tenant-b', sourceWorkspaceId: 'workspace-b'} },
+    ];
+    mockNegativePatterns = [
+      { id: 'neg-a', traceFeatures: ['x'], sceneType: 's', failedApproaches: [],
+        createdAt: old, matchCount: 0, status: 'provisional',
+        provenance: {sourceTenantId: 'tenant-a', sourceWorkspaceId: 'workspace-a'} },
+      { id: 'neg-b', traceFeatures: ['x'], sceneType: 's', failedApproaches: [],
+        createdAt: old, matchCount: 0, status: 'provisional',
+        provenance: {sourceTenantId: 'tenant-b', sourceWorkspaceId: 'workspace-b'} },
+    ];
+
+    const result = await sweepAutoConfirm(now, scopeA);
+
+    expect(result).toEqual({
+      positivePromoted: 1,
+      negativePromoted: 1,
+      totalPromoted: 2,
+    });
+    expect(mockPatterns.find(p => p.id === 'pos-a').status).toBe('confirmed');
+    expect(mockPatterns.find(p => p.id === 'pos-b').status).toBe('provisional');
+    expect(mockNegativePatterns.find(p => p.id === 'neg-a').status).toBe('confirmed');
+    expect(mockNegativePatterns.find(p => p.id === 'neg-b').status).toBe('provisional');
   });
 });
 

@@ -107,6 +107,10 @@ function makeEntry(
 
 describe('POST /api/memory/sweep-confirm', () => {
   it('runs the auto-confirm sweep and returns the promoted count', async () => {
+    process.env[ENTERPRISE_FEATURE_FLAG_ENV] = 'true';
+    process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
+    process.env[ENTERPRISE_DB_PATH_ENV] = path.join(tmpDir, 'enterprise.sqlite');
+    delete process.env.SMARTPERFETTO_API_KEY;
     const sweepSpy = jest.spyOn(patternMemory, 'sweepAutoConfirm') as any;
     sweepSpy.mockResolvedValue({
       positivePromoted: 2,
@@ -114,7 +118,7 @@ describe('POST /api/memory/sweep-confirm', () => {
       totalPromoted: 3,
     });
 
-    const res = await request(app).post('/api/memory/sweep-confirm').send({});
+    const res = await ssoHeaders(request(app).post('/api/memory/sweep-confirm')).send({});
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
@@ -126,7 +130,14 @@ describe('POST /api/memory/sweep-confirm', () => {
         totalPromoted: 3,
       },
     });
-    expect(patternMemory.sweepAutoConfirm).toHaveBeenCalledTimes(1);
+    expect(patternMemory.sweepAutoConfirm).toHaveBeenCalledWith(
+      expect.any(Number),
+      {
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+        userId: 'memory-admin',
+      },
+    );
   });
 });
 

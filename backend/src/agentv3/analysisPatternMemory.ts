@@ -98,6 +98,7 @@ class Mutex {
 
 interface PatternStoreCache<T> {
   lastGood: T[];
+  retainLastGoodOnMissing?: boolean;
 }
 
 export interface AutoConfirmSweepResult {
@@ -169,7 +170,11 @@ function loadPatternStore<T>(
   cache: PatternStoreCache<T>,
 ): T[] {
   if (!fs.existsSync(filePath)) {
+    if (cache.retainLastGoodOnMissing && cache.lastGood.length > 0) {
+      return cloneStoreEntries(cache.lastGood);
+    }
     cache.lastGood = [];
+    cache.retainLastGoodOnMissing = false;
     return [];
   }
 
@@ -181,9 +186,11 @@ function loadPatternStore<T>(
     }
     const entries = parsed as T[];
     cache.lastGood = cloneStoreEntries(entries);
+    cache.retainLastGoodOnMissing = false;
     return cloneStoreEntries(entries);
   } catch (err) {
     backupCorruptStore(filePath, label, err);
+    cache.retainLastGoodOnMissing = cache.lastGood.length > 0;
     return cloneStoreEntries(cache.lastGood);
   }
 }
@@ -201,6 +208,7 @@ async function writePatternStore<T>(
     await fs.promises.writeFile(tmpFile, JSON.stringify(patterns, null, 2));
     await fs.promises.rename(tmpFile, filePath);
     cache.lastGood = cloneStoreEntries(patterns);
+    cache.retainLastGoodOnMissing = false;
   } catch (err) {
     patternStoreLogger.warn(`[PatternMemory] Failed to save ${label}:`, errorMessage(err));
   }
@@ -989,14 +997,19 @@ function transitionStatus(
 
 /**
  * Sweep each on-disk bucket and promote any provisional entries past the
- * auto-confirm window. Run lazily from the system prompt builder so the
- * cost is amortized across normal traffic.
+ * auto-confirm window. The background interval runs this globally; manual
+ * admin repair can pass a scope so one workspace cannot promote another
+ * workspace's provisional patterns.
  */
-export async function sweepAutoConfirm(now: number = Date.now()): Promise<AutoConfirmSweepResult> {
+export async function sweepAutoConfirm(
+  now: number = Date.now(),
+  scope?: KnowledgeScope,
+): Promise<AutoConfirmSweepResult> {
   return patternStoreMutex.runExclusive(async () => {
     const positives = loadPatterns();
     let positivePromoted = 0;
     for (const p of positives) {
+      if (scope && !patternMatchesKnowledgeScope(p, scope)) continue;
       if (autoConfirmIfRipe(p, now)) positivePromoted += 1;
     }
     if (positivePromoted > 0) await savePatterns(positives);
@@ -1004,6 +1017,7 @@ export async function sweepAutoConfirm(now: number = Date.now()): Promise<AutoCo
     const negatives = loadNegativePatterns();
     let negativePromoted = 0;
     for (const p of negatives) {
+      if (scope && !patternMatchesKnowledgeScope(p, scope)) continue;
       if (autoConfirmIfRipe(p, now)) negativePromoted += 1;
     }
     if (negativePromoted > 0) await saveNegativePatterns(negatives);

@@ -104,9 +104,9 @@ export function createMemoryRoutes(memory?: ProjectMemory): ExpressRouter {
    * this hourly; this endpoint exists for admin repair and verification.
    */
   router.post('/sweep-confirm', async (req, res) => {
-    requireRequestContext(req);
+    const storageScope = knowledgeScopeFromRequestContext(requireRequestContext(req));
     try {
-      const result = await sweepAutoConfirm();
+      const result = await sweepAutoConfirm(Date.now(), storageScope);
       return res.status(200).json({
         success: true,
         promoted: result.totalPromoted,
