@@ -1050,7 +1050,10 @@ export function buildPatternContextSection(
   features: string[],
   scope?: KnowledgeScope,
 ): string | undefined {
-  const matches = matchPatterns(features, scope);
+  let matches = matchPatterns(features, scope);
+  if (matches.length === 0) {
+    matches = matchQuickPatternsAsBackup(features, scope);
+  }
   if (matches.length === 0) return undefined;
 
   const lines = matches.map((m, i) => {

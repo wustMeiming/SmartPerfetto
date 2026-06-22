@@ -735,6 +735,45 @@ describe('quick-path bucket', () => {
     expect(matches.length).toBe(1);
   });
 
+  it('injects quick-path matches into the prompt when full-path memory has no match', () => {
+    mockQuickPatterns = [{
+      id: 'quick',
+      traceFeatures: ['arch:FLUTTER', 'scene:scrolling'],
+      sceneType: 'scrolling',
+      keyInsights: ['quick fallback insight'],
+      confidence: 0.3,
+      createdAt: Date.now(),
+      matchCount: 0,
+      status: 'confirmed',
+    }];
+
+    const section = buildPatternContextSection(['arch:FLUTTER', 'scene:scrolling']);
+
+    expect(section).toContain('历史分析经验');
+    expect(section).toContain('quick fallback insight');
+    expect(section).toContain('相似度 30%');
+  });
+
+  it('does not read quick-path fallback when full-path memory already matches', () => {
+    mockPatterns = [{
+      id: 'long',
+      traceFeatures: ['arch:FLUTTER', 'scene:scrolling'],
+      sceneType: 'scrolling',
+      keyInsights: ['long-term insight'],
+      confidence: 0.9,
+      createdAt: Date.now(),
+      matchCount: 0,
+      status: 'confirmed',
+    }];
+    mockQuickPatternFileRaw = '{not valid json';
+
+    const section = buildPatternContextSection(['arch:FLUTTER', 'scene:scrolling']);
+
+    expect(section).toContain('long-term insight');
+    expect(section).not.toContain('quick fallback insight');
+    expect(mockCorruptBackups).toHaveLength(0);
+  });
+
   it('quick-path matches score lower than long-term confirmed for same features', async () => {
     const now = Date.now();
     mockPatterns = [{
