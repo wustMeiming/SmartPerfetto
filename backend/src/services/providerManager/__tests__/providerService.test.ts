@@ -223,6 +223,45 @@ describe('ProviderService', () => {
       expect(env.CLAUDE_LIGHT_MODEL).toBe('deepseek-v4-flash');
     });
 
+    it('uses bearer auth for every dual-surface provider on the Claude runtime', () => {
+      const providerTypes = [
+        'deepseek',
+        'glm',
+        'qwen',
+        'qwen_coding',
+        'kimi_code',
+        'kimi',
+        'doubao',
+        'minimax',
+        'xiaomi',
+        'tencent_token_plan',
+        'tencent_coding_plan',
+        'hunyuan',
+        'qianfan',
+        'stepfun',
+        'siliconflow',
+        'huawei',
+      ] as const;
+
+      for (const type of providerTypes) {
+        const env = svc.getEnvForProvider(svc.create({
+          ...validInput,
+          name: `Dual ${type}`,
+          type,
+          models: { primary: `${type}-primary`, light: `${type}-light` },
+          connection: {
+            apiKey: `sk-${type}-test`,
+            agentRuntime: 'claude-agent-sdk',
+            claudeBaseUrl: `https://${type}.example.test/anthropic`,
+            openaiBaseUrl: `https://${type}.example.test/v1`,
+          },
+        }).id)!;
+
+        expect(env.ANTHROPIC_AUTH_TOKEN).toBe(`sk-${type}-test`);
+        expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+      }
+    });
+
     it('uses DeepSeek OpenAI-compatible endpoint when runtime is OpenAI Agents SDK', () => {
       const p = svc.create({
         ...validInput,

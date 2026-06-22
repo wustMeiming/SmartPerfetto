@@ -268,9 +268,12 @@ async function testVertex(provider: ProviderConfig): Promise<Omit<TestResult, 'l
         messages: [{ role: 'user', content: 'hi' }],
       }),
     });
-    // 401/403 means endpoint reachable but auth needed — partial success
     if (res.status === 401 || res.status === 403) {
-      return { success: true, modelVerified: false, error: 'Endpoint reachable but OAuth required (run gcloud auth)' };
+      return {
+        success: false,
+        modelVerified: false,
+        error: `Vertex auth failed (${res.status}) — check GCP project, region, and OAuth credentials`,
+      };
     }
     if (res.ok) return { success: true, modelVerified: true };
     const body = await safeJson(res);

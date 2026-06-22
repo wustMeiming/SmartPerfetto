@@ -77,20 +77,7 @@ export function resolveProviderAgentRuntime(
 }
 
 export function sharedKeyShouldUseClaudeAuthToken(type: ProviderType): boolean {
-  return [
-    'deepseek',
-    'qwen',
-    'qwen_coding',
-    'kimi',
-    'doubao',
-    'minimax',
-    'tencent_token_plan',
-    'tencent_coding_plan',
-    'hunyuan',
-    'qianfan',
-    'stepfun',
-    'huawei',
-  ].includes(type);
+  return isDualSurfaceProviderType(type);
 }
 
 /**
@@ -118,4 +105,3 @@ export function normalizeBedrockModelId(model: string): string {
   if (model.includes('.')) return model;
   return BEDROCK_MODEL_MAP[model] ?? model;
 }
-
