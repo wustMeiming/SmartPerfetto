@@ -280,6 +280,168 @@ describe('final result quality gate', () => {
     })?.code).toBe('missing_final_report_heading');
   });
 
+  it('does not require a deliverable final-report heading for quick-run answers', () => {
+    const quickRun: NonNullable<AnalysisResult['quickRun']> = {
+      requestedMode: 'fast',
+      resolvedMode: 'quick',
+      profile: 'normal',
+      targetTurns: 5,
+      hardCapTurns: 50,
+      actualTurns: 0,
+      elapsedMs: 1200,
+      enforcement: 'turn_cap',
+      stopReason: 'answered',
+      evidence: {
+        frontendPrequeryInjected: 1,
+        frontendPrequeryCited: 1,
+        currentRunDataEnvelopes: 1,
+        citedEvidenceRefs: 1,
+      },
+      contextInjected: {
+        conversationTurns: 1,
+        recentSqlResults: 0,
+        sqlPitfallPairs: 0,
+        patternHints: 0,
+        negativePatternHints: 0,
+        caseBackgroundCases: 0,
+      },
+      verifierStatus: 'passed',
+    };
+    const quickAnswer = [
+      '## 快速回答',
+      '',
+      '- 总体 janky frame 数：21',
+      '- drop rate：0.00%',
+      '',
+      '证据：data:frontend_prequery:current:abc123',
+    ].join('\n');
+
+    expect(assessFinalResultQuality({
+      result: result({
+        conclusion: quickAnswer,
+        quickRun,
+      }),
+      query: '基于上一轮结果，只说总体 janky frame 数和 drop rate',
+    })).toBeUndefined();
+  });
+
+  it('marks quick answers with failed claim verification as partial', () => {
+    const quickRun: NonNullable<AnalysisResult['quickRun']> = {
+      requestedMode: 'fast',
+      resolvedMode: 'quick',
+      profile: 'normal',
+      targetTurns: 5,
+      hardCapTurns: 50,
+      actualTurns: 4,
+      elapsedMs: 9000,
+      enforcement: 'turn_cap',
+      stopReason: 'answered',
+      evidence: {
+        frontendPrequeryInjected: 0,
+        frontendPrequeryCited: 0,
+        currentRunDataEnvelopes: 1,
+        citedEvidenceRefs: 1,
+      },
+      contextInjected: {
+        conversationTurns: 0,
+        recentSqlResults: 0,
+        sqlPitfallPairs: 0,
+        patternHints: 0,
+        negativePatternHints: 0,
+        caseBackgroundCases: 0,
+      },
+      verifierStatus: 'failed',
+    };
+    const target = result({
+      quickRun,
+      conclusion: '滑动总帧数 **347**，janky frame 数 **0**。证据：data:sql_summary:current:abc',
+      claimVerificationResult: {
+        schemaVersion: 'claim_verifier@1',
+        status: 'failed',
+        policy: 'record_only',
+        passed: false,
+        checkedClaimCount: 1,
+        unsupportedClaimCount: 1,
+        claimResults: [{ claimId: 'claim-frames', status: 'unsupported' }],
+        issues: [{
+          claimId: 'claim-frames',
+          severity: 'error',
+          code: 'unsupported_claim',
+          message: 'No evidence matched this claim',
+        }],
+      },
+    });
+
+    const issue = applyFinalResultQualityGate({
+      result: target,
+      query: '这条 trace 的滑动总帧数和 janky frame 数是多少？',
+    });
+
+    expect(issue?.code).toBe('quick_verifier_failed');
+    expect(target.partial).toBe(true);
+    expect(target.terminationMessage).toContain('未通过证据核对');
+  });
+
+  it('marks over-expanded quick triage reports as partial', () => {
+    const quickRun: NonNullable<AnalysisResult['quickRun']> = {
+      requestedMode: 'fast',
+      resolvedMode: 'quick',
+      profile: 'triage',
+      targetTurns: 5,
+      hardCapTurns: 50,
+      actualTurns: 7,
+      elapsedMs: 28_000,
+      enforcement: 'turn_cap',
+      stopReason: 'extended_answered',
+      evidence: {
+        frontendPrequeryInjected: 0,
+        frontendPrequeryCited: 0,
+        currentRunDataEnvelopes: 13,
+        citedEvidenceRefs: 5,
+      },
+      contextInjected: {
+        conversationTurns: 0,
+        recentSqlResults: 0,
+        sqlPitfallPairs: 0,
+        patternHints: 0,
+        negativePatternHints: 0,
+        caseBackgroundCases: 0,
+      },
+      verifierStatus: 'passed',
+    };
+    const target = result({
+      quickRun,
+      conclusion: [
+        '# 滑动卡顿完整诊断报告',
+        '',
+        '## 一、全景概览',
+        '',
+        '总帧数 347，掉帧 7。',
+        '',
+        '## 二、根因分析',
+        '',
+        '主因 A。',
+        '',
+        '## 三、代码责任链',
+        '',
+        '责任链 B。',
+        '',
+        '## 四、优化建议',
+        '',
+        '建议 C。',
+      ].join('\n'),
+    });
+
+    const issue = applyFinalResultQualityGate({
+      result: target,
+      query: '请完整诊断这次滑动卡顿的根因、优化方案和代码责任链',
+    });
+
+    expect(issue?.code).toBe('quick_full_report_shape');
+    expect(target.partial).toBe(true);
+    expect(target.terminationMessage).toContain('快速模式');
+  });
+
   it('flags sparse unverified analysis conclusions and keeps concise factual answers alone', () => {
     expect(assessFinalResultQuality({
       result: result({

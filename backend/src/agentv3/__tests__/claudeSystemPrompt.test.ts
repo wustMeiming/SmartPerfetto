@@ -52,7 +52,7 @@ jest.mock('../strategyLoader', () => ({
     if (name === 'prompt-role') return '# 角色\n\n你是 SmartPerfetto Android 性能分析专家。';
     if (name === 'prompt-language-zh') return '## 输出语言\n\n所有面向用户的回答必须使用简体中文。';
     if (name === 'prompt-language-en') return '## Output Language\n\nAll user-facing answers MUST be written in English.';
-    if (name === 'prompt-quick') return '# 角色\n\n你是 Android 性能 trace 分析专家。\n\n{{outputLanguageSection}}\n\n{{architectureContext}}\n\n{{focusAppContext}}\n\n{{selectionSection}}';
+    if (name === 'prompt-quick') return '# 角色\n\n你是 Android 性能 trace 分析专家。\n\n{{outputLanguageSection}}\n\n{{architectureContext}}\n\n{{focusAppContext}}\n\n{{selectionSection}}\n\n{{quickMemoryContext}}';
     if (name === 'prompt-methodology') return '## 分析方法论\n\n{{sceneStrategy}}';
     if (name === 'comparison-result-methodology') return '## 分析结果对比方法论\n\nMatrix First';
     if (name === 'prompt-output-format') return '## 输出格式\n\n使用 Markdown 格式输出。';
@@ -125,6 +125,14 @@ describe('buildSystemPrompt', () => {
       const prompt = buildQuickSystemPrompt({ outputLanguage: 'en' });
       expect(prompt).toContain('## Output Language');
       expect(prompt).toContain('MUST be written in English');
+    });
+
+    it('should inject quick memory context into quick prompts', () => {
+      const prompt = buildQuickSystemPrompt({
+        quickMemoryContext: '## 快速模式可复用上下文\n\nSQL 踩坑记录',
+      });
+      expect(prompt).toContain('快速模式可复用上下文');
+      expect(prompt).toContain('SQL 踩坑记录');
     });
   });
 

@@ -811,6 +811,7 @@ export function buildQuickSystemPrompt(opts: {
   focusApps?: DetectedFocusApp[];
   focusMethod?: 'battery_stats' | 'oom_adj' | 'frame_timeline' | 'none';
   selectionContext?: SelectionContext;
+  quickMemoryContext?: string;
   outputLanguage?: OutputLanguage;
 }): string {
   const template = loadPromptTemplate('prompt-quick');
@@ -832,5 +833,11 @@ export function buildQuickSystemPrompt(opts: {
     ? buildSelectionContextSection(opts.selectionContext)
     : '';
 
-  return renderTemplate(template, { outputLanguageSection, architectureContext, focusAppContext, selectionSection });
+  return renderTemplate(template, {
+    outputLanguageSection,
+    architectureContext,
+    focusAppContext,
+    selectionSection,
+    quickMemoryContext: opts.quickMemoryContext ?? '',
+  });
 }

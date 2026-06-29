@@ -13,6 +13,7 @@ describe('persistAgentTurn', () => {
     jest.restoreAllMocks();
     sessionContextManager.remove('session-partial-message');
     sessionContextManager.remove('session-sql-result-message');
+    sessionContextManager.remove('session-frontend-trace-context-message');
     sessionContextManager.remove('session-sql-result-truncated');
     sessionContextManager.remove('session-continuity-breaks');
   });
@@ -188,6 +189,95 @@ describe('persistAgentTurn', () => {
         },
       }],
     });
+  });
+
+  it('persists frontend traceContext envelopes and restores them for quick follow-ups', () => {
+    const appendMessages = jest.fn();
+    jest.spyOn(SessionPersistenceService, 'getInstance').mockReturnValue({
+      saveSessionStateSnapshot: jest.fn(() => true),
+      appendMessages,
+    } as any);
+
+    const sessionId = 'session-frontend-trace-context-message';
+    const traceId = 'trace-frontend-trace-context-message';
+    sessionContextManager.set(sessionId, traceId, new EnhancedSessionContext(sessionId, traceId));
+
+    const frontendEnvelope = createDataEnvelope({
+      columns: ['thread_name', 'state', 'total_ms'],
+      rows: [
+        ['RenderThread', 'Running', 12.5],
+        ['main', 'R', 4.2],
+      ],
+    }, {
+      type: 'sql_result',
+      source: 'frontend_trace_context',
+      title: 'thread states in range',
+      layer: 'list',
+      format: 'table',
+      evidenceRefId: 'data:frontend_prequery:current:abc123',
+      sourceToolCallId: 'frontend-prequery:abc123',
+      queryHash: 'abc123',
+    });
+
+    persistAgentTurn({
+      sessionId,
+      traceId,
+      query: '这段时间线程状态如何？',
+      result: {
+        conclusion: '综合结论：已使用前端预查询数据回答。',
+        totalDurationMs: 123,
+      },
+      session: {
+        createdAt: Date.now(),
+        dataEnvelopes: [frontendEnvelope],
+        orchestrator: {
+          takeSnapshot: jest.fn(() => ({
+            conversationSteps: [],
+            dataEnvelopes: [frontendEnvelope],
+            analysisNotes: [],
+          })),
+        },
+      } as any,
+    });
+
+    const messages = appendMessages.mock.calls[0]?.[1] as Array<{
+      id: string;
+      role: string;
+      timestamp: number;
+      sqlResult?: any;
+    }>;
+    const assistantMessage = messages.find(message => message.role === 'assistant');
+    expect(assistantMessage?.sqlResult).toMatchObject({
+      schemaVersion: 'sql_result_message_v1',
+      resultCount: 1,
+      results: [{
+        title: 'thread states in range',
+        evidenceRefId: 'data:frontend_prequery:current:abc123',
+        sourceToolCallId: 'frontend-prequery:abc123',
+        queryHash: 'abc123',
+        data: {
+          columns: ['thread_name', 'state', 'total_ms'],
+          rows: [
+            ['RenderThread', 'Running', 12.5],
+            ['main', 'R', 4.2],
+          ],
+        },
+      }],
+    });
+
+    const followUpContext = new EnhancedSessionContext(sessionId, traceId);
+    followUpContext.hydrateRecentSqlResultsFromMessages([assistantMessage!]);
+    const promptContext = followUpContext.generateRecentSqlResultPromptContext(1);
+
+    expect(promptContext).toContain('thread states in range');
+    expect(promptContext).toContain('RenderThread');
+    expect(promptContext).toContain('abc123');
+
+    const livePromptContext = sessionContextManager
+      .get(sessionId, traceId)
+      ?.generateRecentSqlResultPromptContext(1);
+    expect(livePromptContext).toContain('thread states in range');
+    expect(livePromptContext).toContain('RenderThread');
   });
 
   it('truncates oversized SQL result payloads before persisting message sqlResult', () => {

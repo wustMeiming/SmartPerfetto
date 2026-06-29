@@ -79,14 +79,19 @@ import type { EngineCapabilities } from '../../runtimeDescriptorTypes';
 import type { RuntimeEngineDefinition, RuntimeFactoryInput } from '../../runtimeRegistry';
 import { createAnalysisRunSpec, type AnalysisRunSpec } from '../../analysisRunSpec';
 import {
+  buildQuickRunReceipt,
   buildEntityContext,
+  buildQuickMemoryContextPayload,
   captureSkillDisplayEntities,
   createRuntimeSkillNotesBudget,
   isTruncationVerificationIssue,
-  knowledgeScopeFromAnalysisOptions,
+  quickStopReasonFromTermination,
   repairTruncatedFinalReport,
+  resolveQuickTurnBudget,
+  shouldMarkQuickRunTriage,
   toProtocolHypothesis as toRuntimeProtocolHypothesis,
 } from '../../runtimeCommon';
+import { buildCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
 import {
   createJsonSchemaFromZodRawShape,
   normalizeRuntimeToolArgs,
@@ -262,6 +267,7 @@ interface OpenCodeAnalysisPreparation {
   hypotheses: Hypothesis[];
   uncertaintyFlags: UncertaintyFlag[];
   analysisRunSpec: AnalysisRunSpec;
+  quickMemoryContextCounts?: ReturnType<typeof buildQuickMemoryContextPayload>['counts'];
 }
 
 export type OpenCodeEvent =
@@ -1713,6 +1719,43 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       partial: partial || undefined,
       terminationReason,
       terminationMessage,
+      quickRun: prep.quickMode
+        ? (() => {
+            const quickBudget = resolveQuickTurnBudget({
+              env: this.env,
+              targetEnvKeys: ['AGENT_QUICK_TARGET_TURNS'],
+              hardCapEnvKeys: ['AGENT_QUICK_MAX_TURNS'],
+              enforcement: 'timeout_only',
+            });
+            return buildQuickRunReceipt({
+              requestedMode: 'fast',
+              profile: shouldMarkQuickRunTriage(query) ? 'triage' : undefined,
+              budget: quickBudget,
+              actualTurns: 1,
+              elapsedMs: Date.now() - startedAt,
+              stopReason: quickStopReasonFromTermination({
+                partial,
+                terminationReason,
+                actualTurns: 1,
+                targetTurns: quickBudget.targetTurns,
+                hardCapTurns: quickBudget.hardCapTurns,
+              }),
+              evidence: {
+                frontendPrequeryInjected: prep.analysisRunSpec.traceContext.datasetCount,
+              },
+              contextInjected: {
+                conversationTurns: prep.previousTurns.filter((turn: any) => turn?.completed).slice(-3).length,
+                ...(prep.quickMemoryContextCounts ?? {
+                  recentSqlResults: 0,
+                  sqlPitfallPairs: 0,
+                  patternHints: 0,
+                  negativePatternHints: 0,
+                  caseBackgroundCases: 0,
+                }),
+              },
+            });
+          })()
+        : undefined,
     };
 
     if (!prep.quickMode) {
@@ -1922,7 +1965,8 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     const uncertaintyFlags = this.sessionUncertaintyFlags.get(sessionId)!;
     uncertaintyFlags.splice(0);
 
-    const recentSqlErrors = loadLearnedSqlFixPairs(5, analysisRunSpec.scopes.knowledge);
+    const knowledgeScope = analysisRunSpec.scopes.knowledge;
+    const recentSqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope);
     const skillNotesBudget = createRuntimeSkillNotesBudget(quickMode);
     const { toolDefinitions } = createClaudeMcpServer({
       sessionId,
@@ -1947,7 +1991,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       lightweight: quickMode,
       skillNotesBudget,
       outputLanguage,
-      knowledgeScope: analysisRunSpec.scopes.knowledge,
+      knowledgeScope,
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
       referenceTraceId: options.referenceTraceId,
@@ -1958,8 +2002,22 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     if (analysisRunSpec.traceContext.promptSection) {
       prompt = `${analysisRunSpec.traceContext.promptSection}\n\n${prompt}`;
     }
+    const traceFeatures = extractTraceFeatures({
+      architectureType: architecture?.type,
+      sceneType,
+      packageName: effectivePackageName,
+    });
 
     if (quickMode) {
+      const quickMemoryPayload = buildQuickMemoryContextPayload({
+        patternContext: buildPatternContextSection(traceFeatures, knowledgeScope),
+        negativePatternContext: buildNegativePatternSection(traceFeatures, knowledgeScope),
+        caseBackgroundContext: buildCaseBackgroundContext(sceneType, architecture?.type, knowledgeScope),
+        sqlErrorFixPairs: recentSqlErrors,
+        recentSqlResultsContext: sessionContext.generateRecentSqlResultPromptContext(3),
+        outputLanguage,
+      });
+      const quickMemoryContext = quickMemoryPayload.text;
       return {
         systemPrompt: buildQuickSystemPrompt({
           architecture,
@@ -1967,6 +2025,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
           focusApps: focusResult.apps.length > 0 ? focusResult.apps : undefined,
           focusMethod: focusResult.method,
           selectionContext: options.selectionContext,
+          quickMemoryContext,
           outputLanguage,
         }),
         prompt,
@@ -1983,6 +2042,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
         hypotheses,
         uncertaintyFlags,
         analysisRunSpec,
+        quickMemoryContextCounts: quickMemoryPayload.counts,
       };
     }
 
@@ -1994,11 +2054,6 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       // Non-fatal. OpenCode can still use lookup_sql_schema/knowledge tools.
     }
 
-    const traceFeatures = extractTraceFeatures({
-      architectureType: architecture?.type,
-      sceneType,
-      packageName: effectivePackageName,
-    });
     const traceInfo = this.input.traceProcessorService.getTrace(traceId);
     const analysisContext: ClaudeAnalysisContext = {
       query,
@@ -2022,11 +2077,11 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
         })),
       patternContext: buildPatternContextSection(
         traceFeatures,
-        knowledgeScopeFromAnalysisOptions(options),
+        knowledgeScope,
       ),
       negativePatternContext: buildNegativePatternSection(
         traceFeatures,
-        knowledgeScopeFromAnalysisOptions(options),
+        knowledgeScope,
       ),
       previousPlan,
       planHistory: analysisPlan.history.length > 0 ? analysisPlan.history : undefined,

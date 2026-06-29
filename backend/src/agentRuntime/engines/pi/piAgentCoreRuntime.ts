@@ -82,14 +82,19 @@ import {
   PI_AGENT_CORE_RUNTIME_KIND,
 } from '../../runtimeKinds';
 import {
+  buildQuickRunReceipt,
   buildEntityContext,
+  buildQuickMemoryContextPayload,
   captureSkillDisplayEntities,
   createRuntimeSkillNotesBudget,
   isTruncationVerificationIssue,
-  knowledgeScopeFromAnalysisOptions,
+  quickStopReasonFromTermination,
   repairTruncatedFinalReport,
+  resolveQuickTurnBudget,
+  shouldMarkQuickRunTriage,
   toProtocolHypothesis as toRuntimeProtocolHypothesis,
 } from '../../runtimeCommon';
+import { buildCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
 
 export type ExperimentalPiAgentCoreRuntimeKind = typeof EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND;
 export type PublicPiAgentCoreRuntimeKind = typeof PI_AGENT_CORE_RUNTIME_KIND;
@@ -283,6 +288,7 @@ interface PiAnalysisPreparation {
   hypotheses: Hypothesis[];
   uncertaintyFlags: UncertaintyFlag[];
   analysisRunSpec: AnalysisRunSpec;
+  quickMemoryContextCounts?: ReturnType<typeof buildQuickMemoryContextPayload>['counts'];
 }
 
 function truthyEnv(value: string | undefined): boolean {
@@ -1206,6 +1212,43 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       partial: partial || undefined,
       terminationReason,
       terminationMessage,
+      quickRun: prep.quickMode
+        ? (() => {
+            const quickBudget = resolveQuickTurnBudget({
+              env: this.env,
+              targetEnvKeys: ['AGENT_QUICK_TARGET_TURNS'],
+              hardCapEnvKeys: ['AGENT_QUICK_MAX_TURNS'],
+              enforcement: 'timeout_only',
+            });
+            return buildQuickRunReceipt({
+              requestedMode: 'fast',
+              profile: shouldMarkQuickRunTriage(query) ? 'triage' : undefined,
+              budget: quickBudget,
+              actualTurns: Math.max(rounds, 1),
+              elapsedMs: Date.now() - startedAt,
+              stopReason: quickStopReasonFromTermination({
+                partial,
+                terminationReason,
+                actualTurns: Math.max(rounds, 1),
+                targetTurns: quickBudget.targetTurns,
+                hardCapTurns: quickBudget.hardCapTurns,
+              }),
+              evidence: {
+                frontendPrequeryInjected: prep.analysisRunSpec.traceContext.datasetCount,
+              },
+              contextInjected: {
+                conversationTurns: prep.previousTurns.filter((turn: any) => turn?.completed).slice(-3).length,
+                ...(prep.quickMemoryContextCounts ?? {
+                  recentSqlResults: 0,
+                  sqlPitfallPairs: 0,
+                  patternHints: 0,
+                  negativePatternHints: 0,
+                  caseBackgroundCases: 0,
+                }),
+              },
+            });
+          })()
+        : undefined,
     };
 
     if (!prep.quickMode) {
@@ -1428,7 +1471,8 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     uncertaintyFlags.splice(0);
 
     const watchdogWarning: { current: string | null } = { current: null };
-    const recentSqlErrors = loadLearnedSqlFixPairs(5, analysisRunSpec.scopes.knowledge);
+    const knowledgeScope = analysisRunSpec.scopes.knowledge;
+    const recentSqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope);
     const skillNotesBudget = createRuntimeSkillNotesBudget(quickMode);
     const { toolDefinitions } = createClaudeMcpServer({
       sessionId,
@@ -1453,7 +1497,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       lightweight: quickMode,
       skillNotesBudget,
       outputLanguage,
-      knowledgeScope: analysisRunSpec.scopes.knowledge,
+      knowledgeScope,
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
       referenceTraceId: options.referenceTraceId,
@@ -1471,8 +1515,22 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     if (analysisRunSpec.traceContext.promptSection) {
       prompt = `${analysisRunSpec.traceContext.promptSection}\n\n${prompt}`;
     }
+    const traceFeatures = extractTraceFeatures({
+      architectureType: architecture?.type,
+      sceneType,
+      packageName: effectivePackageName,
+    });
 
     if (quickMode) {
+      const quickMemoryPayload = buildQuickMemoryContextPayload({
+        patternContext: buildPatternContextSection(traceFeatures, knowledgeScope),
+        negativePatternContext: buildNegativePatternSection(traceFeatures, knowledgeScope),
+        caseBackgroundContext: buildCaseBackgroundContext(sceneType, architecture?.type, knowledgeScope),
+        sqlErrorFixPairs: recentSqlErrors,
+        recentSqlResultsContext: sessionContext.generateRecentSqlResultPromptContext(3),
+        outputLanguage,
+      });
+      const quickMemoryContext = quickMemoryPayload.text;
       return {
         systemPrompt: buildQuickSystemPrompt({
           architecture,
@@ -1480,6 +1538,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
           focusApps: focusResult.apps.length > 0 ? focusResult.apps : undefined,
           focusMethod: focusResult.method,
           selectionContext: options.selectionContext,
+          quickMemoryContext,
           outputLanguage,
         }),
         prompt,
@@ -1496,6 +1555,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
         hypotheses,
         uncertaintyFlags,
         analysisRunSpec,
+        quickMemoryContextCounts: quickMemoryPayload.counts,
       };
     }
 
@@ -1507,18 +1567,13 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       // Non-fatal. Pi can still use lookup_sql_schema/knowledge tools.
     }
 
-    const traceFeatures = extractTraceFeatures({
-      architectureType: architecture?.type,
-      sceneType,
-      packageName: effectivePackageName,
-    });
     const patternContext = buildPatternContextSection(
       traceFeatures,
-      knowledgeScopeFromAnalysisOptions(options),
+      knowledgeScope,
     );
     const negativePatternContext = buildNegativePatternSection(
       traceFeatures,
-      knowledgeScopeFromAnalysisOptions(options),
+      knowledgeScope,
     );
     const traceInfo = this.traceProcessorService.getTrace(traceId);
     const systemPromptEnv = normalizeOptionalString(this.env[PI_AGENT_CORE_SYSTEM_PROMPT_ENV]);

@@ -380,8 +380,10 @@ import {
 } from '../../../services/enterpriseMigration';
 import {
   SDK_SESSION_FRESHNESS_MS,
+  buildQuickRunReceipt,
   buildEntityContext,
   buildQuickConversationContext,
+  buildQuickMemoryContextPayload,
   buildRuntimeSessionMapKey,
   captureSkillDisplayEntities,
   collectRecentFindings,
@@ -390,6 +392,9 @@ import {
   isFreshRuntimeEntry,
   knowledgeScopeFromAnalysisOptions,
   providerScopeFromAnalysisOptions,
+  quickStopReasonFromTermination,
+  resolveQuickTurnBudget,
+  shouldMarkQuickRunTriage,
   setLruCacheEntry,
   toProtocolHypothesis as toRuntimeProtocolHypothesis,
 } from '../../runtimeCommon';
@@ -2258,6 +2263,27 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
       skillExecutor.registerSkills(skillRegistry.getAllSkills());
       skillExecutor.setFragmentRegistry(skillRegistry.getFragmentCache());
 
+      const knowledgeScope = analysisRunSpec.scopes.knowledge;
+      let sqlErrors = this.sessionSqlErrors.get(sessionId);
+      if (!sqlErrors) {
+        sqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope);
+        this.sessionSqlErrors.set(sessionId, sqlErrors);
+      }
+      const traceFeatures = extractTraceFeatures({
+        architectureType: architecture?.type,
+        sceneType,
+        packageName: effectivePackageName,
+      });
+      const quickMemoryPayload = buildQuickMemoryContextPayload({
+        patternContext: buildPatternContextSection(traceFeatures, knowledgeScope),
+        negativePatternContext: buildNegativePatternSection(traceFeatures, knowledgeScope),
+        caseBackgroundContext: buildCaseBackgroundContext(sceneType, architecture?.type, knowledgeScope),
+        sqlErrorFixPairs: sqlErrors,
+        recentSqlResultsContext: sessionContext.generateRecentSqlResultPromptContext(3),
+        outputLanguage: this.config.outputLanguage,
+      });
+      const quickMemoryContext = quickMemoryPayload.text;
+
       const watchdogWarning: { current: string | null } = { current: null };
       // Quick path defaults to no skill-notes injection per §8 of the
       // self-improving design. Operators can opt-in via the env override.
@@ -2273,9 +2299,10 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
         watchdogWarning,
         sceneType,
         lightweight: true,
+        recentSqlErrors: sqlErrors,
         skillNotesBudget: quickNotesBudget,
         outputLanguage: this.config.outputLanguage,
-        knowledgeScope: analysisRunSpec.scopes.knowledge,
+        knowledgeScope,
         codeAwareMode: options.codeAwareMode,
         codebaseIds: options.codebaseIds,
       });
@@ -2286,6 +2313,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
         focusApps: focusResult.apps.length > 0 ? focusResult.apps : undefined,
         focusMethod: focusResult.method,
         selectionContext: options.selectionContext,
+        quickMemoryContext,
         outputLanguage: this.config.outputLanguage,
       });
 
@@ -2295,6 +2323,13 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
         resolveRuntimeConfig(this.config, options.providerId, providerScope),
         sdkEnv,
       );
+      const quickBudget = resolveQuickTurnBudget({
+        env: sdkEnv,
+        hardCapTurns: quickConfig.maxTurns,
+        targetEnvKeys: ['AGENT_QUICK_TARGET_TURNS', 'CLAUDE_QUICK_TARGET_TURNS'],
+        hardCapEnvKeys: ['AGENT_QUICK_MAX_TURNS', 'CLAUDE_QUICK_MAX_TURNS'],
+        enforcement: 'turn_cap',
+      });
 
       const { handleMessage: bridge, getAccumulatedAnswer } = createSseBridge((update: StreamingUpdate) => {
         this.emitUpdate(update);
@@ -2320,6 +2355,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
       // the full-mode SDK conversation.
       let quickPrompt = query;
       const quickConversationContext = buildQuickConversationContext(previousTurns, this.config.outputLanguage);
+      const quickConversationTurns = previousTurns.filter((turn: any) => turn?.completed).slice(-3).length;
       if (quickConversationContext) {
         quickPrompt = `${quickConversationContext}\n\n${quickPrompt}`;
       }
@@ -2415,19 +2451,41 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
         unregisterSdkAbortHandle();
       }
 
+      if (timedOut) {
+        terminationReason = 'timeout';
+        terminationMessage = localize(
+          this.config.outputLanguage,
+          `快速问答超过 ${Math.round(timeoutMs / 1000)} 秒超时，结果可能不完整。`,
+          `Fast Q&A timed out after ${Math.round(timeoutMs / 1000)} seconds; the result may be incomplete.`,
+        );
+      }
+
       let conclusionText = finalResult || getAccumulatedAnswer() || '';
       let mergedFindings = mergeFindings([extractFindingsFromText(conclusionText)]);
-      const isPartialResult = terminationReason === MAX_TURNS_TERMINATION_REASON;
+      const isPartialResult = terminationReason === MAX_TURNS_TERMINATION_REASON || terminationReason === 'timeout';
       if (isPartialResult) {
-        terminationMessage ||= buildMaxTurnsTerminationMessage({
-          mode: 'fast',
-          turns: quickRounds,
-          maxTurns: quickConfig.maxTurns,
-          outputLanguage: this.config.outputLanguage,
-        });
+        if (terminationReason === MAX_TURNS_TERMINATION_REASON) {
+          terminationMessage ||= buildMaxTurnsTerminationMessage({
+            mode: 'fast',
+            turns: quickRounds,
+            maxTurns: quickConfig.maxTurns,
+            outputLanguage: this.config.outputLanguage,
+          });
+        }
+        const partialMessage = terminationMessage || localize(
+          this.config.outputLanguage,
+          '快速问答未能生成完整可核验答案。',
+          'Fast Q&A could not produce a complete verifiable answer.',
+        );
         conclusionText = conclusionText.trim()
-          ? prependPartialNotice(conclusionText, terminationMessage, this.config.outputLanguage)
-          : buildMaxTurnsFallbackConclusion({
+          ? prependPartialNotice(conclusionText, partialMessage, this.config.outputLanguage)
+          : terminationReason === 'timeout'
+            ? (terminationMessage || localize(
+                this.config.outputLanguage,
+                '快速问答超时，未能生成可核验答案。',
+                'Fast Q&A timed out before producing a verifiable answer.',
+              ))
+            : buildMaxTurnsFallbackConclusion({
               mode: 'fast',
               turns: quickRounds,
               maxTurns: quickConfig.maxTurns,
@@ -2469,6 +2527,27 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
         partial: isPartialResult || undefined,
         terminationReason,
         terminationMessage,
+        quickRun: buildQuickRunReceipt({
+          requestedMode: options.analysisMode ?? 'auto',
+          profile: shouldMarkQuickRunTriage(query) ? 'triage' : undefined,
+          budget: quickBudget,
+          actualTurns: quickRounds,
+          elapsedMs: Date.now() - startTime,
+          stopReason: quickStopReasonFromTermination({
+            partial: isPartialResult,
+            terminationReason,
+            actualTurns: quickRounds,
+            targetTurns: quickBudget.targetTurns,
+            hardCapTurns: quickBudget.hardCapTurns,
+          }),
+          evidence: {
+            frontendPrequeryInjected: analysisRunSpec.traceContext.datasetCount,
+          },
+          contextInjected: {
+            conversationTurns: quickConversationTurns,
+            ...quickMemoryPayload.counts,
+          },
+        }),
       };
       const quickGateIssue = applyFinalResultQualityGate({ result: quickResult, query, sceneType });
       if (quickGateIssue) {

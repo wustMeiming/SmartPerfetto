@@ -90,6 +90,7 @@ import {
   shouldUseMimoReasoningContentCompat,
 } from './mimoReasoningCompat';
 import { createOpenAIToolsFromMcpDefinitions } from './openAiToolAdapter';
+import { buildCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
 import {
   applyFinalResultQualityGate,
   hasDeliverableFinalReportHeading,
@@ -99,8 +100,10 @@ import { verifyConclusion } from '../claude/claudeVerifier';
 import { assessFinalReportContractCompleteness } from '../../../services/finalReportContractGate';
 import {
   SDK_SESSION_FRESHNESS_MS,
+  buildQuickRunReceipt,
   buildEntityContext,
   buildQuickConversationContext,
+  buildQuickMemoryContextPayload,
   buildRuntimeSessionMapKey,
   captureSkillDisplayEntities,
   collectRecentFindings,
@@ -109,6 +112,9 @@ import {
   isFreshRuntimeEntry,
   knowledgeScopeFromAnalysisOptions,
   providerScopeFromAnalysisOptions,
+  quickStopReasonFromTermination,
+  resolveQuickTurnBudget,
+  shouldMarkQuickRunTriage,
   isTruncationVerificationIssue,
   repairTruncatedFinalReport,
   setLruCacheEntry,
@@ -682,9 +688,17 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     const startTime = Date.now();
     let accumulatedAnswer = '';
     let rounds = 0;
+    let observedToolCalls = 0;
     const config = loadOpenAIConfig(options.providerId, providerScopeFromAnalysisOptions(options));
     const sceneType = classifyScene(query);
     const quickMode = await this.classifyModeForRequest(query, sessionId, traceId, options, sceneType, config);
+    const inferReportedRounds = (visibleText?: string) => {
+      const hasVisibleWork = Boolean((visibleText ?? accumulatedAnswer).trim()) || observedToolCalls > 0;
+      if (quickMode) {
+        return Math.max(rounds, hasVisibleWork ? (observedToolCalls > 0 ? observedToolCalls + 1 : 1) : 0);
+      }
+      return Math.max(rounds, hasVisibleWork ? 1 : 0);
+    };
     const sessionContext = sessionContextManager.getOrCreate(sessionId, traceId);
     const previousTurns = sessionContext.getAllTurns?.() || [];
     const analysisRunSpec = createAnalysisRunSpec({
@@ -702,6 +716,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         lightModel: config.lightModel,
         maxTurns: config.maxTurns,
         quickMaxTurns: config.quickMaxTurns,
+        quickTargetTurns: config.quickTargetTurns,
         maxOutputTokens: config.maxOutputTokens,
         fullPathPerTurnMs: config.fullPathPerTurnMs,
         quickPathPerTurnMs: config.quickPathPerTurnMs,
@@ -718,6 +733,13 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         sessionContext,
         previousTurns,
       });
+      const quickBudget = quickMode
+        ? resolveQuickTurnBudget({
+            hardCapTurns: config.quickMaxTurns,
+            targetTurns: config.quickTargetTurns,
+            enforcement: 'turn_cap',
+          })
+        : undefined;
 
       const promptPrefix = analysisRunSpec.traceContext.promptSection;
       const effectivePrompt = promptPrefix ? `${promptPrefix}\n\n${query}` : query;
@@ -889,6 +911,9 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
                   quickMode,
                   answerStreamFilter,
                   toolInputsByTaskId,
+                  onToolCalled: () => {
+                    observedToolCalls++;
+                  },
                 });
                 if (delta) {
                   runAnswer += delta;
@@ -1053,6 +1078,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         let confidence = partial
           ? Math.min(0.55, this.estimateConfidence(findings, conclusion))
           : this.estimateConfidence(findings, conclusion);
+        rounds = inferReportedRounds(conclusion);
         const result: AnalysisResult = {
           sessionId,
           success: true,
@@ -1065,6 +1091,35 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           partial: partial || undefined,
           terminationReason,
           terminationMessage,
+          quickRun: quickMode && quickBudget
+            ? buildQuickRunReceipt({
+                requestedMode: options.analysisMode ?? 'auto',
+                profile: shouldMarkQuickRunTriage(query) ? 'triage' : undefined,
+                budget: quickBudget,
+                actualTurns: rounds,
+                elapsedMs: Date.now() - startTime,
+                stopReason: quickStopReasonFromTermination({
+                  partial,
+                  terminationReason,
+                  actualTurns: rounds,
+                  targetTurns: quickBudget.targetTurns,
+                  hardCapTurns: quickBudget.hardCapTurns,
+                }),
+                evidence: {
+                  frontendPrequeryInjected: analysisRunSpec.traceContext.datasetCount,
+                },
+                contextInjected: {
+                  conversationTurns: context.previousTurns.filter((turn: any) => turn?.completed).slice(-3).length,
+                  ...(context.quickMemoryContextCounts ?? {
+                    recentSqlResults: 0,
+                    sqlPitfallPairs: 0,
+                    patternHints: 0,
+                    negativePatternHints: 0,
+                    caseBackgroundCases: 0,
+                  }),
+                },
+              })
+            : undefined,
         };
         if (!quickMode) {
           const verifyCurrentConclusion = async () => verifyConclusion(result.findings, result.conclusion, {
@@ -1194,6 +1249,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
             outputLanguage: config.outputLanguage,
           });
         } else if (error instanceof MaxTurnsExceededError) {
+          const reportedRounds = inferReportedRounds();
           return this.recordMaxTurnsPartialResult({
             error,
             query,
@@ -1202,12 +1258,16 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
             accumulatedAnswer,
             context,
             startTime,
-            rounds,
+            rounds: reportedRounds,
             quickMode,
             maxTurns: quickMode ? config.quickMaxTurns : config.maxTurns,
+            quickBudget,
+            requestedMode: options.analysisMode ?? 'auto',
+            frontendPrequeryInjected: analysisRunSpec.traceContext.datasetCount,
             codeAwareMode: options.codeAwareMode,
           });
         }
+        const reportedRounds = inferReportedRounds();
         const recoverablePartial = this.recoverPartialResultAfterStreamTermination({
           error,
           sessionId,
@@ -1217,7 +1277,10 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           context,
           query,
           startTime,
-          rounds,
+          rounds: reportedRounds,
+          quickBudget,
+          requestedMode: options.analysisMode ?? 'auto',
+          frontendPrequeryInjected: analysisRunSpec.traceContext.datasetCount,
           codeAwareMode: options.codeAwareMode,
         });
         if (recoverablePartial) {
@@ -1407,7 +1470,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       previousTurns: any[];
     },
   ) {
-    const { config, sceneType, lightweight, analysisRunSpec } = runtime;
+    const { config, sceneType, lightweight, analysisRunSpec, sessionContext } = runtime;
     const knowledgeScope = analysisRunSpec.scopes.knowledge;
     let effectivePackageName = options.packageName;
     const focusResult = await detectFocusApps(this.traceProcessorService, traceId);
@@ -1439,7 +1502,6 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       ? await this.buildComparisonContext(traceId, options.referenceTraceId, config.outputLanguage)
       : undefined;
 
-    const sessionContext = runtime.sessionContext;
     const previousTurns = runtime.previousTurns;
     const previousFindings = this.collectPreviousFindings(sessionContext);
     const conversationSummary = previousTurns.length > 0
@@ -1542,6 +1604,17 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       .slice(-3)
       .map((e: any) => ({ errorSql: e.errorSql, errorMessage: e.errorMessage, fixedSql: e.fixedSql }));
     const traceInfo = this.traceProcessorService.getTrace(traceId);
+    const quickMemoryPayload = lightweight
+      ? buildQuickMemoryContextPayload({
+          patternContext: buildPatternContextSection(traceFeatures, knowledgeScope),
+          negativePatternContext: buildNegativePatternSection(traceFeatures, knowledgeScope),
+          caseBackgroundContext: buildCaseBackgroundContext(sceneType, architecture?.type, knowledgeScope),
+          sqlErrorFixPairs,
+          recentSqlResultsContext: sessionContext.generateRecentSqlResultPromptContext(3),
+          outputLanguage: config.outputLanguage,
+        })
+      : undefined;
+    const quickMemoryContext = quickMemoryPayload?.text;
 
     const systemPrompt = lightweight
       ? buildQuickSystemPrompt({
@@ -1550,6 +1623,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           focusApps: focusResult.apps.length > 0 ? focusResult.apps : undefined,
           focusMethod: focusResult.method,
           selectionContext: options.selectionContext,
+          quickMemoryContext,
           outputLanguage: config.outputLanguage,
         })
       : buildSystemPrompt({
@@ -1591,6 +1665,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       hypotheses,
       allowedTools,
       sessionMapKey,
+      quickMemoryContextCounts: quickMemoryPayload?.counts,
     };
   }
 
@@ -1956,6 +2031,9 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     query: string;
     startTime: number;
     rounds: number;
+    quickBudget?: ReturnType<typeof resolveQuickTurnBudget>;
+    requestedMode?: AnalysisOptions['analysisMode'];
+    frontendPrequeryInjected?: number;
     codeAwareMode?: AnalysisOptions['codeAwareMode'];
   }): AnalysisResult | undefined {
     if (!isRecoverableOpenAIStreamTermination(params.error)) {
@@ -2007,22 +2085,53 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       timestamp: Date.now(),
     });
 
+    const result: AnalysisResult = {
+      sessionId: params.sessionId,
+      success: true,
+      findings,
+      hypotheses: params.context.hypotheses.map(h => this.toProtocolHypothesis(h)),
+      conclusion,
+      confidence,
+      rounds: params.rounds,
+      totalDurationMs: Date.now() - params.startTime,
+      partial: true,
+      terminationReason,
+      terminationMessage,
+      quickRun: params.quickMode && params.quickBudget
+        ? buildQuickRunReceipt({
+            requestedMode: params.requestedMode ?? 'auto',
+            profile: shouldMarkQuickRunTriage(params.query) ? 'triage' : undefined,
+            budget: params.quickBudget,
+            actualTurns: params.rounds,
+            elapsedMs: Date.now() - params.startTime,
+            stopReason: quickStopReasonFromTermination({
+              partial: true,
+              terminationReason,
+              actualTurns: params.rounds,
+              targetTurns: params.quickBudget.targetTurns,
+              hardCapTurns: params.quickBudget.hardCapTurns,
+            }),
+            evidence: {
+              frontendPrequeryInjected: params.frontendPrequeryInjected ?? 0,
+            },
+            contextInjected: {
+              conversationTurns: params.context.previousTurns.filter((turn: any) => turn?.completed).slice(-3).length,
+              ...(params.context.quickMemoryContextCounts ?? {
+                recentSqlResults: 0,
+                sqlPitfallPairs: 0,
+                patternHints: 0,
+                negativePatternHints: 0,
+                caseBackgroundCases: 0,
+              }),
+            },
+          })
+        : undefined,
+    };
+
     this.recordTurn({
       query: params.query,
       sessionId: params.sessionId,
-      result: {
-        sessionId: params.sessionId,
-        success: true,
-        findings,
-        hypotheses: params.context.hypotheses.map(h => this.toProtocolHypothesis(h)),
-        conclusion,
-        confidence,
-        rounds: params.rounds,
-        totalDurationMs: Date.now() - params.startTime,
-        partial: true,
-        terminationReason,
-        terminationMessage,
-      },
+      result,
       sessionContext: params.context.sessionContext,
       previousTurnCount: params.context.previousTurns.length,
       quickMode: params.quickMode,
@@ -2039,19 +2148,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       timestamp: Date.now(),
     });
 
-    return {
-      sessionId: params.sessionId,
-      success: true,
-      findings,
-      hypotheses: params.context.hypotheses.map(h => this.toProtocolHypothesis(h)),
-      conclusion,
-      confidence,
-      rounds: params.rounds,
-      totalDurationMs: Date.now() - params.startTime,
-      partial: true,
-      terminationReason,
-      terminationMessage,
-    };
+    return result;
   }
 
   private recordMaxTurnsPartialResult(params: {
@@ -2062,12 +2159,15 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     accumulatedAnswer: string;
     context: Pick<
       Awaited<ReturnType<OpenAIRuntime['prepareAnalysisContext']>>,
-      'hypotheses' | 'sessionContext' | 'previousTurns'
+      'hypotheses' | 'sessionContext' | 'previousTurns' | 'quickMemoryContextCounts'
     >;
     startTime: number;
     rounds: number;
     quickMode: boolean;
     maxTurns?: number;
+    quickBudget?: ReturnType<typeof resolveQuickTurnBudget>;
+    requestedMode?: AnalysisOptions['analysisMode'];
+    frontendPrequeryInjected?: number;
     codeAwareMode?: AnalysisOptions['codeAwareMode'];
   }): AnalysisResult {
     const maxTurnText = Number.isFinite(params.maxTurns)
@@ -2099,6 +2199,35 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       partial: true,
       terminationReason: 'max_turns',
       terminationMessage: params.error.message,
+      quickRun: params.quickMode && params.quickBudget
+        ? buildQuickRunReceipt({
+            requestedMode: params.requestedMode ?? 'auto',
+            profile: shouldMarkQuickRunTriage(params.query) ? 'triage' : undefined,
+            budget: params.quickBudget,
+            actualTurns: params.rounds,
+            elapsedMs: Date.now() - params.startTime,
+            stopReason: quickStopReasonFromTermination({
+              partial: true,
+              terminationReason: 'max_turns',
+              actualTurns: params.rounds,
+              targetTurns: params.quickBudget.targetTurns,
+              hardCapTurns: params.quickBudget.hardCapTurns,
+            }),
+            evidence: {
+              frontendPrequeryInjected: params.frontendPrequeryInjected ?? 0,
+            },
+            contextInjected: {
+              conversationTurns: params.context.previousTurns.filter((turn: any) => turn?.completed).slice(-3).length,
+              ...(params.context.quickMemoryContextCounts ?? {
+                recentSqlResults: 0,
+                sqlPitfallPairs: 0,
+                patternHints: 0,
+                negativePatternHints: 0,
+                caseBackgroundCases: 0,
+              }),
+            },
+          })
+        : undefined,
     };
 
     this.emitUpdate({
@@ -2247,6 +2376,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       quickMode: boolean;
       answerStreamFilter: OpenAiReasoningFilterState;
       toolInputsByTaskId: Map<string, { toolName: string; args: Record<string, unknown> }>;
+      onToolCalled?: () => void;
     },
   ): string {
     const now = Date.now();
@@ -2282,6 +2412,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
 
     const rawItem = (event.item as any)?.rawItem;
     if (event.name === 'tool_called') {
+      streamContext.onToolCalled?.();
       const args = parseJsonObject(rawItem?.arguments) || {};
       const taskIds = [rawItem?.callId, rawItem?.call_id, rawItem?.id]
         .filter((id): id is string => typeof id === 'string' && id.length > 0);

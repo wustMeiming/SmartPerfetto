@@ -313,21 +313,26 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
         const assistantSqlResult = buildAssistantSqlResult(
           sessionEnvelopes.some(isSqlResultEnvelope) ? sessionEnvelopes : snapshotEnvelopes,
         );
-        persistenceService.appendMessages(sessionId, [
+        const now = Date.now();
+        const messages = [
           {
             id: `msg-${sessionId}-turn${turnIndex}-user`,
             role: 'user',
             content: query,
-            timestamp: Date.now() - (result.totalDurationMs || 0),
+            timestamp: now - (result.totalDurationMs || 0),
           },
           {
             id: `msg-${sessionId}-turn${turnIndex}-assistant`,
             role: 'assistant',
             content: buildPersistedAssistantMessage(result),
-            timestamp: Date.now(),
+            timestamp: now,
             sqlResult: assistantSqlResult,
           },
-        ]);
+        ];
+        persistenceService.appendMessages(sessionId, messages);
+        if (assistantSqlResult) {
+          sessionContext.hydrateRecentSqlResultsFromMessages([messages[1]]);
+        }
       } catch (msgErr) {
         logger?.warn(logComponent, 'Failed to persist turn messages', {
           error: (msgErr as Error).message,

@@ -52,7 +52,7 @@ import {
   Hypothesis,
 } from '../agent';
 import { getSharedModelRouter } from '../agent/core/modelRouterSingleton';
-import type { IOrchestrator } from '../agent/core/orchestratorTypes';
+import type { IOrchestrator, TraceDataset } from '../agent/core/orchestratorTypes';
 import { resolveConclusionScene } from '../agent/core/conclusionSceneTemplates';
 import { DEEP_REASON_LABEL } from '../utils/analysisNarrative';
 import { sanitizeNarrativeForClient } from './narrativeSanitizer';
@@ -140,6 +140,10 @@ import {
   generateEventId,
   type DataEnvelope,
 } from '../types/dataContract';
+import {
+  buildTraceContextDataEnvelopes,
+  decorateTraceContextDatasets,
+} from '../agentRuntime/traceContextEvidence';
 import type { ConclusionContract } from '../agent/core/conclusionContract';
 import type { ClaimSupportV1 } from '../types/evidenceContract';
 import type { ClaimVerificationResult } from '../types/claimVerification';
@@ -964,6 +968,7 @@ function sanitizePersistedAnalysisCompletedEvent(
     claimSupport: data?.claimSupport,
     claimVerificationResult: data?.claimVerificationResult,
     identityResolutions: data?.identityResolutions,
+    quickRun: data?.quickRun,
   };
 
   const issue = applyFinalResultQualityGate({ result, query: session.query });
@@ -975,6 +980,7 @@ function sanitizePersistedAnalysisCompletedEvent(
     partial: result.partial,
     terminationReason: result.terminationReason,
     terminationMessage: result.terminationMessage,
+    quickRun: result.quickRun,
   };
   const nextPayload = payload?.data && typeof payload.data === 'object'
     ? { ...payload, data: nextData }
@@ -2264,6 +2270,16 @@ function handleSessionStream(
     }
   }
 
+  const shouldReplayInitialSessionBuffer =
+    lastEventId === null &&
+    !streamRunId &&
+    (
+      streamStatus === 'pending' ||
+      streamStatus === 'running' ||
+      streamStatus === 'awaiting_user' ||
+      streamStatus === 'failed' ||
+      streamStatus === 'cancelled'
+    );
   const persistedReplayFrom = streamRunId && lastEventId === null ? 0 : lastEventId;
   let ringReplayAfter = persistedReplayFrom;
   if (persistedReplayFrom !== null) {
@@ -2281,7 +2297,10 @@ function handleSessionStream(
     }
   }
 
-  // Replay missed events from the ring buffer if reconnecting.
+  if (ringReplayAfter === null && shouldReplayInitialSessionBuffer) {
+    ringReplayAfter = 0;
+  }
+
   const replayBuffer = resolveReplayBufferForStream(session, streamRunId);
   if (ringReplayAfter !== null && replayBuffer.length > 0) {
     const replayState = {
@@ -3297,6 +3316,37 @@ function objectRowsToEnvelopePayload(rows: Array<Record<string, any>>): { column
   };
 }
 
+function appendTraceContextDataEnvelopes(
+  session: AnalysisSession,
+  traceContext: TraceDataset[] | undefined,
+  traceId: string,
+): DataEnvelope[] {
+  const envelopes = buildTraceContextDataEnvelopes(traceContext, traceId);
+  if (envelopes.length === 0) return [];
+
+  const existingHashes = new Set(
+    (session.dataEnvelopes || [])
+      .map((env) => env?.meta?.queryHash)
+      .filter((hash): hash is string => typeof hash === 'string' && hash.length > 0),
+  );
+  const unique = envelopes.filter((env) => {
+    const hash = env.meta?.queryHash;
+    if (!hash || existingHashes.has(hash)) return false;
+    existingHashes.add(hash);
+    return true;
+  });
+  if (unique.length === 0) return [];
+
+  const turnNumber = session.activeRun?.sequence || session.runSequence || 1;
+  for (const env of unique) {
+    if (env.meta) (env.meta as any).turn = turnNumber;
+  }
+
+  session.dataEnvelopes.push(...unique);
+  trimSessionArray(session.dataEnvelopes, MAX_SESSION_DATA_ENVELOPES);
+  return unique;
+}
+
 function buildSceneExtractionEnvelopesFromRawResults(rawResults: any): DataEnvelope[] {
   const envelopes: DataEnvelope[] = [];
   if (!rawResults || typeof rawResults !== 'object') return envelopes;
@@ -3930,6 +3980,8 @@ async function runAgentDrivenAnalysis(
     requestId: session.activeRun?.requestId,
     runSequence: session.activeRun?.sequence,
   });
+  const decoratedTraceContext = decorateTraceContextDatasets(options.traceContext, traceId);
+  options.traceContext = decoratedTraceContext;
   if (!runIdForAnalysis) {
     throw new Error(`Missing run id for session ${sessionId}`);
   }
@@ -4092,6 +4144,15 @@ async function runAgentDrivenAnalysis(
       });
   }
 
+  const traceContextEnvelopes = appendTraceContextDataEnvelopes(session, decoratedTraceContext, traceId);
+  if (traceContextEnvelopes.length > 0) {
+    broadcastToAgentDrivenClients(sessionId, {
+      type: 'data',
+      content: traceContextEnvelopes,
+      timestamp: Date.now(),
+    }, runIdForAnalysis);
+  }
+
   try {
     console.log('[AgentRoutes.AgentDriven] Starting orchestrator.analyze...');
     const result = await logger.timed('AgentDrivenAnalysis', 'analyze', async () => {
@@ -4104,7 +4165,7 @@ async function runAgentDrivenAnalysis(
         adb: options.adb,
         selectionContext: options.selectionContext,
         analysisMode: options.analysisMode,
-        traceContext: options.traceContext,
+        traceContext: decoratedTraceContext,
         referenceTraceId: options.referenceTraceId,
         providerId: options.providerId,
         codeAwareMode: options.codeAwareMode,
@@ -4717,6 +4778,18 @@ function mapToAgentDrivenEventType(update: StreamingUpdate): StreamingUpdate['ty
   }
 }
 
+function dataEnvelopeDedupKey(envelope: DataEnvelope): string | undefined {
+  const meta = envelope.meta;
+  if (!meta) return undefined;
+  if (typeof meta.evidenceRefId === 'string' && meta.evidenceRefId.length > 0) {
+    return `evidence:${meta.evidenceRefId}`;
+  }
+  if (typeof meta.queryHash === 'string' && meta.queryHash.length > 0) {
+    return `query:${meta.traceId || ''}:${meta.queryHash}`;
+  }
+  return undefined;
+}
+
 /**
  * Broadcast update to all SSE clients for an agent-driven session
  */
@@ -4759,16 +4832,29 @@ function broadcastToAgentDrivenClients(sessionId: string, update: StreamingUpdat
     },
     onValidDataEnvelopes: (validEnvelopes) => {
       if (validEnvelopes.length > 0) {
+        const existingKeys = new Set(
+          (session.dataEnvelopes || [])
+            .map(dataEnvelopeDedupKey)
+            .filter((key): key is string => typeof key === 'string' && key.length > 0),
+        );
+        const uniqueEnvelopes = validEnvelopes.filter((env) => {
+          const key = dataEnvelopeDedupKey(env);
+          if (!key) return true;
+          if (existingKeys.has(key)) return false;
+          existingKeys.add(key);
+          return true;
+        });
         console.log(
           `[AgentRoutes.broadcastToAgentDrivenClients] Sending ${validEnvelopes.length} DataEnvelope(s) for session ${sessionId}`
         );
+        if (uniqueEnvelopes.length === 0) return;
         // P2-4: Tag envelopes with current turn number for multi-turn attribution
         const run = resolveSessionRun(session, runId);
         const turnNumber = run?.sequence || session.runSequence || 1;
-        for (const env of validEnvelopes) {
+        for (const env of uniqueEnvelopes) {
           if (env.meta) (env.meta as any).turn = turnNumber;
         }
-        session.dataEnvelopes.push(...validEnvelopes);
+        session.dataEnvelopes.push(...uniqueEnvelopes);
         trimSessionArray(session.dataEnvelopes, MAX_SESSION_DATA_ENVELOPES);
       }
     },
@@ -5969,6 +6055,103 @@ function ensureAnalysisQualityArtifacts(
   };
 }
 
+function collectEvidenceRefsFromText(text: string | undefined): Set<string> {
+  const refs = new Set<string>();
+  const matches = String(text || '').match(/data:[A-Za-z0-9_.:-]+/g) || [];
+  for (const raw of matches) {
+    const cleaned = raw.replace(/[).,;，。；、]+$/g, '');
+    if (cleaned) refs.add(cleaned);
+  }
+  return refs;
+}
+
+function collectEvidenceRefsFromClaimSupport(claimSupport: ClaimSupportV1[] | undefined): Set<string> {
+  const refs = new Set<string>();
+  for (const claim of claimSupport || []) {
+    for (const anchor of claim.anchors || []) {
+      if (anchor.evidenceRefId) refs.add(anchor.evidenceRefId);
+    }
+  }
+  return refs;
+}
+
+function currentRunEnvelopeCounts(session: AnalysisSession, runId?: string): {
+  currentRunDataEnvelopes: number;
+  frontendPrequeryInjected: number;
+} {
+  const run = resolveSessionRun(session, runId);
+  const turn = run?.sequence || session.runSequence || session.activeRun?.sequence;
+  const envelopes = session.dataEnvelopes || [];
+  const current = turn
+    ? envelopes.filter((env) => (env.meta as any)?.turn === turn)
+    : envelopes;
+  return {
+    currentRunDataEnvelopes: current.length,
+    frontendPrequeryInjected: current.filter((env) => env.meta?.source === 'frontend_trace_context').length,
+  };
+}
+
+function quickRunVerifierStatus(
+  result: AgentRuntimeAnalysisResult,
+  claimVerificationResult: ClaimVerificationResult | undefined,
+): NonNullable<AgentRuntimeAnalysisResult['quickRun']>['verifierStatus'] {
+  if (result.partial === true || result.terminationReason === 'max_turns' || result.terminationReason === 'timeout') {
+    return 'issues';
+  }
+  const status = claimVerificationResult?.status;
+  if (status === 'passed') return 'passed';
+  if (status === 'failed') return 'failed';
+  if (status === 'partial') return 'issues';
+  return 'not_checked';
+}
+
+function finalizeQuickRunReceipt(
+  session: AnalysisSession,
+  input: {
+    result: AgentRuntimeAnalysisResult;
+    qualityArtifacts: CompletedAnalysisResultPayload['qualityArtifacts'];
+    runId?: string;
+  },
+): AgentRuntimeAnalysisResult['quickRun'] {
+  const receipt = input.result.quickRun;
+  if (!receipt) return undefined;
+  const textRefs = collectEvidenceRefsFromText(input.result.conclusion);
+  const supportRefs = collectEvidenceRefsFromClaimSupport(input.qualityArtifacts.claimSupport);
+  const citedRefs = new Set([...textRefs, ...supportRefs]);
+  const frontendPrequeryCited = [...citedRefs].filter(ref => ref.startsWith('data:frontend_prequery:')).length;
+  const envelopeCounts = currentRunEnvelopeCounts(session, input.runId);
+  const actualTurns = input.result.rounds || receipt.actualTurns;
+  const extended = actualTurns > receipt.targetTurns;
+  return {
+    ...receipt,
+    profile: receipt.profile === 'triage'
+      ? 'triage'
+      : extended
+        ? 'extended'
+        : receipt.profile,
+    actualTurns,
+    elapsedMs: input.result.totalDurationMs || receipt.elapsedMs,
+    stopReason: input.result.partial === true
+      ? receipt.stopReason === 'hard_cap' || receipt.stopReason === 'timeout'
+        ? receipt.stopReason
+        : 'partial'
+      : extended && receipt.stopReason === 'answered'
+        ? 'extended_answered'
+        : receipt.stopReason,
+    evidence: {
+      ...receipt.evidence,
+      frontendPrequeryInjected: Math.max(
+        receipt.evidence.frontendPrequeryInjected,
+        envelopeCounts.frontendPrequeryInjected,
+      ),
+      frontendPrequeryCited,
+      currentRunDataEnvelopes: envelopeCounts.currentRunDataEnvelopes,
+      citedEvidenceRefs: citedRefs.size,
+    },
+    verifierStatus: quickRunVerifierStatus(input.result, input.qualityArtifacts.claimVerificationResult),
+  };
+}
+
 interface CompletedAnalysisFinalArtifacts {
   reportId?: string;
   reportUrl?: string;
@@ -5988,6 +6171,7 @@ interface CompletedAnalysisResultPayload {
     claimVerificationResult?: ClaimVerificationResult;
     identityResolutions?: IdentityResolutionV1[];
   };
+  quickRun?: AgentRuntimeAnalysisResult['quickRun'];
   clientFindings: ReturnType<typeof buildClientFindings>;
   resultContract: ReturnType<typeof buildSessionResultContract>;
   finalArtifacts: CompletedAnalysisFinalArtifacts;
@@ -6217,6 +6401,14 @@ function ensureCompletedAnalysisResultPayload(
   const qualityArtifacts = hasEvidenceBackedConclusion && !replayOnlyScene
     ? ensureAnalysisQualityArtifacts(session, normalizedConclusionContract)
     : {};
+  let quickRun = finalizeQuickRunReceipt(session, {
+    result,
+    qualityArtifacts,
+    runId,
+  });
+  if (quickRun) {
+    result.quickRun = quickRun;
+  }
   if (normalizedConclusionContract) {
     result.conclusionContract = normalizedConclusionContract;
   }
@@ -6236,6 +6428,14 @@ function ensureCompletedAnalysisResultPayload(
         claimVerificationResult: result.claimVerificationResult,
         identityResolutions: result.identityResolutions,
       });
+      quickRun = finalizeQuickRunReceipt(session, {
+        result,
+        qualityArtifacts,
+        runId,
+      });
+      if (quickRun) {
+        result.quickRun = quickRun;
+      }
     }
   }
   const resultForClient =
@@ -6243,13 +6443,15 @@ function ensureCompletedAnalysisResultPayload(
       normalizedConclusionContract === result.conclusionContract &&
       qualityArtifacts.claimSupport === result.claimSupport &&
       qualityArtifacts.claimVerificationResult === result.claimVerificationResult &&
-      qualityArtifacts.identityResolutions === result.identityResolutions
+      qualityArtifacts.identityResolutions === result.identityResolutions &&
+      quickRun === result.quickRun
       ? result
       : {
         ...result,
         conclusion: normalizedConclusion,
         conclusionContract: normalizedConclusionContract,
         ...qualityArtifacts,
+        quickRun,
       };
   const clientFindings = replayOnlyScene ? [] : buildClientFindings(result.findings, session.scenes || []);
   const resultContract = buildSessionResultContract(session, clientFindings);
@@ -6268,6 +6470,7 @@ function ensureCompletedAnalysisResultPayload(
     normalizedConclusion,
     normalizedConclusionContract,
     qualityArtifacts,
+    quickRun,
     clientFindings,
     resultContract,
     finalArtifacts,
@@ -6316,6 +6519,7 @@ function ensureCompletedAnalysisSseEvents(session: AnalysisSession, runId?: stri
     normalizedConclusion,
     normalizedConclusionContract,
     qualityArtifacts,
+    quickRun,
     clientFindings,
     resultContract,
     finalArtifacts,
@@ -6350,6 +6554,7 @@ function ensureCompletedAnalysisSseEvents(session: AnalysisSession, runId?: stri
       partial: result.partial,
       terminationReason: result.terminationReason,
       terminationMessage: result.terminationMessage,
+      quickRun,
       smartScenePreview: result.smartScenePreview,
       findings: clientFindings,
       resultContract,
