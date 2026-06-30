@@ -18,8 +18,8 @@ SmartPerfetto is an Android performance analysis platform built on Perfetto. Thi
 | Skill author | [Skill System Guide](reference/skill-system.en.md) | [MCP Tools Reference](reference/mcp-tools.en.md), [Testing Rules](../.claude/rules/testing.md) |
 | Architecture reader | [Architecture Overview](architecture/overview.en.md) | [Agent Runtime](architecture/agent-runtime.en.md), [Data Contract](../backend/docs/DATA_CONTRACT_DESIGN.en.md) |
 | Release maintainer | [Release Runbook](reference/release.en.md) | [Portable Packaging](reference/portable-packaging.en.md), [Release Rules](../.claude/rules/release.md) |
-| Feature plan reader | [Multi-trace comparison development plan](features/multi-trace-result-comparison/README.md) | [Enterprise multi-tenant plan](features/enterprise-multi-tenant/README.md) |
 | Deployment troubleshooter | [Troubleshooting](operations/troubleshooting.en.md) | [Configuration Guide](getting-started/configuration.en.md) |
+| Historical plan or review reader | [Archive](archive/README.md) | Archived docs are background only, not the current recommended implementation |
 
 ## Documentation Structure
 
@@ -29,12 +29,12 @@ docs/
 ├── README.en.md                      # English documentation entry
 ├── getting-started/                  # Installation, configuration, usage
 ├── architecture/                     # Current architecture and authoritative design
-├── features/                         # Feature-specific development docs
 ├── reference/                        # API, CLI, MCP, and Skill DSL references
 ├── operations/                       # Runtime operations and troubleshooting
 ├── rendering_pipelines/              # Runtime-read Android rendering pipeline knowledge
 ├── product/                          # External project positioning
-├── archive/                          # Historical proposals, spikes, and decisions
+├── presentations/                    # External sharing material
+├── archive/                          # Historical proposals, spikes, reviews, and development plans
 └── images/                           # Documentation images
 ```
 
@@ -51,6 +51,7 @@ docs/
 - DataEnvelope and frontend/backend contracts: [Data Contract](../backend/docs/DATA_CONTRACT_DESIGN.en.md).
 - Final report, evidence/claim verification, identity resolution, and chat-vs-report boundaries: [Architecture Overview](architecture/overview.en.md) and [Agent Runtime](architecture/agent-runtime.en.md).
 - Rendering pipeline summary: [Rendering Pipeline Overview](rendering_pipelines/index.en.md).
+- Development-task docs, feature plans, reviews, spikes, and scratch records live under [Archive](archive/README.md) and are not current implementation guidance.
 
 ## Runtime-Read Documentation
 

@@ -21,6 +21,7 @@
 11. [Pipeline Skills](#11-pipeline-skills)
 12. [开发工作流](#12-开发工作流)
 13. [与 Claude 标准 Skill 的区别](#13-与-claude-标准-skill-的区别)
+14. [Skill tier 与校验规则](#14-skill-tier-与校验规则)
 
 ---
 
@@ -692,8 +693,6 @@ cd backend && npm run test:scene-trace-regression
 2. 使用 `execute_sql` 单独测试 SQL 片段
 3. 检查 SSE 事件中的 DataEnvelope 是否正确
 
----
-
 ## 13. 与 Claude 标准 Skill 的区别
 
 SmartPerfetto Skills **不是** Claude Code Skills 的等价物，两者解决不同的问题：
@@ -725,3 +724,27 @@ SmartPerfetto Skills (backend/skills/)
 **不建议迁移的原因：**
 - 迁移到 Claude Code Skills 会**丢失**多步编排、L1-L4 分层、Artifact 压缩、确定性执行
 - SmartPerfetto 的 `.strategy.md` 已经承担了 Claude Code Skills 的角色（注入分析方法论到 system prompt）
+
+---
+
+## 14. Skill tier 与校验规则
+
+Skill 可以声明顶层 `tier: S | A | B`，用于表达目标复杂度和 review 预期：
+
+| Tier | 适用 Skill | 结构预期 |
+|---|---|---|
+| `S` | 旗舰级跨域分析，如 startup、scrolling、CPU、scene reconstruction | `type: composite` 或 `deep`，通常包含多个 Perfetto stdlib module 和 5 个以上步骤 |
+| `A` | 单域实质分析，能产出诊断结论或关键列表 | 至少声明相关 `prerequisites.modules`，并提供可复用的显示层 |
+| `B` | 单事实或辅助数据提供者 | 查询边界清晰，字段和缺失数据语义明确 |
+
+`npm run validate:skills` 会执行这些稳定规则：
+
+| Rule | 行为 |
+|---|---|
+| `skill-tier-must-match-declared` | 校验 `tier` 是否为 `S/A/B`，并把结构不足报告为迁移 warning |
+| `skill-stdlib-detected-vs-declared` | 扫描 SQL 中使用的 Perfetto stdlib symbol，要求被 `prerequisites.modules` 覆盖 |
+| `skill-include-budget-soft-cap` | 当 `prerequisites.modules` 超过 8 个时发出成本 warning |
+| `skill-step-id-uniqueness` | 每个 Skill 内 step id 必须唯一 |
+| `skill-vendor-override-runtime-conformant` | Vendor override 必须有真实 `additional_steps`、vendor signatures，并指向已注册 base Skill |
+
+`backend/skills/_template/` 是作者模板，不进入运行时 registry。复制模板后必须删除占位符，放入正式 Skill 目录，再运行 `validate:skills` 和匹配的 trace regression。

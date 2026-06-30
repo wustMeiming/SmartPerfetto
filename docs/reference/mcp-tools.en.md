@@ -83,6 +83,7 @@ Knowledge and memory support the investigation; they must not override current t
 | `flag_uncertainty` | Mark uncertainty or missing evidence explicitly |
 | `write_analysis_note` | Persist session analysis notes when configured |
 | `fetch_artifact` | Page through large SQL/Skill artifacts when an artifact store exists |
+| `lookup_strategy_detail` | Read scene strategy details by detail ref returned from plan tools; informational fallback only and does not satisfy expectedCalls |
 
 These tools enforce investigation discipline and reduce context size. Artifact summaries are not a reason to discard full DataEnvelope evidence from frontend, reports, CLI artifacts, or snapshots.
 

@@ -37,6 +37,22 @@ Upload example:
 curl -F "file=@trace.pftrace" http://localhost:3000/api/traces/upload
 ```
 
+## Workspace-scoped APIs
+
+New integrations should prefer workspace-scoped paths. When enterprise or
+multiple workspaces are not enabled, the legacy global paths remain available
+for local and compatibility flows.
+
+| Base path | Purpose |
+|---|---|
+| `/api/workspaces/:workspaceId/traces` | Workspace-scoped trace upload, list, delete, and download |
+| `/api/workspaces/:workspaceId/reports` | Workspace-scoped report read, export, and delete |
+| `/api/workspaces/:workspaceId/agent` | Workspace-scoped agent analysis, SSE, turns, and feedback |
+| `/api/workspaces/:workspaceId/providers` | Workspace-scoped Provider Manager profiles |
+| `/api/workspaces/:workspaceId/analysis-results` | Analysis-result snapshot list, read, and update |
+| `/api/workspaces/:workspaceId/windows` | Frontend window heartbeat and active-window state |
+| `/api/workspaces/:workspaceId/comparisons` | Multi-result comparison create, read, stream, and export |
+
 ## Agent v1 Main Path
 
 Base path: `/api/agent/v1`
@@ -44,12 +60,15 @@ Base path: `/api/agent/v1`
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/analyze` | Start analysis |
+| `POST` | `/sessions/:sessionId/runs` | Start a new run in an existing session |
 | `GET` | `/:sessionId/stream` | Subscribe to SSE |
+| `GET` | `/runs/:runId/stream` | Subscribe to SSE by run id |
 | `GET` | `/:sessionId/status` | Poll status |
 | `GET` | `/:sessionId/turns` | Get multi-turn history |
 | `GET` | `/:sessionId/turns/:turnId` | Get a single turn |
 | `POST` | `/resume` | Resume an existing session |
 | `POST` | `/:sessionId/respond` | Continue an awaiting-user session |
+| `POST` | `/sessions/:sessionId/respond` | Session-scoped alias for `respond` |
 | `POST` | `/:sessionId/cancel` | Cancel analysis |
 | `POST` | `/:sessionId/interaction` | Record UI interaction |
 | `GET` | `/:sessionId/focus` | Query focus state |
@@ -60,6 +79,10 @@ Base path: `/api/agent/v1`
 | `POST` | `/teaching/pipeline` | Rendering pipeline teaching |
 | `GET` | `/sessions` | Session catalog |
 | `GET` | `/logs` | Agent logs, gated by feature flag |
+
+The workspace-scoped agent base is `/api/workspaces/:workspaceId/agent`, with
+the same child paths as the table above. `/api/agent/v1` still exists and is
+tracked by legacy telemetry with a migration target.
 
 Start analysis:
 
@@ -136,6 +159,91 @@ Base path: `/api/agent/v1`
 
 This capability is controlled by `FEATURE_AGENT_SCENE_RECONSTRUCT`.
 
+## Skill API
+
+Base path: `/api/skills`
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/` | List Skills |
+| `GET` | `/:skillId` | Skill detail |
+| `POST` | `/execute/:skillId` | Execute a Skill |
+| `POST` | `/analyze` | Detect and run a Skill |
+| `POST` | `/detect-intent` | Intent detection |
+| `POST` | `/detect-vendor` | Vendor detection |
+
+Admin path: `/api/admin`
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/skills` | Admin Skill list |
+| `POST` | `/skills` | Create a Skill |
+| `PUT` | `/skills/:skillId` | Update a Skill |
+| `DELETE` | `/skills/:skillId` | Delete a Skill |
+| `POST` | `/skills/validate` | Validate a Skill |
+| `POST` | `/skills/reload` | Reload Skills |
+| `POST` | `/strategies/reload` | Reload strategies |
+| `GET` | `/self-improve/metrics` | Self-improvement metrics |
+
+## Provider Manager API
+
+Legacy base path: `/api/v1/providers`. New integrations should prefer
+`/api/workspaces/:workspaceId/providers`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/` | List provider profiles |
+| `GET` | `/templates` | Get built-in provider templates |
+| `GET` | `/effective` | Get the effective provider/runtime |
+| `GET` | `/:id` | Get one provider |
+| `POST` | `/` | Create a provider |
+| `PATCH` | `/:id` | Update a provider |
+| `DELETE` | `/:id` | Delete a provider |
+| `POST` | `/deactivate` | Deactivate the active provider and return to system default |
+| `POST` | `/:id/activate` | Activate a provider |
+| `POST` | `/:id/runtime` | Update runtime pinning |
+| `POST` | `/:id/rotate-secret` | Rotate provider secret |
+| `POST` | `/:id/test` | Test a provider |
+
+## Codebase / RAG API
+
+Base path: `/api/rag`
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/stats` | RAG store stats |
+| `GET` | `/chunks/:chunkId` | Read one chunk |
+| `DELETE` | `/chunks/:chunkId` | Delete one chunk |
+| `POST` | `/search` | Search code or knowledge chunks |
+| `GET` | `/codebases` | List registered codebases |
+| `POST` | `/codebases/preview` | Preview files accepted by the path security gate |
+| `POST` | `/codebases/register` | Register a local codebase |
+| `GET` | `/codebases/:id` | Codebase detail |
+| `GET` | `/codebases/:id/symbols` | Resolve symbols |
+| `GET` | `/codebases/:id/excerpt` | Read an indexed excerpt |
+| `POST` | `/codebases/:id/reindex` | Reindex |
+| `GET` | `/codebases/:id/audit` | Index audit |
+
+## Analysis Result Comparison API
+
+Workspace base path: `/api/workspaces/:workspaceId/comparisons`
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/` | Create an analysis-result comparison |
+| `PATCH` | `/:comparisonId/baseline` | Update baseline |
+| `GET` | `/:comparisonId/report/export` | Export comparison report |
+| `GET` | `/:comparisonId` | Get comparison |
+| `GET` | `/:comparisonId/stream` | Subscribe to comparison stream |
+
+Analysis-result snapshot base path: `/api/workspaces/:workspaceId/analysis-results`
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/` | List snapshots |
+| `GET` | `/:snapshotId` | Read a snapshot |
+| `PATCH` | `/:snapshotId` | Update snapshot metadata |
+
 ## Reports and Export
 
 | Method | Path | Purpose |
@@ -151,7 +259,17 @@ This capability is controlled by `FEATURE_AGENT_SCENE_RECONSTRUCT`.
 
 The following APIs still exist, but new integrations should prefer `/api/agent/v1/*`:
 
+- `/api/traces/*`; prefer `/api/workspaces/:workspaceId/traces/*`
+- `/api/reports/*`; prefer `/api/workspaces/:workspaceId/reports/*`
+- `/api/agent/v1/*`; workspace products should prefer `/api/workspaces/:workspaceId/agent/*`
+- `/api/v1/providers/*`; prefer `/api/workspaces/:workspaceId/providers/*`
 - `/api/perfetto-sql/*`
 - `/api/template-analysis/*`
+
+Maintained auxiliary APIs include `/api/flamegraph/*`, `/api/critical-path/*`,
+`/api/baselines/*`, `/api/memory/*`, `/api/cases/*`, `/api/ci/*`, `/api/tp/*`,
+`/api/auth/*`, `/api/tenant/*`, and `/api/admin/runtime/*`. These are scoped to
+specific product or admin surfaces; confirm the relevant feature/auth state
+before integrating against them.
 
 The legacy agent API base is rejected by `rejectLegacyAgentApi` to avoid new external use of deprecated paths. Legacy direct AI routes such as `/api/advanced-ai/*`, `/api/auto-analysis/*`, and `/api/agent/v1/llm/*` have been removed; use `/api/agent/v1/analyze`.

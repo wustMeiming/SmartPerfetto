@@ -120,4 +120,28 @@ npm run validate:skills
 npm run test:scene-trace-regression
 ```
 
-SmartPerfetto Skills are repository-specific YAML DSL files for deterministic trace analysis, SQL execution, layered result construction, and frontend DataEnvelope rendering.
+## Skill Tiers And Validation Rules
+
+Skills may declare top-level `tier: S | A | B` to express target complexity and
+review expectations:
+
+| Tier | Use case | Structural expectation |
+|---|---|---|
+| `S` | Flagship cross-domain analysis such as startup, scrolling, CPU, or scene reconstruction | `type: composite` or `deep`, usually multiple Perfetto stdlib modules and 5+ steps |
+| `A` | Focused single-domain analysis that can produce diagnostic findings or key lists | Declares relevant `prerequisites.modules` and reusable display layers |
+| `B` | Single-fact or helper data provider | Clear query boundary, fields, and missing-data semantics |
+
+`npm run validate:skills` enforces these stable rules:
+
+| Rule | Behavior |
+|---|---|
+| `skill-tier-must-match-declared` | Validates `tier` is `S/A/B` and reports structural gaps as migration warnings |
+| `skill-stdlib-detected-vs-declared` | Scans SQL for Perfetto stdlib symbols and requires coverage in `prerequisites.modules` |
+| `skill-include-budget-soft-cap` | Warns when `prerequisites.modules` exceeds 8 modules |
+| `skill-step-id-uniqueness` | Requires unique step ids inside each Skill |
+| `skill-vendor-override-runtime-conformant` | Requires vendor overrides to contain real `additional_steps`, vendor signatures, and a registered base Skill |
+
+`backend/skills/_template/` contains authoring templates and is not loaded into
+the runtime registry. After copying a template, remove placeholders, place the
+Skill under a runtime Skill directory, then run `validate:skills` and the
+matching trace regression.
