@@ -21,6 +21,7 @@ import {
   type PiAgentCoreEvent,
 } from '../piAgentCoreRuntime';
 import type { RuntimeToolResult, SharedToolSpec } from '../runtimeToolSpec';
+import * as quickEvidenceDirectAnswer from '../quickEvidenceDirectAnswer';
 
 class FakePiAgent {
   static instances: FakePiAgent[] = [];
@@ -603,6 +604,183 @@ describe('experimental Pi agent-core runtime contract', () => {
     expect(toolNames).not.toContain('submit_plan');
     expect(result.claimVerificationResult).toBeUndefined();
     expect(result.terminationReason).toBeUndefined();
+  });
+
+  it('answers default auto trace facts directly without loading the Pi SDK', async () => {
+    const traceProcessorService = createFakeTraceProcessorService();
+    traceProcessorService.query.mockImplementation(async (_traceId: string, sql: string) => {
+      expect(sql).toContain('runtime_cpu_core_count');
+      return {
+        columns: [
+          'observed_cpu_count',
+          'observed_cpus',
+          'universe_source',
+          'cpu_table_count',
+          'cpu_table_cpus',
+          'source_table',
+        ],
+        rows: [[
+          7,
+          '0, 1, 2, 3, 4, 5, 6',
+          'sched_observed',
+          7,
+          '0, 1, 2, 3, 4, 5, 6',
+          'sched_slice/thread_state',
+        ]],
+        durationMs: 2,
+      };
+    });
+    const moduleLoader = jest.fn(async () => ({ Agent: FakePiAgent }));
+    const runtime = new PiAgentCoreRuntime(
+      traceProcessorService,
+      { kind: 'pi-agent-core', source: 'env' },
+      {
+        env: { [PI_AGENT_CORE_MODEL_JSON_ENV]: PI_TEST_MODEL_JSON },
+        moduleLoader,
+      },
+    );
+    const updates: StreamingUpdate[] = [];
+    runtime.on('update', (update) => updates.push(update));
+
+    const result = await runtime.analyze('这个 trace 的 CPU 有几个核心？', 'session-pi-auto-quick', 'trace-pi');
+
+    expect(moduleLoader).not.toHaveBeenCalled();
+    expect(FakePiAgent.instances).toHaveLength(0);
+    expect(result.quickRun).toMatchObject({
+      requestedMode: 'auto',
+      resolvedMode: 'quick',
+      actualTurns: 0,
+      stopReason: 'answered',
+      evidence: {
+        currentRunDataEnvelopes: 1,
+        citedEvidenceRefs: 1,
+      },
+    });
+    expect(result.rounds).toBe(0);
+    expect(result.conclusion).toContain('7 个 CPU 核心');
+    expect(result.conclusionContract?.claims?.[0]?.references?.[0]).toMatchObject({
+      column: 'observed_cpu_count',
+      value: 7,
+    });
+    expect(result.terminationReason).toBeUndefined();
+    expect(traceProcessorService.query).toHaveBeenCalledTimes(1);
+    expect(updates.map((update) => update.type)).toEqual([
+      'data',
+      'progress',
+      'conclusion',
+      'answer_token',
+    ]);
+  });
+
+  it('answers acknowledgement follow-ups directly without loading the Pi SDK', async () => {
+    const traceProcessorService = createFakeTraceProcessorService();
+    const moduleLoader = jest.fn(async () => ({ Agent: FakePiAgent }));
+    const runtime = new PiAgentCoreRuntime(
+      traceProcessorService,
+      { kind: 'pi-agent-core', source: 'env' },
+      {
+        env: { [PI_AGENT_CORE_MODEL_JSON_ENV]: PI_TEST_MODEL_JSON },
+        moduleLoader,
+      },
+    );
+    const updates: StreamingUpdate[] = [];
+    runtime.on('update', (update) => updates.push(update));
+
+    const result = await runtime.analyze('谢谢', 'session-pi-ack', 'trace-pi');
+
+    expect(moduleLoader).not.toHaveBeenCalled();
+    expect(FakePiAgent.instances).toHaveLength(0);
+    expect(traceProcessorService.query).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: true,
+      conclusion: '收到。',
+      confidence: 1,
+      rounds: 0,
+      quickRun: {
+        requestedMode: 'auto',
+        resolvedMode: 'quick',
+        actualTurns: 0,
+        stopReason: 'answered',
+      },
+    });
+    expect(result.claimVerificationResult).toBeUndefined();
+    expect(updates.map((update) => update.type)).toEqual([
+      'progress',
+      'conclusion',
+      'answer_token',
+    ]);
+  });
+
+  it('does not pre-run quick direct evidence for auto full scrolling diagnostics', async () => {
+    const traceProcessorService = createFakeTraceProcessorService();
+    const moduleLoader = jest.fn(async () => ({ Agent: FakePiAgent }));
+    const runtime = new PiAgentCoreRuntime(
+      traceProcessorService,
+      { kind: 'pi-agent-core', source: 'env' },
+      {
+        env: { [PI_AGENT_CORE_MODEL_JSON_ENV]: PI_TEST_MODEL_JSON },
+        moduleLoader,
+      },
+    );
+    runtime.restoreArchitectureCache('trace-pi-full-scroll', {
+      type: 'STANDARD',
+      confidence: 0.9,
+      evidence: [],
+    });
+    const directEvidence = jest.spyOn(
+      quickEvidenceDirectAnswer,
+      'buildRuntimeQuickEvidenceDirectAnswer',
+    );
+
+    try {
+      const result = await runtime.analyze(
+        '分析滑动性能',
+        'session-pi-full-scroll',
+        'trace-pi-full-scroll',
+      );
+
+      expect(directEvidence).not.toHaveBeenCalled();
+      expect(moduleLoader).toHaveBeenCalledTimes(1);
+      expect(FakePiAgent.instances).toHaveLength(1);
+      expect(result.quickRun).toBeUndefined();
+    } finally {
+      directEvidence.mockRestore();
+    }
+  });
+
+  it('skips focus detection for package-scoped trace fact fallback preparation', async () => {
+    const traceProcessorService = createFakeTraceProcessorService();
+    const sqlQueries: string[] = [];
+    traceProcessorService.query.mockImplementation(async (_traceId: string, sql: string) => {
+      sqlQueries.push(sql);
+      return { columns: [], rows: [], durationMs: 1 };
+    });
+    const runtime = new PiAgentCoreRuntime(
+      traceProcessorService,
+      { kind: 'pi-agent-core', source: 'env' },
+      {
+        env: { [PI_AGENT_CORE_MODEL_JSON_ENV]: PI_TEST_MODEL_JSON },
+        moduleLoader: async () => ({ Agent: FakePiAgent }),
+      },
+    );
+    runtime.restoreArchitectureCache('trace-pi', {
+      type: 'STANDARD',
+      confidence: 0.9,
+      evidence: [],
+    });
+
+    await runtime.analyze(
+      '滑动 FPS 是多少？',
+      'session-pi-package-fallback',
+      'trace-pi',
+      { packageName: 'com.example.app' },
+    );
+
+    expect(FakePiAgent.instances).toHaveLength(1);
+    expect(FakePiAgent.instances[0].state.systemPrompt).toContain('com.example.app');
+    expect(sqlQueries.some(sql => sql.includes('runtime_frame_metrics'))).toBe(true);
+    expect(sqlQueries.some(sql => sql.includes('android_battery_stats_event_slices'))).toBe(false);
+    expect(sqlQueries.some(sql => sql.includes('android_oom_adj_intervals'))).toBe(false);
   });
 
   it('keeps the final report when Pi emits trailing bookkeeping assistant text', async () => {

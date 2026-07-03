@@ -151,7 +151,7 @@ export function createSseBridge(
 
     // Claude Agent SDK emits control-plane status messages while waiting for
     // model responses. They do not represent user-visible analysis progress.
-    if (msg.type === 'system' && msg.subtype === 'status') {
+    if (msg.type === 'system' && (msg.subtype === 'status' || msg.subtype === 'thinking_tokens')) {
       return;
     }
 

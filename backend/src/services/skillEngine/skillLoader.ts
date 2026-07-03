@@ -709,6 +709,46 @@ export class SkillRegistry {
   }
 
   /**
+   * Load one YAML skill into this registry without marking the registry fully
+   * initialized. This is used by latency-sensitive runtime pre-evidence paths
+   * that need one deterministic Skill while the full registry initializes in
+   * parallel.
+   */
+  loadSingleSkill(skillsDir: string, relativeSkillPath: string): SkillDefinition | undefined {
+    if (this.fragmentCache.size === 0) {
+      this.loadFragments(skillsDir);
+    }
+
+    const filePath = path.isAbsolute(relativeSkillPath)
+      ? relativeSkillPath
+      : path.join(skillsDir, relativeSkillPath);
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const loaded: unknown = yaml.load(content);
+      const skill = normalizeSkillDefinition(loaded, filePath);
+
+      if (!skill?.name) {
+        logger.warn('SkillLoader', `Single skill ${filePath} missing 'name', skipping`);
+        return undefined;
+      }
+
+      this.validateAndLogWarnings(skill, filePath);
+      this.skills.set(skill.name, skill);
+      if (skill.module) {
+        this.moduleSkills.set(skill.name, skill);
+      } else {
+        this.moduleSkills.delete(skill.name);
+      }
+      logger.debug('SkillLoader', `Loaded single skill: ${skill.name} (${skill.type})`);
+      return skill;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('SkillLoader', `Failed to load single skill ${filePath}:`, message);
+      return undefined;
+    }
+  }
+
+  /**
    * 获取 skill
    */
   getSkill(name: string): SkillDefinition | undefined {

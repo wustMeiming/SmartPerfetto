@@ -700,10 +700,6 @@ describe('createClaudeMcpServer', () => {
         artifactId: skillResult.diagnosticsArtifactId,
         detail: 'rows',
       });
-      const fetchedSynthesize = await callTool(tools, 'fetch_artifact', {
-        artifactId: skillResult.synthesizeArtifacts[0].artifactId,
-        detail: 'rows',
-      });
 
       expect(fetched.identityResolution).toEqual(expect.objectContaining({
         identityRefId: 'identity:test',
@@ -713,10 +709,77 @@ describe('createClaudeMcpServer', () => {
         identityRefId: 'identity:test',
         status: 'verified',
       }));
-      expect(fetchedSynthesize.identityResolution).toEqual(expect.objectContaining({
+    });
+
+    it('returns answerable lightweight artifact previews with evidence refs', async () => {
+      const { tools, mockSkillExecutor } = createTestServer({ lightweight: true });
+      mockSkillExecutor.execute.mockResolvedValueOnce({
+        skillId: 'scrolling_analysis',
+        skillName: '滑动性能分析',
+        success: true,
+        displayResults: [{
+          stepId: 'frame_summary',
+          title: '滑动性能概览',
+          layer: 'overview',
+          format: 'table',
+          data: {
+            columns: ['total_frames', 'perceived_jank_frames', 'jank_rate'],
+            rows: [[347, 7, 2.02]],
+          },
+        }],
+        identityResolution: {
+          version: 'identity_contract@1',
+          identityRefId: 'identity:test',
+          target: {
+            traceId: 'test-trace-123',
+            packageName: 'com.example',
+            processName: 'com.example',
+            source: 'skill_param',
+          },
+          status: 'verified',
+          processes: [],
+          threads: [],
+          warnings: [],
+        },
+        synthesizeData: [{
+          stepId: 'large_synth',
+          stepName: 'Large Synth',
+          success: true,
+          data: [{ frame_id: 1, blocked_ms: 120 }],
+        }],
+        executionTimeMs: 5,
+      } as any);
+
+      const result = await callTool(tools, 'invoke_skill', {
+        skillId: 'scrolling_analysis',
+        params: { process_name: 'com.example' },
+      });
+
+      expect(result.quickMode).toMatchObject({
+        answerNow: true,
+      });
+      expect(result.hint).toContain('answer from previews');
+      expect(result.identity).toMatchObject({
         identityRefId: 'identity:test',
         status: 'verified',
-      }));
+        packageName: 'com.example',
+        processName: 'com.example',
+      });
+      expect(result.identityResolution).toBeUndefined();
+      expect(result.synthesizeArtifacts).toBeUndefined();
+      expect(result.artifacts).toEqual([
+        expect.objectContaining({
+          id: 'art-1',
+          stepId: 'frame_summary',
+          evidenceRefId: expect.stringContaining('data:skill:scrolling_analysis'),
+          sourceToolCallId: expect.stringContaining('invoke_skill:'),
+          preview: {
+            total_frames: 347,
+            perceived_jank_frames: 7,
+            jank_rate: 2.02,
+          },
+        }),
+      ]);
     });
 
     it('creates fetchable diagnostics artifacts without display results', async () => {

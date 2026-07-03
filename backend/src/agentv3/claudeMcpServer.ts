@@ -53,6 +53,7 @@ import { matchPhaseHintForNextPhase } from './phaseHintMatcher';
 import { buildActivePhaseReminder } from './activePhaseReminder';
 import { validatePlanAgainstSceneTemplate, MIN_WAIVER_REASON_CHARS } from './scenePlanTemplates';
 import { summarizeToolCallInput } from './toolCallSummary';
+import { buildQuickArtifactGuidance } from './quickAnswerContract';
 import {
   findBestPhaseForExpectedCallGap,
   findCompletedPhaseEvidenceGaps,
@@ -61,7 +62,7 @@ import {
 } from './planToolCallRecorder';
 import { isConclusionLikePlanPhase } from './planPhaseSemantics';
 import { formatToolCallNarration } from './toolNarration';
-import type { ArtifactStore } from './artifactStore';
+import type { ArtifactStore, CompactArtifactSummary } from './artifactStore';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from './outputLanguage';
 import { RagStore } from '../services/ragStore';
 import {
@@ -400,6 +401,11 @@ const CORE_EXPECTED_CALL_TOOL_NAMES = new Set([
   'resolve_hypothesis',
   'mark_uncertainty',
 ]);
+
+type SkillArtifactSummaryForModel = CompactArtifactSummary & {
+  evidenceRefId: string;
+  sourceToolCallId?: string;
+};
 
 function shortExpectedToolName(toolName: string): string {
   const MCP_PREFIX = 'mcp__smartperfetto__';
@@ -952,6 +958,19 @@ function normalizeSynthesizeDataForStorage(data: any): { columns: string[]; rows
 
   // Scalar
   return { columns: ['value'], rows: [[data]] };
+}
+
+function previewFromColumnarData(data: any): Record<string, any> | undefined {
+  const columns: string[] = Array.isArray(data?.columns)
+    ? data.columns.filter((col: unknown): col is string => typeof col === 'string')
+    : [];
+  const firstRow = Array.isArray(data?.rows) ? data.rows[0] : undefined;
+  if (columns.length === 0 || !Array.isArray(firstRow)) return undefined;
+  const preview: Record<string, any> = {};
+  columns.forEach((column, index) => {
+    preview[column] = index < firstRow.length ? firstRow[index] : null;
+  });
+  return preview;
 }
 
 export interface ClaudeMcpServerOptions {
@@ -2684,12 +2703,20 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
 
         // Artifact mode stores displayResults before emitting DataEnvelopes so
         // evidence meta can carry the same artifact ids that the model sees.
-        let artifacts: NonNullable<ReturnType<ArtifactStore['generateCompactSummary']>>[] | undefined;
+        let artifacts: SkillArtifactSummaryForModel[] | undefined;
         let diagnosticsArtifactId: string | undefined;
         let synthesizeArtifacts: Array<{ artifactId: string; stepId: string; rowCount: number; columns: string[] }> | undefined;
         const artifactIdsByStepId = new Map<string, string>();
         if (artifactStore && result.displayResults?.length) {
           artifacts = result.displayResults.map(dr => {
+            const evidenceRefId = stableSkillEvidenceRefId(
+              result.skillId || skillId,
+              dr.stepId,
+              dr.title,
+              dr.data,
+              skillTraceProvenance,
+              producer,
+            );
             const artId = artifactStore.store({
               skillId: result.skillId || skillId,
               stepId: dr.stepId,
@@ -2706,8 +2733,14 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             });
             if (dr.stepId) artifactIdsByStepId.set(dr.stepId, artId);
             const summary = artifactStore.generateCompactSummary(artId);
-            return summary;
-          }).filter((summary): summary is NonNullable<ReturnType<ArtifactStore['generateCompactSummary']>> => Boolean(summary));
+            const preview = summary?.preview ?? previewFromColumnarData(dr.data);
+            return summary ? {
+              ...summary,
+              ...(preview ? { preview } : {}),
+              evidenceRefId,
+              ...(producer.sourceToolCallId ? { sourceToolCallId: producer.sourceToolCallId } : {}),
+            } : undefined;
+          }).filter((summary): summary is SkillArtifactSummaryForModel => Boolean(summary));
         }
 
         // Store diagnostics as a separate artifact if present, even for
@@ -2810,6 +2843,9 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         // Artifact mode: return compact references whenever any fetchable
         // artifact was created.
         if (artifactStore && (artifacts?.length || diagnosticsArtifactId || synthesizeArtifacts?.length)) {
+          const lightweightArtifacts = options.lightweight
+            ? artifacts?.filter(summary => summary.rowCount > 0 || summary.preview).slice(0, 10)
+            : artifacts;
           return {
             content: [{
               type: 'text' as const,
@@ -2818,14 +2854,36 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
                 skillId: result.skillId,
                 skillName: result.skillName,
                 ...(result.error ? { error: result.error } : {}),
-                ...(result.identityResolution ? { identityResolution: result.identityResolution } : {}),
-                artifacts,
+                ...(options.lightweight
+                  ? {
+                      quickMode: {
+                        answerNow: true,
+                        guidance: buildQuickArtifactGuidance(),
+                      },
+                    }
+                  : {}),
+                ...(result.identityResolution
+                  ? options.lightweight
+                    ? {
+                        identity: {
+                          identityRefId: result.identityResolution.identityRefId,
+                          status: result.identityResolution.status,
+                          packageName: result.identityResolution.target?.packageName,
+                          processName: result.identityResolution.target?.processName,
+                          warnings: result.identityResolution.warnings,
+                        },
+                      }
+                    : { identityResolution: result.identityResolution }
+                  : {}),
+                artifacts: lightweightArtifacts,
                 ...(diagnosticsArtifactId ? { diagnosticsArtifactId } : {}),
-                ...(synthesizeArtifacts && synthesizeArtifacts.length > 0
+                ...((!options.lightweight || !artifacts?.length) && synthesizeArtifacts && synthesizeArtifacts.length > 0
                   ? { synthesizeArtifacts }
                   : {}),
                 ...(vendorOverrideHint ? { vendorOverride: vendorOverrideHint } : {}),
-                hint: 'Use fetch_artifact(artifactId=<id>, detail="rows", offset=0, limit=50) to page through large datasets. All data is accessible — use offset/limit to paginate.',
+                hint: options.lightweight
+                  ? 'Quick mode: answer from previews/evidenceRefId now; fetch artifacts only for explicit row-level follow-up.'
+                  : 'Use fetch_artifact(artifactId=<id>, detail="rows", offset=0, limit=50) to page through large datasets. All data is accessible — use offset/limit to paginate.',
               })) + (result.success ? getReasoningNudge() : ''),
             }],
           };

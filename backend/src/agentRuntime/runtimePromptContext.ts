@@ -4,7 +4,7 @@
 
 import type { TraceDataset } from '../agent/core/orchestratorTypes';
 import type { QuickRunContextInjectedCounts } from '../agent/core/orchestratorTypes';
-import type { Finding, ConversationTurn } from '../agent/types';
+import type { Finding, SubAgentResult } from '../agent/types';
 import {
   DEFAULT_OUTPUT_LANGUAGE,
   localize,
@@ -46,8 +46,23 @@ function compactForPrompt(value: unknown, maxChars: number): string {
   return `${text.slice(0, Math.max(0, maxChars - 1))}...`;
 }
 
+export interface QuickConversationContextTurn {
+  id?: string;
+  timestamp?: number;
+  query: string;
+  intent?: unknown;
+  result?: Pick<SubAgentResult, 'message'>;
+  findings?: Array<Pick<Finding, 'severity' | 'title'>>;
+  turnIndex: number;
+  completed: boolean;
+}
+
+interface FindingSessionContext<TFinding extends Pick<Finding, 'title'>> {
+  getAllTurns?: () => Array<{ findings?: TFinding[] }>;
+}
+
 export function buildQuickConversationContext(
-  previousTurns: ConversationTurn[],
+  previousTurns: QuickConversationContextTurn[],
   outputLanguage: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE,
 ): string | undefined {
   const turns = previousTurns.filter(turn => turn.completed).slice(-3);
@@ -64,7 +79,7 @@ export function buildQuickConversationContext(
   for (const turn of turns) {
     const query = compactForPrompt(turn.query, 220);
     const answer = compactForPrompt(turn.result?.message || '', 700);
-    const findings = turn.findings
+    const findings = (turn.findings ?? [])
       .slice(0, 3)
       .map(f => `[${f.severity}] ${compactForPrompt(f.title, 160)}`)
       .filter(Boolean);
@@ -184,16 +199,16 @@ export function buildQuickMemoryContext(input: QuickMemoryContextInput): string 
   return buildQuickMemoryContextPayload(input).text;
 }
 
-export function collectRecentFindings(
-  sessionContext: any,
+export function collectRecentFindings<TFinding extends Pick<Finding, 'title'> = Finding>(
+  sessionContext: FindingSessionContext<TFinding>,
   options: { maxTurns?: number; maxFindings?: number } = {},
-): Finding[] {
+): TFinding[] {
   try {
-    let turns = sessionContext.getAllTurns?.() || [];
+    let turns = sessionContext.getAllTurns?.() ?? [];
     if (options.maxTurns && options.maxTurns > 0) {
       turns = turns.slice(-options.maxTurns);
     }
-    return turns.flatMap((turn: any) => turn.findings || []).slice(-(options.maxFindings ?? 5));
+    return turns.flatMap(turn => turn.findings ?? []).slice(-(options.maxFindings ?? 5));
   } catch {
     return [];
   }

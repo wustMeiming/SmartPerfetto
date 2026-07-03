@@ -477,8 +477,11 @@ export function createQuickConfig(
 ): ClaudeAgentConfig {
   const budgetConfig = resolveAgentRuntimeBudgetConfig(env);
   const quickMaxTurns = parsePositiveIntEnvFrom(env, 'CLAUDE_QUICK_MAX_TURNS', budgetConfig.quickMaxTurns);
+  const quickModel = env.CLAUDE_LIGHT_MODEL ?? baseConfig.lightModel;
   return {
     ...baseConfig,
+    model: quickModel,
+    lightModel: quickModel,
     maxTurns: quickMaxTurns,
     quickTargetTurns: Math.min(
       parsePositiveIntEnvFrom(env, 'CLAUDE_QUICK_TARGET_TURNS', budgetConfig.quickTargetTurns),

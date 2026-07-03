@@ -97,6 +97,14 @@ describe('createSseBridge', () => {
         session_id: 'sdk-session-1',
       });
       bridge.handleMessage({
+        type: 'system',
+        subtype: 'thinking_tokens',
+        estimated_tokens: 12,
+        estimated_tokens_delta: 2,
+        uuid: 'thinking-1',
+        session_id: 'sdk-session-1',
+      });
+      bridge.handleMessage({
         type: 'rate_limit_event',
         retry_after_ms: 1000,
       });

@@ -55,6 +55,7 @@ import { getSharedModelRouter } from '../agent/core/modelRouterSingleton';
 import type { IOrchestrator, TraceDataset } from '../agent/core/orchestratorTypes';
 import { resolveConclusionScene } from '../agent/core/conclusionSceneTemplates';
 import { DEEP_REASON_LABEL } from '../utils/analysisNarrative';
+import { localize, parseOutputLanguage } from '../agentv3/outputLanguage';
 import { sanitizeNarrativeForClient } from './narrativeSanitizer';
 import { registerSceneReconstructRoutes } from './agentSceneReconstructRoutes';
 import { SceneStoryService } from '../agent/scene/sceneStoryService';
@@ -477,6 +478,13 @@ function initializeCancelStateForRun(
 
 function getSessionRunId(session: AnalysisSession): string | undefined {
   return session.activeRun?.runId || session.lastRun?.runId;
+}
+
+function getCompletedResultRunId(
+  session: AnalysisSession,
+  runId?: string,
+): string | undefined {
+  return runId ?? getSessionRunId(session);
 }
 
 function isSessionRunCancelled(
@@ -1091,6 +1099,7 @@ function loadPersistedCompletedAnalysisSseEvents(
   const events = listSerializedAgentEventsAfter(scope, scope.runId, 0)
     .filter(event =>
       event.eventType === 'snapshot_created' ||
+      event.eventType === 'progress' ||
       event.eventType === 'analysis_completed' ||
       event.eventType === 'analysis_cancelled' ||
       event.eventType === 'scene_reconstruction_completed' ||
@@ -1122,6 +1131,22 @@ function loadPersistedCompletedAnalysisSseEvents(
     replayState.sseEventBuffer.splice(0, replayState.sseEventBuffer.length - SSE_RING_BUFFER_SIZE);
   }
   return events;
+}
+
+function latestBufferedProgressEvent(
+  session: AnalysisSession,
+  runId?: string,
+): BufferedSseEvent | undefined {
+  const replayState =
+    runId && !isCurrentRunOwner(session, runId)
+      ? session.runSseState?.[runId]
+      : session;
+  const buffer = replayState?.sseEventBuffer ?? [];
+  return [...buffer]
+    .reverse()
+    .find(event =>
+      event.eventType === 'progress' &&
+      (!runId || event.runId === runId));
 }
 
 type TurnHistorySource = 'memory' | 'persistence';
@@ -2277,6 +2302,8 @@ function handleSessionStream(
       streamStatus === 'pending' ||
       streamStatus === 'running' ||
       streamStatus === 'awaiting_user' ||
+      streamStatus === 'completed' ||
+      streamStatus === 'quota_exceeded' ||
       streamStatus === 'failed' ||
       streamStatus === 'cancelled'
     );
@@ -6368,6 +6395,7 @@ function ensureCompletedAnalysisResultPayload(
   session: AnalysisSession,
   runId?: string,
 ): CompletedAnalysisResultPayload | undefined {
+  const completedRunId = getCompletedResultRunId(session, runId);
   const result = session.result;
   if (!result) return undefined;
   const replayOnlyScene = isSceneReplayOnlyQuery(session.query);
@@ -6404,7 +6432,7 @@ function ensureCompletedAnalysisResultPayload(
   let quickRun = finalizeQuickRunReceipt(session, {
     result,
     qualityArtifacts,
-    runId,
+    runId: completedRunId,
   });
   if (quickRun) {
     result.quickRun = quickRun;
@@ -6431,7 +6459,7 @@ function ensureCompletedAnalysisResultPayload(
       quickRun = finalizeQuickRunReceipt(session, {
         result,
         qualityArtifacts,
-        runId,
+        runId: completedRunId,
       });
       if (quickRun) {
         result.quickRun = quickRun;
@@ -6462,7 +6490,7 @@ function ensureCompletedAnalysisResultPayload(
     normalizedConclusionContract,
     qualityArtifacts,
     resultForClient: resultForClient as AgentRuntimeAnalysisResult,
-    runId,
+    runId: completedRunId,
   });
   return {
     result,
@@ -6481,15 +6509,16 @@ function ensureCompletedAnalysisResultPayload(
  * Send agent-driven analysis result to SSE client
  */
 function ensureCompletedAnalysisSseEvents(session: AnalysisSession, runId?: string): BufferedSseEvent[] {
+  const completedRunId = getCompletedResultRunId(session, runId);
   const sseCache = ((session as any).completedAnalysisSseEventsByRunId ||= {}) as Record<string, {
     qualityGateVersion?: number;
     events: BufferedSseEvent[];
   }>;
-  const runCache = runId ? sseCache[runId] : undefined;
-  const cached = runId
+  const runCache = completedRunId ? sseCache[completedRunId] : undefined;
+  const cached = completedRunId
     ? runCache?.events
     : (session as any).completedAnalysisSseEvents as BufferedSseEvent[] | undefined;
-  const cachedVersion = runId
+  const cachedVersion = completedRunId
     ? runCache?.qualityGateVersion
     : (session as any).completedAnalysisSseEventsQualityGateVersion;
   if (
@@ -6500,12 +6529,12 @@ function ensureCompletedAnalysisSseEvents(session: AnalysisSession, runId?: stri
     return cached;
   }
 
-  const completedPayload = ensureCompletedAnalysisResultPayload(session, runId);
+  const completedPayload = ensureCompletedAnalysisResultPayload(session, completedRunId);
   if (!completedPayload) {
-    const persisted = loadPersistedCompletedAnalysisSseEvents(session, runId);
+    const persisted = loadPersistedCompletedAnalysisSseEvents(session, completedRunId);
     if (persisted.length > 0) {
-      if (runId) {
-        sseCache[runId] = { events: persisted };
+      if (completedRunId) {
+        sseCache[completedRunId] = { events: persisted };
       } else {
         (session as any).completedAnalysisSseEvents = persisted;
         delete (session as any).completedAnalysisSseEventsQualityGateVersion;
@@ -6524,8 +6553,25 @@ function ensureCompletedAnalysisSseEvents(session: AnalysisSession, runId?: stri
     resultContract,
     finalArtifacts,
   } = completedPayload;
-  const observability = buildStreamObservability(session, runId);
+  const observability = buildStreamObservability(session, completedRunId);
   const events: BufferedSseEvent[] = [];
+  const progressEvent = latestBufferedProgressEvent(session, completedRunId)
+    ?? appendAndPersistReplayableSessionEvent(session, 'progress', {
+      type: 'progress',
+      architecture: 'agent-driven',
+      ...observability,
+      data: {
+        phase: 'completed',
+        message: localize(
+          parseOutputLanguage(process.env.SMARTPERFETTO_OUTPUT_LANGUAGE),
+          '分析已完成。',
+          'Analysis completed.',
+        ),
+      },
+      timestamp: Date.now(),
+    }, completedRunId);
+  events.push(progressEvent);
+
   if (finalArtifacts.resultSnapshotEventData) {
     events.push(appendAndPersistReplayableSessionEvent(session, 'snapshot_created', {
       type: 'snapshot_created',
@@ -6533,7 +6579,7 @@ function ensureCompletedAnalysisSseEvents(session: AnalysisSession, runId?: stri
       ...observability,
       data: finalArtifacts.resultSnapshotEventData,
       timestamp: Date.now(),
-    }, runId));
+    }, completedRunId));
   }
 
   // Send analysis_completed event with full result. Keep it replayable so a
@@ -6585,7 +6631,7 @@ function ensureCompletedAnalysisSseEvents(session: AnalysisSession, runId?: stri
       terminalRunStatus: session.status === 'quota_exceeded' ? 'quota_exceeded' : 'completed',
     },
     timestamp: Date.now(),
-  }, runId));
+  }, completedRunId));
 
   // Backward-compatible scene reconstruction payload (used by the legacy /scene-reconstruct clients).
   if ((session.scenes?.length || 0) > 0 || (session.trackEvents?.length || 0) > 0) {
@@ -6617,15 +6663,15 @@ function ensureCompletedAnalysisSseEvents(session: AnalysisSession, runId?: stri
         observability,
       },
       timestamp: Date.now(),
-    }, runId));
+    }, completedRunId));
   }
 
   events.push(appendAndPersistReplayableSessionEvent(session, 'end', {
     timestamp: Date.now(),
     ...observability,
-  }, runId));
-  if (runId) {
-    sseCache[runId] = {
+  }, completedRunId));
+  if (completedRunId) {
+    sseCache[completedRunId] = {
       events,
       qualityGateVersion: COMPLETED_ANALYSIS_SSE_EVENTS_QUALITY_GATE_VERSION,
     };

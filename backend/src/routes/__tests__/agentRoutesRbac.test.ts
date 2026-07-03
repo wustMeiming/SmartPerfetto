@@ -25,7 +25,11 @@ import {
   setTraceProcessorLeaseStoreForTests,
 } from '../../services/traceProcessorLeaseStore';
 import { SessionPersistenceService } from '../../services/sessionPersistenceService';
-import { setTraceProcessorServiceForTests } from '../../services/traceProcessorService';
+import {
+  TraceProcessorService,
+  setTraceProcessorServiceForTests,
+  type TraceProcessor,
+} from '../../services/traceProcessorService';
 import agentRoutes from '../agentRoutes';
 
 const originalApiKey = process.env.SMARTPERFETTO_API_KEY;
@@ -34,6 +38,13 @@ const originalEnterprise = process.env[ENTERPRISE_FEATURE_FLAG_ENV];
 const originalEnterpriseDbPath = process.env[ENTERPRISE_DB_PATH_ENV];
 const originalEnterpriseDataDir = process.env[ENTERPRISE_DATA_DIR_ENV];
 const originalUploadDir = process.env.UPLOAD_DIR;
+const originalAgentRuntime = process.env.SMARTPERFETTO_AGENT_RUNTIME;
+
+type DeferredRuntime = {
+  promise: Promise<unknown>;
+  reject: (error: unknown) => void;
+  settled: boolean;
+};
 
 function makeApp(): express.Express {
   const app = express();
@@ -80,6 +91,36 @@ function restoreEnvValue(key: string, value: string | undefined): void {
     delete process.env[key];
   } else {
     process.env[key] = value;
+  }
+}
+
+function createDeferredRuntime(deferreds: DeferredRuntime[]): DeferredRuntime {
+  let rejectRuntime!: (error: unknown) => void;
+  const promise = new Promise<unknown>((_resolve, reject) => {
+    rejectRuntime = reject;
+  });
+  const deferred: DeferredRuntime = {
+    promise,
+    reject: (error: unknown) => {
+      if (deferred.settled) return;
+      deferred.settled = true;
+      rejectRuntime(error);
+    },
+    settled: false,
+  };
+  deferreds.push(deferred);
+  return deferred;
+}
+
+async function rejectPendingDeferredRuntimes(
+  deferreds: DeferredRuntime[],
+  label: string,
+): Promise<void> {
+  for (const [index, deferred] of deferreds.entries()) {
+    deferred.reject(new Error(`${label} ${index}`));
+  }
+  if (deferreds.length > 0) {
+    await new Promise(resolve => setTimeout(resolve, 0));
   }
 }
 
@@ -145,6 +186,7 @@ afterEach(async () => {
   restoreEnvValue(ENTERPRISE_DB_PATH_ENV, originalEnterpriseDbPath);
   restoreEnvValue(ENTERPRISE_DATA_DIR_ENV, originalEnterpriseDataDir);
   restoreEnvValue('UPLOAD_DIR', originalUploadDir);
+  restoreEnvValue('SMARTPERFETTO_AGENT_RUNTIME', originalAgentRuntime);
   sessionContextManager.remove('session-resume-integration');
 });
 
@@ -341,6 +383,7 @@ describe('agent route RBAC', () => {
   it('replays persisted terminal SSE events before falling back to the in-memory buffer', async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'smartperfetto-agent-event-replay-'));
     let leaseStore: ReturnType<typeof getTraceProcessorLeaseStore> | null = null;
+    const deferreds: DeferredRuntime[] = [];
     try {
       const traceId = 'trace-agent-event-replay';
       const tracePath = path.join(tmpDir, `${traceId}.trace`);
@@ -381,7 +424,7 @@ describe('agent route RBAC', () => {
           status: 'ready',
         })),
         ensureProcessorForLease: jest.fn(async () => undefined),
-        runWithLease: jest.fn(() => new Promise<unknown>(() => undefined)),
+        runWithLease: jest.fn(() => createDeferredRuntime(deferreds).promise),
         query: jest.fn(async () => ({ columns: [], rows: [], durationMs: 1 })),
       } as any);
 
@@ -462,6 +505,7 @@ describe('agent route RBAC', () => {
         userId: 'analyst-user',
       }, { traceId })).toHaveLength(1);
     } finally {
+      await rejectPendingDeferredRuntimes(deferreds, 'event replay cleanup');
       leaseStore?.close();
       setTraceProcessorLeaseStoreForTests(null);
       await fs.rm(tmpDir, { recursive: true, force: true });
@@ -471,6 +515,7 @@ describe('agent route RBAC', () => {
   it('replays buffered frontend traceContext data on first session stream connect', async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'smartperfetto-agent-trace-context-replay-'));
     let leaseStore: ReturnType<typeof getTraceProcessorLeaseStore> | null = null;
+    const deferreds: DeferredRuntime[] = [];
     try {
       const traceId = 'trace-context-replay';
       const tracePath = path.join(tmpDir, `${traceId}.trace`);
@@ -511,7 +556,7 @@ describe('agent route RBAC', () => {
           status: 'ready',
         })),
         ensureProcessorForLease: jest.fn(async () => undefined),
-        runWithLease: jest.fn(() => new Promise<unknown>(() => undefined)),
+        runWithLease: jest.fn(() => createDeferredRuntime(deferreds).promise),
         query: jest.fn(async () => ({ columns: [], rows: [], durationMs: 1 })),
       } as any);
 
@@ -554,7 +599,128 @@ describe('agent route RBAC', () => {
         userId: 'analyst-user',
       }, { traceId })).toHaveLength(1);
     } finally {
+      await rejectPendingDeferredRuntimes(deferreds, 'trace context replay cleanup');
       leaseStore?.close();
+      setTraceProcessorLeaseStoreForTests(null);
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('replays buffered quick pre-evidence data when the first session stream connects after completion', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'smartperfetto-agent-completed-data-replay-'));
+    let leaseStore: ReturnType<typeof getTraceProcessorLeaseStore> | null = null;
+    try {
+      const traceId = 'completed-data-replay';
+      const tracePath = path.join(tmpDir, `${traceId}.trace`);
+      await fs.writeFile(tracePath, 'trace bytes');
+      delete process.env.SMARTPERFETTO_API_KEY;
+      process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
+      process.env[ENTERPRISE_FEATURE_FLAG_ENV] = 'true';
+      process.env[ENTERPRISE_DB_PATH_ENV] = path.join(tmpDir, 'enterprise.sqlite');
+      process.env[ENTERPRISE_DATA_DIR_ENV] = path.join(tmpDir, 'data');
+      process.env.UPLOAD_DIR = path.join(tmpDir, 'uploads');
+      process.env.SMARTPERFETTO_AGENT_RUNTIME = 'openai-agents-sdk';
+
+      await writeTraceMetadata({
+        id: traceId,
+        filename: `${traceId}.trace`,
+        size: 11,
+        uploadedAt: new Date().toISOString(),
+        status: 'ready',
+        path: tracePath,
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+        userId: 'analyst-user',
+      });
+      const traceProcessorService = new TraceProcessorService(process.env.UPLOAD_DIR);
+      jest.spyOn(traceProcessorService, 'getOrLoadTrace').mockResolvedValue({
+        id: traceId,
+        filename: `${traceId}.trace`,
+        size: 11,
+        filePath: tracePath,
+        uploadTime: new Date(),
+        status: 'ready',
+      });
+      jest.spyOn(traceProcessorService, 'getTrace').mockReturnValue({
+        id: traceId,
+        filename: `${traceId}.trace`,
+        size: 11,
+        filePath: tracePath,
+        uploadTime: new Date(),
+        status: 'ready',
+      });
+      const readyProcessor: TraceProcessor = {
+        id: `processor-${traceId}`,
+        traceId,
+        status: 'ready',
+        activeQueries: 0,
+        query: jest.fn(async () => ({
+          columns: [],
+          rows: [],
+          durationMs: 1,
+        })),
+        queryRaw: jest.fn(async () => Buffer.alloc(0)),
+        destroy: jest.fn(),
+      };
+      jest.spyOn(traceProcessorService, 'ensureProcessorForLease').mockResolvedValue(readyProcessor);
+      jest.spyOn(traceProcessorService, 'runWithLease').mockImplementation(async (_context, callback) => callback());
+      jest.spyOn(traceProcessorService, 'query').mockResolvedValue({
+        columns: [
+          'android_device_manufacturer',
+          'android_build_fingerprint',
+          'android_sdk_version',
+          'android_soc_model',
+          'system_name',
+          'system_release',
+          'system_machine',
+          'source_table',
+        ],
+        rows: [[
+          'OPPO',
+          'OPPO/PKH110/OP5DC1L1:16/AP3A.240617.008/V.2a01376:user/release-keys',
+          36,
+          'SM8750',
+          'Linux',
+          '6.6.89-android15',
+          'aarch64',
+          'metadata',
+        ]],
+        durationMs: 1,
+      });
+      setTraceProcessorServiceForTests(traceProcessorService);
+
+      const app = makeApp();
+      const analyzeRes = await analystHeaders(request(app).post('/api/agent/v1/analyze'))
+        .send({
+          traceId,
+          query: '设备型号是什么？',
+          options: { analysisMode: 'auto', maxRounds: 1 },
+        });
+
+      expect(analyzeRes.status).toBe(200);
+      await new Promise(resolve => setTimeout(resolve, 25));
+
+      const streamRes = await analystHeaders(
+        request(app)
+          .get(`/api/agent/v1/${analyzeRes.body.sessionId}/stream`)
+          .set('Accept', 'text/event-stream'),
+      );
+
+      expect(streamRes.status).toBe(200);
+      expect(streamRes.text).toContain('event: data');
+      expect(streamRes.text).toContain('runtime_trace_fact:device_info');
+      expect(streamRes.text).toContain('data:runtime_trace_fact:device_info:current:');
+      expect(streamRes.text).toContain('event: analysis_completed');
+      expect(streamRes.text).toContain('"actualTurns":0');
+      leaseStore = getTraceProcessorLeaseStore();
+      expect(leaseStore.listLeases({
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+        userId: 'analyst-user',
+      }, { traceId }).length).toBeGreaterThanOrEqual(1);
+    } finally {
+      leaseStore?.close();
+      delete process.env.SMARTPERFETTO_AGENT_RUNTIME;
       setTraceProcessorLeaseStoreForTests(null);
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
@@ -564,6 +730,7 @@ describe('agent route RBAC', () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'smartperfetto-agent-concurrency-'));
     let leaseStore: ReturnType<typeof getTraceProcessorLeaseStore> | null = null;
     const sessionIds: string[] = [];
+    const deferreds: DeferredRuntime[] = [];
     try {
       const traces = new Map<string, { traceId: string; workspaceId: string; userId: string; tracePath: string }>();
       for (const item of [
@@ -622,7 +789,7 @@ describe('agent route RBAC', () => {
           };
         }),
         ensureProcessorForLease: jest.fn(async () => undefined),
-        runWithLease: jest.fn(() => new Promise<unknown>(() => undefined)),
+        runWithLease: jest.fn(() => createDeferredRuntime(deferreds).promise),
         query: jest.fn(async () => ({ columns: [], rows: [], durationMs: 1 })),
       } as any);
 
@@ -765,6 +932,7 @@ describe('agent route RBAC', () => {
         userId: 'analyst-b',
       }, { traceId: 'trace-concurrent-b' })).toHaveLength(1);
     } finally {
+      await rejectPendingDeferredRuntimes(deferreds, 'concurrency cleanup');
       for (const sessionId of sessionIds) {
         sessionContextManager.remove(sessionId);
       }

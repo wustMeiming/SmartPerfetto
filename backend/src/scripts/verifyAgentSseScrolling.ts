@@ -17,6 +17,7 @@ import { getTraceProcessorService } from '../services/traceProcessorService';
 import { resolveAgentRuntimeSelection } from '../agentRuntime';
 import { getOpenAIRuntimeDiagnostics, hasOpenAICredentials } from '../agentOpenAI';
 import type { TraceDataset } from '../agent/core/orchestratorTypes';
+import type { SelectionContext } from '../agentv3/types';
 import {
   DEFAULT_DEV_USER_ID,
   DEFAULT_TENANT_ID,
@@ -43,6 +44,7 @@ interface VerifyOptions {
   preset?: 'smart';
   /** Frontend-style pre-queried trace datasets forwarded as top-level traceContext. */
   traceContext?: TraceDataset[];
+  selectionContext?: SelectionContext;
   /** Smart action forwarded as options.smartAction. Defaults to analyze for --mode smart CLI runs. */
   smartAction?: SmartAction;
   /** Smart scene selection forwarded as options.smartSelection. */
@@ -189,6 +191,8 @@ function printUsage(): void {
   console.log('  --mode <fast|full|auto|smart>     Override analysisMode, or use smart as shorthand for --preset smart');
   console.log('  --preset <smart>                  Forward preset to the backend');
   console.log('  --trace-context-json <json|@file> Forward frontend-style traceContext datasets');
+  console.log('  --selection-context-json <json|@file>');
+  console.log('                                      Forward frontend-style selectionContext');
   console.log('  --smart-action <preview|analyze>  Smart action (default: analyze for --mode/--preset smart)');
   console.log('  --smart-scope <all|scene_types|scene_ids>');
   console.log('                                      Smart selection scope (default: all for analyze)');
@@ -246,6 +250,17 @@ function parseTraceContextArg(value: string): TraceDataset[] {
     throw new Error('--trace-context-json did not contain any valid datasets');
   }
   return datasets;
+}
+
+function parseSelectionContextArg(value: string): SelectionContext {
+  const raw = value.startsWith('@')
+    ? fs.readFileSync(path.resolve(process.cwd(), value.slice(1)), 'utf8')
+    : value;
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('--selection-context-json must be a JSON object');
+  }
+  return parsed as SelectionContext;
 }
 
 function parseArgs(argv: string[]): VerifyOptions {
@@ -464,6 +479,15 @@ function parseArgs(argv: string[]): VerifyOptions {
         throw new Error('--trace-context-json requires a value');
       }
       options.traceContext = parseTraceContextArg(next);
+      i += 1;
+      continue;
+    }
+
+    if (arg === '--selection-context-json') {
+      if (!next) {
+        throw new Error('--selection-context-json requires a value');
+      }
+      options.selectionContext = parseSelectionContextArg(next);
       i += 1;
       continue;
     }
@@ -1190,6 +1214,7 @@ async function main(): Promise<void> {
         query: options.query,
         ...(options.providerId !== undefined ? { providerId: options.providerId } : {}),
         ...(options.traceContext ? { traceContext: options.traceContext } : {}),
+        ...(options.selectionContext ? { selectionContext: options.selectionContext } : {}),
         options: {
           maxRounds: options.maxRounds,
           confidenceThreshold: options.confidenceThreshold,
@@ -1363,6 +1388,7 @@ async function main(): Promise<void> {
           traceId,
           query: options.followUpQuery,
           ...(options.providerId !== undefined ? { providerId: options.providerId } : {}),
+          ...(options.selectionContext ? { selectionContext: options.selectionContext } : {}),
           options: {
             maxRounds: options.maxRounds,
             confidenceThreshold: options.confidenceThreshold,
@@ -1432,6 +1458,7 @@ async function main(): Promise<void> {
       tracePath: options.tracePath,
       query: options.query,
       preset: options.preset,
+      selectionContext: options.selectionContext,
       traceId,
       sessionId,
       checks,

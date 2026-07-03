@@ -19,6 +19,57 @@ describe('custom skill loading', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  it('loads one requested skill without full registry initialization', async () => {
+    const atomicDir = path.join(tmpDir, 'atomic');
+    const moduleDir = path.join(tmpDir, 'modules', 'app');
+    const fragmentsDir = path.join(tmpDir, 'fragments');
+    await fs.mkdir(atomicDir, { recursive: true });
+    await fs.mkdir(moduleDir, { recursive: true });
+    await fs.mkdir(fragmentsDir, { recursive: true });
+    await fs.writeFile(path.join(fragmentsDir, 'common.sql'), 'SELECT 1 AS fragment_value', 'utf-8');
+    await fs.writeFile(
+      path.join(atomicDir, 'process_identity_resolver.skill.yaml'),
+      [
+        'name: process_identity_resolver',
+        'version: "1"',
+        'type: atomic',
+        'meta:',
+        '  display_name: Process Identity Resolver',
+        '  description: Resolves process identity',
+        'sql: SELECT 1 AS value',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    await fs.writeFile(
+      path.join(moduleDir, 'unrelated.skill.yaml'),
+      [
+        'name: unrelated_module_skill',
+        'version: "1"',
+        'type: atomic',
+        'meta:',
+        '  display_name: Unrelated',
+        '  description: Should not be loaded by the single-skill path',
+        'sql: SELECT 2 AS value',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const registry = new SkillRegistry();
+    const loaded = registry.loadSingleSkill(tmpDir, 'atomic/process_identity_resolver.skill.yaml');
+
+    expect(loaded).toMatchObject({
+      name: 'process_identity_resolver',
+      type: 'atomic',
+      meta: { display_name: 'Process Identity Resolver' },
+    });
+    expect(registry.getSkill('process_identity_resolver')).toBe(loaded);
+    expect(registry.getSkill('unrelated_module_skill')).toBeUndefined();
+    expect(registry.getFragmentCache().get('fragments/common.sql')).toBe('SELECT 1 AS fragment_value');
+    expect(registry.isInitialized()).toBe(false);
+  });
+
   it('loads skills from the custom directory after admin writes', async () => {
     const customDir = path.join(tmpDir, 'custom');
     await fs.mkdir(customDir, { recursive: true });

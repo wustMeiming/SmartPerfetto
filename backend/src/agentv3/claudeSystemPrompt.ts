@@ -15,6 +15,11 @@ import {
   renderTemplate,
 } from './strategyLoader';
 import { DEFAULT_OUTPUT_LANGUAGE, type OutputLanguage } from './outputLanguage';
+import {
+  QUICK_TRIAGE_MAX_CHINESE_CHARS,
+  QUICK_TRIAGE_MAX_CLAIMS,
+  QUICK_TRIAGE_MAX_FACT_BULLETS,
+} from './quickAnswerContract';
 
 /**
  * Rough token estimate for mixed Chinese/English text.
@@ -93,14 +98,22 @@ function buildFocusAppSection(
   focusMethod?: 'battery_stats' | 'oom_adj' | 'frame_timeline' | 'none',
 ): string {
   const isFrameMode = focusMethod === 'frame_timeline';
+  const scoped = focusApps.some(app => app.scopeStartNs !== undefined && app.scopeEndNs !== undefined);
+  const scopeText = scoped ? '当前选区/范围内' : 'trace 期间';
   const appLines = focusApps.map((app, i) => {
     const marker = i === 0 ? ' **(主焦点)** ' : ' ';
     const countLabel = isFrameMode
       ? `${app.switchCount} 帧`
       : `切换 ${app.switchCount} 次`;
-    return `- \`${app.packageName}\`${marker}— 前台时长 ${formatDurationNs(app.totalDurationNs)}，${countLabel}`;
+    const scopeRef = app.scopeStartNs !== undefined && app.scopeEndNs !== undefined
+      ? `；scope_start_ns=${app.scopeStartNs}，scope_end_ns=${app.scopeEndNs}`
+      : '';
+    const evidenceRef = app.evidenceRefId
+      ? `；source_ref=\`Runtime focus app detection\`，evidence_ref_id=\`${app.evidenceRefId}\`，row_index=${app.evidenceRowIndex ?? i}，columns=package_name/foreground_duration_ns/foreground_count${scopeRef}`
+      : '';
+    return `- \`${app.packageName}\`${marker}— 前台时长 ${formatDurationNs(app.totalDurationNs)}，${countLabel}${evidenceRef}`;
   });
-  return `## 焦点应用\n\n以下应用在 trace 期间处于前台：\n${appLines.join('\n')}\n\n默认分析第一个（主焦点）应用。调用 Skill 时，使用 process_name="${focusApps[0].packageName}" 作为参数；系统会在进程级 Skill 执行前自动做身份准入和参数重写。如果准入返回 ambiguous/blocked，先查看候选进程或澄清目标，不要继续基于未验证包名下结论。`;
+  return `## 焦点应用\n\n以下应用在${scopeText}处于前台：\n${appLines.join('\n')}\n\n默认分析第一个（主焦点）应用。调用 Skill 时，使用 process_name="${focusApps[0].packageName}" 作为参数；系统会在进程级 Skill 执行前自动做身份准入和参数重写。如果准入返回 ambiguous/blocked，先查看候选进程或澄清目标，不要继续基于未验证包名下结论。`;
 }
 
 interface SceneStrategySections {
@@ -811,6 +824,7 @@ export function buildQuickSystemPrompt(opts: {
   focusApps?: DetectedFocusApp[];
   focusMethod?: 'battery_stats' | 'oom_adj' | 'frame_timeline' | 'none';
   selectionContext?: SelectionContext;
+  runtimeEvidenceContext?: string;
   quickMemoryContext?: string;
   outputLanguage?: OutputLanguage;
 }): string {
@@ -837,7 +851,11 @@ export function buildQuickSystemPrompt(opts: {
     outputLanguageSection,
     architectureContext,
     focusAppContext,
+    runtimeEvidenceContext: opts.runtimeEvidenceContext ?? '',
     selectionSection,
     quickMemoryContext: opts.quickMemoryContext ?? '',
+    quickTriageMaxChineseChars: QUICK_TRIAGE_MAX_CHINESE_CHARS,
+    quickTriageMaxFactBullets: QUICK_TRIAGE_MAX_FACT_BULLETS,
+    quickTriageMaxClaims: QUICK_TRIAGE_MAX_CLAIMS,
   });
 }

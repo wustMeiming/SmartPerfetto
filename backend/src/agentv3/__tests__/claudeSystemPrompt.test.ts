@@ -52,7 +52,7 @@ jest.mock('../strategyLoader', () => ({
     if (name === 'prompt-role') return '# 角色\n\n你是 SmartPerfetto Android 性能分析专家。';
     if (name === 'prompt-language-zh') return '## 输出语言\n\n所有面向用户的回答必须使用简体中文。';
     if (name === 'prompt-language-en') return '## Output Language\n\nAll user-facing answers MUST be written in English.';
-    if (name === 'prompt-quick') return '# 角色\n\n你是 Android 性能 trace 分析专家。\n\n{{outputLanguageSection}}\n\n{{architectureContext}}\n\n{{focusAppContext}}\n\n{{selectionSection}}\n\n{{quickMemoryContext}}';
+    if (name === 'prompt-quick') return '# 角色\n\n你是 Android 性能 trace 分析专家。\n\n{{outputLanguageSection}}\n\n{{architectureContext}}\n\n{{focusAppContext}}\n\n{{runtimeEvidenceContext}}\n\n{{selectionSection}}\n\n{{quickMemoryContext}}';
     if (name === 'prompt-methodology') return '## 分析方法论\n\n{{sceneStrategy}}';
     if (name === 'comparison-result-methodology') return '## 分析结果对比方法论\n\nMatrix First';
     if (name === 'prompt-output-format') return '## 输出格式\n\n使用 Markdown 格式输出。';
@@ -133,6 +133,52 @@ describe('buildSystemPrompt', () => {
       });
       expect(prompt).toContain('快速模式可复用上下文');
       expect(prompt).toContain('SQL 踩坑记录');
+    });
+
+    it('should inject runtime evidence context into quick prompts', () => {
+      const prompt = buildQuickSystemPrompt({
+        runtimeEvidenceContext: '## 当前 Trace 运行时预证据：进程身份候选\n\n| recommended_process_name_param |\n| --- |\n| com.example.app |',
+      });
+      expect(prompt).toContain('当前 Trace 运行时预证据');
+      expect(prompt).toContain('recommended_process_name_param');
+      expect(prompt).toContain('com.example.app');
+    });
+
+    it('should expose focus app evidence refs in quick prompts', () => {
+      const prompt = buildQuickSystemPrompt({
+        focusApps: [{
+          packageName: 'com.example.app',
+          totalDurationNs: 1_700_000_000,
+          switchCount: 347,
+          evidenceRefId: 'data:focus_app:current:abc123def456',
+          evidenceRowIndex: 0,
+        }],
+        focusMethod: 'frame_timeline',
+      });
+
+      expect(prompt).toContain('data:focus_app:current:abc123def456');
+      expect(prompt).toContain('row_index=0');
+      expect(prompt).toContain('Runtime focus app detection');
+      expect(prompt).toContain('columns=package_name/foreground_duration_ns/foreground_count');
+    });
+
+    it('should label scoped focus app evidence as selected-range context', () => {
+      const prompt = buildQuickSystemPrompt({
+        focusApps: [{
+          packageName: 'com.example.app',
+          totalDurationNs: 800_000_000,
+          switchCount: 1,
+          scopeStartNs: 1_000_000_000,
+          scopeEndNs: 2_000_000_000,
+          evidenceRefId: 'data:focus_app:current:scoped123456',
+          evidenceRowIndex: 0,
+        }],
+        focusMethod: 'battery_stats',
+      });
+
+      expect(prompt).toContain('以下应用在当前选区/范围内处于前台');
+      expect(prompt).toContain('scope_start_ns=1000000000');
+      expect(prompt).toContain('scope_end_ns=2000000000');
     });
   });
 
