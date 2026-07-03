@@ -41,6 +41,14 @@ agent skill runtime.
 | `perfetto-infra-querying-traces` | SQL stdlib docs/lineage lookup, auto-include validator, MCP SQL guidance | Implemented |
 | `perfetto-infra-getting-trace-processor` | Existing local `trace_processor_shell` pool and setup docs; no runtime skill copy | Documented |
 | `perfetto-workflow-android-heap-dump` | `android_heap_graph_summary`, `android_bitmap_memory_per_process`, memory strategy heap graph guidance | Implemented |
+| `perfetto` v57 Agent Skill: `workflows/gpu/gpu_info.md` | `gpu_v57_ai_diagnostics` inventory step; complements existing `gpu_analysis` and `gpu_metrics` | Implemented |
+| `perfetto` v57 Agent Skill: `workflows/gpu/timeline_occupancy.md` | `gpu_v57_ai_diagnostics` timeline occupancy and idle-gap steps | Implemented |
+| `perfetto` v57 Agent Skill: `workflows/gpu/frequency_residency.md` | `gpu_v57_ai_diagnostics` busy-frequency residency, DVFS ramp, and sustained throttle steps | Implemented |
+| `perfetto` v57 Agent Skill: GPU compute/NVIDIA workflows | Existing generic GPU skills remain available; NVIDIA counter-specific scripts are not promoted without fixture/schema coverage | Deferred |
+| `perfetto` v57 Agent Skill: Android memory heap dump/caching/clustering scripts | `android_heap_graph_summary`, `android_heap_graph_leak_candidates`, `android_bitmap_memory_per_process`, `android_memory_v57_ai_diagnostics` repeated-object and size-frequency steps | Implemented |
+| `perfetto` v57 Agent Skill: Java/native allocation profile scripts | `native_heap_breakdown`, `android_memory_v57_ai_diagnostics` heap-profile hotspot step | Implemented |
+| v57 `linux.systemd_journald` stdlib | `linux_systemd_journald_analysis` | Implemented |
+| v57 `state` table / state tracks | `trace_state_track_summary`; existing `state_timeline` remains the higher-level interaction timeline | Implemented |
 
 ## Acceptance
 
