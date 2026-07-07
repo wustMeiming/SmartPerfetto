@@ -17,6 +17,27 @@ Authorization: Bearer <token>
 | `GET` | `/health` | Backend status, runtime, model configuration, auth status |
 | `GET` | `/debug` | Development diagnostics and legacy API usage snapshot |
 
+`/health` returns top-level `aiPolicy` and mirrors `aiEnabled` plus
+`disabledReason` under `aiEngine` so the frontend and CLI can decide whether
+model-backed analysis is allowed. When `aiPolicy.aiEnabled=false`, trace
+upload/read, SQL, reports, Provider configuration/switching, and deterministic
+Skills remain available; model analysis, resume, scene reconstruction start,
+Provider tests, and LLM Skill steps return `403`:
+
+```json
+{
+  "success": false,
+  "code": "AI_DISABLED",
+  "retryable": false,
+  "feature": "agent_analyze",
+  "aiPolicy": {
+    "schemaVersion": 1,
+    "aiEnabled": false,
+    "source": "env"
+  }
+}
+```
+
 ## Trace Management
 
 | Method | Path | Purpose |
@@ -52,6 +73,139 @@ for local and compatibility flows.
 | `/api/workspaces/:workspaceId/analysis-results` | Analysis-result snapshot list, read, and update |
 | `/api/workspaces/:workspaceId/windows` | Frontend window heartbeat and active-window state |
 | `/api/workspaces/:workspaceId/comparisons` | Multi-result comparison create, read, stream, and export |
+| `/api/workspaces/:workspaceId/trace-config` | Side-effect-free trace config proposals |
+| `/api/workspaces/:workspaceId/skill-packs` | Local-directory Skill Pack preview, install, enable/disable, and remove |
+| `/api/workspaces/:workspaceId/batch-traces` | Deterministic Skill batch over workspace trace sets, report export, snapshot promotion, and comparison bridge |
+
+## Skill Pack API
+
+Base path: `/api/workspaces/:workspaceId/skill-packs`
+
+All endpoints require `runtime:manage`. The first release accepts only a local
+directory selected by an admin. Remote URLs, auto-sync, and archive unpacking
+are not supported. Install reruns preview, then copies only manifest-declared
+Skill YAML, SQL fragments, and docs into
+`backendDataPath('skill-packs', tenantId, workspaceId, packId, version)`.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/` | List installed Skill Packs for the current workspace |
+| `POST` | `/preview` | Validate a local directory and return manifest, Skill IDs, fragments, docs, and errors without writing managed storage |
+| `POST` | `/install` | Rerun preview, copy declared assets, and write `skill_registry_entries` metadata |
+| `PATCH` | `/:packId` | Send `{ "enabled": true | false }` to enable or disable an installed pack |
+| `DELETE` | `/:packId` | Disable the pack and remove only its managed copy; built-in Skills are untouched |
+
+```bash
+curl -X POST http://localhost:3000/api/workspaces/default-workspace/skill-packs/preview \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{ "sourcePath": "/absolute/path/to/local-skill-pack" }'
+```
+
+Each `smartperfetto-skill-pack.json` asset must declare `kind`, `path`,
+`sha256`, and `sizeBytes`. Allowed roots are `atomic/`, `composite/`, `deep/`,
+`system/`, `comparison/`, `modules/`, `pipelines/`, `fragments/`, and `docs/`.
+`strategies/`, `vendors/`, `custom/`, hidden files, symlinks, and executable
+extensions are rejected. Skill IDs and SQL fragment keys cannot override
+built-in content.
+
+## Batch Trace API
+
+Base path: `/api/workspaces/:workspaceId/batch-traces`
+
+The first release executes a deterministic YAML Skill batch synchronously within
+the request. Inputs must be existing `traceId` values in the current workspace;
+uploading trace sets still goes through the workspace trace upload API. This API
+does not call an LLM, execute raw batch SQL, create remote workers, provide a
+browser UI, or automatically write analysis-result snapshots. Results enter
+comparison only after explicit promotion.
+
+Synchronous HTTP create accepts at most 20 traces by default, configurable with
+`SMARTPERFETTO_BATCH_TRACE_API_SYNC_MAX_TRACES`. A process can run at most 2
+HTTP batch creates at once by default, configurable with
+`SMARTPERFETTO_BATCH_TRACE_API_MAX_IN_FLIGHT_RUNS`; excess requests return
+`429` with `batch_trace_api_busy`. Offline CLI batch trace count remains governed
+by `SMARTPERFETTO_BATCH_TRACE_MAX_TRACES`.
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| `POST` | `/` | `agent:run` | Create a batch run with `{ skillId, traceIds, params?, maxConcurrency? }` |
+| `GET` | `/` | `report:read` | List batch runs for the current workspace |
+| `GET` | `/:runId` | `report:read` | Read one batch run |
+| `GET` | `/:runId/report/export` | `report:read` | Export an HTML batch report |
+| `POST` | `/:runId/promote-snapshots` | `analysis_result:create` | Promote selected completed per-trace results into analysis-result snapshots |
+| `POST` | `/:runId/comparisons` | `comparison:create` | Promote snapshots when needed, then create a normal analysis-result comparison |
+
+Create example:
+
+```bash
+curl -X POST http://localhost:3000/api/workspaces/default-workspace/batch-traces \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{
+    "skillId": "startup_analysis",
+    "traceIds": ["trace-a", "trace-b"],
+    "params": { "package": "com.example" },
+    "maxConcurrency": 2
+  }'
+```
+
+The response is `{ "success": true, "run": BatchTraceRunV1 }`. `run.perTrace`
+preserves per-trace completion/failure state, diagnostics, metrics, and evidence
+envelope IDs. `run.aggregate` preserves statistics, outlier ordinals, missing
+metric limitations, and failed-trace limitations. Standard startup / scrolling
+metrics are mapped to comparison metric keys; unmapped numeric values remain
+batch-local metrics.
+
+Promotion selects all completed traces by default, or accepts
+`{ "ordinals": [0, 2] }`. Failed or unsupported per-trace results are never
+promoted. The comparison bridge accepts
+`{ "ordinals": [0, 1], "baselineSnapshotId": "...", "metricKeys": ["startup.total_ms"] }`;
+when `ordinals` is omitted it uses all completed results. The comparison is
+stored through the normal `/api/workspaces/:workspaceId/comparisons` product
+path, not a private batch-only comparison format.
+
+## Trace Config Proposal API
+
+Base path: `/api/workspaces/:workspaceId/trace-config`
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/proposals` | Generate a deterministic Android trace config proposal from natural language |
+
+The endpoint requires `trace:write`, but it does not call an LLM, ADB, or
+tracebox, and it does not record the device. `proposal.config.textproto` is
+rendered by the same renderer used by `smp capture config`.
+
+```bash
+curl -X POST http://localhost:3000/api/workspaces/default-workspace/trace-config/proposals \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request": "debug startup first frame jank",
+    "app": "com.example.app",
+    "durationSeconds": 10,
+    "categories": ["dalvikviktime"]
+  }'
+```
+
+Example response:
+
+```json
+{
+  "success": true,
+  "proposal": {
+    "schemaVersion": 1,
+    "source": "deterministic",
+    "target": "android",
+    "preset": "startup",
+    "confidence": "high",
+    "command": {
+      "config": ["smp", "capture", "config", "--preset", "startup"],
+      "capture": ["smp", "capture", "android", "--preset", "startup"]
+    }
+  }
+}
+```
 
 ## Agent v1 Main Path
 
@@ -103,6 +257,13 @@ The response returns `sessionId`. Then subscribe:
 ```bash
 curl -N http://localhost:3000/api/agent/v1/<sessionId>/stream
 ```
+
+The terminal `analysis_completed` event can include `analysisReceipt`,
+`traceConfigProposal`, and `uiActionProposals`. `uiActionProposals` only
+contains safe UI proposals derived from DataEnvelope evidence and column click
+metadata, such as navigating to a time range, opening an evidence table, or
+pinning evidence. Clients must execute them only after an explicit user click;
+they are not automatic commands.
 
 Dual-trace comparison requires `referenceTraceId`, and it must be different from `traceId`.
 
@@ -203,7 +364,11 @@ Legacy base path: `/api/v1/providers`. New integrations should prefer
 | `POST` | `/:id/activate` | Activate a provider |
 | `POST` | `/:id/runtime` | Update runtime pinning |
 | `POST` | `/:id/rotate-secret` | Rotate provider secret |
-| `POST` | `/:id/test` | Test a provider |
+| `POST` | `/:id/test` | Test a provider; returns `AI_DISABLED` without provider network calls when AI is disabled |
+
+AI disabled only blocks Provider connection tests. Provider profile list, create,
+update, delete, activate, deactivate, runtime pinning, and secret rotation remain
+configuration operations and continue to work.
 
 ## Codebase / RAG API
 
@@ -243,6 +408,16 @@ Analysis-result snapshot base path: `/api/workspaces/:workspaceId/analysis-resul
 | `GET` | `/` | List snapshots |
 | `GET` | `/:snapshotId` | Read a snapshot |
 | `PATCH` | `/:snapshotId` | Update snapshot metadata |
+| `POST` | `/:snapshotId/similarity` | Find similar historical snapshots, with optional case-library hints |
+
+`POST /:snapshotId/similarity` accepts `{ "limit": 5, "includeCases": false }`.
+`limit` must be between 1 and 20; `includeCases` defaults to `false`. The
+response includes `signature`, `snapshotHints`, `caseHints`, merged `hints`,
+and `count`. Every hint is a `SimilarityHintV1` with
+`allowedUse: "navigation_hint_only"`; it is a navigation/review aid, not
+diagnostic evidence or root-cause proof for the current trace. The endpoint
+reuses the current workspace scope, `analysis_result:read`, and the snapshot
+repository readability rules.
 
 ## Reports and Export
 

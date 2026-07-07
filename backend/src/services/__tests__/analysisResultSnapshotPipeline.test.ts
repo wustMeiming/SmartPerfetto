@@ -74,6 +74,53 @@ describe('analysis result snapshot pipeline', () => {
       },
       confidence: 0.7,
       dataEnvelopes: [envelope()],
+      uiActionProposals: [{
+        schemaVersion: 1,
+        id: 'ui-navigate_timeline-1',
+        kind: 'navigate_timeline',
+        title: '跳到启动',
+        reason: '来自启动证据',
+        source: { evidenceRefId: 'data:startup:summary:123' },
+        payload: { ts: '123456789' },
+        requiresConfirmation: true,
+      }],
+      analysisReceipt: {
+        schemaVersion: 1,
+        runId: 'run-a',
+        sessionId: 'session-a',
+        traceId: 'trace-a',
+        mode: 'auto',
+        resolvedMode: 'full',
+        providerId: null,
+        generatedAt: 1234,
+        traceEvidence: {
+          sqlCount: 1,
+          skillCount: 0,
+          dataEnvelopeCount: 1,
+          artifactCount: 1,
+          evidenceRefCount: 1,
+        },
+        nonEvidenceContext: {
+          frontendPrequeryCount: 0,
+          memoryHintCount: 0,
+          conversationContextCount: 0,
+          strategyHintCount: 0,
+        },
+        claimAudit: {
+          totalClaims: 1,
+          verifiedClaims: 1,
+          unsupportedClaims: 0,
+          uncertainClaims: 0,
+        },
+        qualityGates: {
+          finalReportContract: 'passed',
+          claimVerification: 'not_applicable',
+          identityResolution: 'not_applicable',
+        },
+        outputs: {
+          reportId: 'report-a',
+        },
+      },
       createdAt: 1234,
     });
 
@@ -94,6 +141,15 @@ describe('analysis result snapshot pipeline', () => {
       headline: '启动耗时偏高。',
       confidence: 0.7,
       partialReasons: expect.arrayContaining(['No normalized comparison metrics extracted yet']),
+      analysisReceipt: expect.objectContaining({
+        schemaVersion: 1,
+        runId: 'run-a',
+        traceId: 'trace-a',
+      }),
+      uiActionProposals: [expect.objectContaining({
+        id: 'ui-navigate_timeline-1',
+        kind: 'navigate_timeline',
+      })],
     }));
     expect(snapshot?.conclusionContract).toEqual(expect.objectContaining({
       claims: [expect.objectContaining({ id: 'Q1' })],

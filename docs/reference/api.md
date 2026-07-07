@@ -16,6 +16,25 @@ Authorization: Bearer <token>
 | `GET` | `/health` | 后端状态、运行时、模型配置、鉴权状态 |
 | `GET` | `/debug` | 开发调试信息，包含 legacy API 使用快照 |
 
+`/health` 会返回顶层 `aiPolicy`，并在 `aiEngine` 中同步 `aiEnabled` 与
+`disabledReason`，用于前端和 CLI 判断当前是否允许模型分析。`aiPolicy.aiEnabled=false`
+时，trace 上传/读取、SQL、报告、Provider 配置/切换和确定性 Skill 仍可用；模型分析、
+resume、场景还原启动、Provider test 和 LLM Skill step 会返回 `403`：
+
+```json
+{
+  "success": false,
+  "code": "AI_DISABLED",
+  "retryable": false,
+  "feature": "agent_analyze",
+  "aiPolicy": {
+    "schemaVersion": 1,
+    "aiEnabled": false,
+    "source": "env"
+  }
+}
+```
+
 ## Trace 管理
 
 | 方法 | 路径 | 说明 |
@@ -49,6 +68,131 @@ curl -F "file=@trace.pftrace" http://localhost:3000/api/traces/upload
 | `/api/workspaces/:workspaceId/analysis-results` | 分析结果 snapshot 列表、读取、更新 |
 | `/api/workspaces/:workspaceId/windows` | 前端窗口 heartbeat 与 active window 状态 |
 | `/api/workspaces/:workspaceId/comparisons` | 多分析结果 comparison 创建、读取、stream、导出 |
+| `/api/workspaces/:workspaceId/trace-config` | 无副作用 trace config proposal |
+| `/api/workspaces/:workspaceId/skill-packs` | 本地目录型 Skill Pack 预检、安装、启停和移除 |
+| `/api/workspaces/:workspaceId/batch-traces` | workspace trace set 的确定性 Skill batch、报告导出、snapshot promotion 和 comparison bridge |
+
+## Skill Pack API
+
+Base path: `/api/workspaces/:workspaceId/skill-packs`
+
+所有接口需要 `runtime:manage` 权限。第一版只支持管理员选择本机目录作为来源；
+不支持远程 URL、自动同步或 archive 解包。安装会重新执行 preview，通过后只把
+manifest 声明的 Skill YAML、SQL fragment 和 docs 复制到受管目录
+`backendDataPath('skill-packs', tenantId, workspaceId, packId, version)`。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/` | 列出当前 workspace 已安装的 Skill Pack |
+| `POST` | `/preview` | 预检本地目录，返回 manifest、Skill ID、fragment、docs 和错误列表，不写入受管目录 |
+| `POST` | `/install` | 重新预检本地目录，成功后复制声明资产并写入 `skill_registry_entries` |
+| `PATCH` | `/:packId` | 传 `{ "enabled": true | false }` 启用或禁用已安装 pack |
+| `DELETE` | `/:packId` | 禁用 pack 并删除受管目录副本，内置 Skill 不受影响 |
+
+```bash
+curl -X POST http://localhost:3000/api/workspaces/default-workspace/skill-packs/preview \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{ "sourcePath": "/absolute/path/to/local-skill-pack" }'
+```
+
+`smartperfetto-skill-pack.json` 中的每个 asset 必须声明 `kind`、`path`、
+`sha256` 和 `sizeBytes`。允许的根目录是 `atomic/`、`composite/`、
+`deep/`、`system/`、`comparison/`、`modules/`、`pipelines/`、`fragments/`
+和 `docs/`。`strategies/`、`vendors/`、`custom/`、隐藏文件、symlink 和可执行
+扩展会被拒绝。Skill ID 与 SQL fragment key 不能覆盖内置内容。
+
+## Batch Trace API
+
+Base path: `/api/workspaces/:workspaceId/batch-traces`
+
+第一版在请求内同步执行确定性 YAML Skill batch。输入必须是当前 workspace 中已经存在的
+`traceId`；上传 trace set 仍使用 workspace trace upload API。该 API 不调用 LLM、
+不执行 raw batch SQL、不创建远程 worker、不提供浏览器 UI，也不会自动把结果写入
+analysis-result snapshot。需要进入 comparison 时必须显式 promotion。
+
+同步 HTTP create 默认最多接收 20 条 trace，可通过
+`SMARTPERFETTO_BATCH_TRACE_API_SYNC_MAX_TRACES` 调整。进程内同时执行的 HTTP
+batch create 默认最多 2 个，可通过
+`SMARTPERFETTO_BATCH_TRACE_API_MAX_IN_FLIGHT_RUNS` 调整；超过时返回 `429`
+和 `batch_trace_api_busy`。离线 CLI batch 的总 trace 上限仍由
+`SMARTPERFETTO_BATCH_TRACE_MAX_TRACES` 控制。
+
+| 方法 | 路径 | 权限 | 说明 |
+|---|---|---|---|
+| `POST` | `/` | `agent:run` | 创建 batch run，body 为 `{ skillId, traceIds, params?, maxConcurrency? }` |
+| `GET` | `/` | `report:read` | 列出当前 workspace 的 batch runs |
+| `GET` | `/:runId` | `report:read` | 读取单个 batch run |
+| `GET` | `/:runId/report/export` | `report:read` | 导出 HTML batch report |
+| `POST` | `/:runId/promote-snapshots` | `analysis_result:create` | 将选中的 completed per-trace 结果提升为 analysis-result snapshots |
+| `POST` | `/:runId/comparisons` | `comparison:create` | 必要时先提升 snapshot，再创建普通 analysis-result comparison |
+
+创建示例：
+
+```bash
+curl -X POST http://localhost:3000/api/workspaces/default-workspace/batch-traces \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{
+    "skillId": "startup_analysis",
+    "traceIds": ["trace-a", "trace-b"],
+    "params": { "package": "com.example" },
+    "maxConcurrency": 2
+  }'
+```
+
+响应包含 `{ "success": true, "run": BatchTraceRunV1 }`。`run.perTrace`
+保留每条 trace 的完成/失败状态、diagnostics、metric 列表和证据 envelope ID；
+`run.aggregate` 保留统计值、outlier ordinals、missing metric 与 failed trace
+限制说明。标准 startup / scrolling 指标会映射为 comparison metric key，未映射数字值
+只作为 batch-local metric 保存。
+
+Promotion 默认选择所有 completed trace，也可以传 `{ "ordinals": [0, 2] }`。
+失败或 unsupported 的 per-trace 结果不会被提升。Comparison bridge 接受
+`{ "ordinals": [0, 1], "baselineSnapshotId": "...", "metricKeys": ["startup.total_ms"] }`；
+未传 `ordinals` 时使用所有 completed 结果。comparison 仍写入普通
+`/api/workspaces/:workspaceId/comparisons` 存储和报告路径，不创建 batch-only 私有对比格式。
+
+## Trace Config Proposal API
+
+Base path: `/api/workspaces/:workspaceId/trace-config`
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/proposals` | 根据自然语言生成确定性的 Android trace config proposal |
+
+该接口需要 `trace:write` 权限，但不会调用 LLM、ADB 或 tracebox，也不会录制设备。
+响应中的 `proposal.config.textproto` 来自 `smp capture config` 使用的同一个 renderer。
+
+```bash
+curl -X POST http://localhost:3000/api/workspaces/default-workspace/trace-config/proposals \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request": "debug startup first frame jank",
+    "app": "com.example.app",
+    "durationSeconds": 10,
+    "categories": ["dalvikviktime"]
+  }'
+```
+
+响应示例：
+
+```json
+{
+  "success": true,
+  "proposal": {
+    "schemaVersion": 1,
+    "source": "deterministic",
+    "target": "android",
+    "preset": "startup",
+    "confidence": "high",
+    "command": {
+      "config": ["smp", "capture", "config", "--preset", "startup"],
+      "capture": ["smp", "capture", "android", "--preset", "startup"]
+    }
+  }
+}
+```
 
 ## Agent v1 主路径
 
@@ -98,6 +242,11 @@ curl -X POST http://localhost:3000/api/agent/v1/analyze \
 ```bash
 curl -N http://localhost:3000/api/agent/v1/<sessionId>/stream
 ```
+
+终态 `analysis_completed` 事件可能携带 `analysisReceipt`、
+`traceConfigProposal` 和 `uiActionProposals`。`uiActionProposals` 只包含从
+DataEnvelope 证据和列点击元数据派生的安全 UI 提案，例如跳转到时间范围、打开证据表
+或固定证据；客户端必须等待用户点击后再执行，不能把它当成自动命令。
 
 支持的 `selectionContext`：
 
@@ -220,7 +369,10 @@ Legacy base path: `/api/v1/providers`。新集成优先使用
 | `POST` | `/:id/activate` | 激活 provider |
 | `POST` | `/:id/runtime` | 更新 provider runtime pinning |
 | `POST` | `/:id/rotate-secret` | 轮换 provider secret |
-| `POST` | `/:id/test` | 测试 provider |
+| `POST` | `/:id/test` | 测试 provider；AI disabled 时返回 `AI_DISABLED` 且不发起 provider 网络请求 |
+
+AI disabled 只阻断 provider connection test。Provider profile 的列表、创建、更新、
+删除、激活、停用、runtime pinning 和 secret rotation 仍是配置操作，可以继续使用。
 
 ## Codebase / RAG API
 
@@ -260,6 +412,15 @@ Analysis-result snapshot base path: `/api/workspaces/:workspaceId/analysis-resul
 | `GET` | `/` | 列出 snapshot |
 | `GET` | `/:snapshotId` | 读取 snapshot |
 | `PATCH` | `/:snapshotId` | 更新 snapshot 元数据 |
+| `POST` | `/:snapshotId/similarity` | 查询相似历史 snapshot，可选 case-library hint |
+
+`POST /:snapshotId/similarity` body 支持 `{ "limit": 5, "includeCases": false }`。
+`limit` 范围是 1 到 20；`includeCases` 默认 `false`。响应包含
+`signature`、`snapshotHints`、`caseHints`、合并的 `hints` 和 `count`。每个
+hint 都是 `SimilarityHintV1`，并带有
+`allowedUse: "navigation_hint_only"`；它只能作为导航/回看提示，不能作为当前
+trace 的诊断证据或 root-cause 证明。接口复用当前 workspace scope、
+`analysis_result:read` 权限和 snapshot repository 的可读性规则。
 
 ## 报告与导出
 

@@ -66,6 +66,9 @@ import enterpriseRuntimeDashboardRoutes from './routes/enterpriseRuntimeDashboar
 import analysisResultRoutes from './routes/analysisResultRoutes';
 import workspaceWindowRoutes from './routes/workspaceWindowRoutes';
 import comparisonRoutes from './routes/comparisonRoutes';
+import traceConfigProposalRoutes from './routes/traceConfigProposalRoutes';
+import skillPackRoutes from './routes/skillPackRoutes';
+import batchTraceRoutes from './routes/batchTraceRoutes';
 import traceProcessorProxyRoutes, { handleTraceProcessorProxyUpgrade } from './routes/traceProcessorProxyRoutes';
 import {authenticate} from './middleware/auth';
 import { collectEnvCredentialSources } from './agentRuntime/envCredentialSources';
@@ -181,6 +184,21 @@ app.use(
   '/api/workspaces/:workspaceId/comparisons',
   ...workspaceRouteContextMiddleware,
   comparisonRoutes,
+);
+app.use(
+  '/api/workspaces/:workspaceId/trace-config',
+  ...workspaceRouteContextMiddleware,
+  traceConfigProposalRoutes,
+);
+app.use(
+  '/api/workspaces/:workspaceId/skill-packs',
+  ...workspaceRouteContextMiddleware,
+  skillPackRoutes,
+);
+app.use(
+  '/api/workspaces/:workspaceId/batch-traces',
+  ...workspaceRouteContextMiddleware,
+  batchTraceRoutes,
 );
 app.use(
   '/api/traces',

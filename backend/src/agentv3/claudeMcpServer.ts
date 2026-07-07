@@ -10,8 +10,9 @@ import * as path from 'path';
 
 import type { TraceProcessorService } from '../services/traceProcessorService';
 import type { SkillExecutor } from '../services/skillEngine/skillExecutor';
-import { getSkillAnalysisAdapter } from '../services/skillEngine/skillAnalysisAdapter';
-import { skillRegistry } from '../services/skillEngine/skillLoader';
+import { createSkillAnalysisAdapter } from '../services/skillEngine/skillAnalysisAdapter';
+import { skillRegistry, type SkillRegistry } from '../services/skillEngine/skillLoader';
+import { getWorkspaceSkillRegistry } from '../services/skillPacks/workspaceSkillRegistryProvider';
 import { createArchitectureDetector } from '../agent/detectors/architectureDetector';
 import { createDataEnvelope, displayResultToEnvelope } from '../types/dataContract';
 import type { DisplayResult as SkillDisplayResult } from '../services/skillEngine/types';
@@ -64,6 +65,9 @@ import { isConclusionLikePlanPhase } from './planPhaseSemantics';
 import { formatToolCallNarration } from './toolNarration';
 import type { ArtifactStore, CompactArtifactSummary } from './artifactStore';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from './outputLanguage';
+import { buildSqlQueryReview } from '../services/queryReview/queryReviewBuilder';
+import { buildSkillQueryReview } from '../services/queryReview/skillQueryReviewBuilder';
+import { compactQueryReviewForToolResponse, type QueryReviewV1 } from '../types/queryReviewContract';
 import { RagStore } from '../services/ragStore';
 import {
   BaselineStore,
@@ -77,6 +81,17 @@ import {
 import {ProjectMemory} from './projectMemory';
 import {CaseLibrary} from '../services/caseLibrary';
 import { createCaseRetriever } from '../services/caseEvolution/caseRecommendationRetriever';
+import {
+  DEFAULT_DEV_USER_ID,
+  DEFAULT_TENANT_ID,
+  DEFAULT_WORKSPACE_ID,
+} from '../middleware/auth';
+import { openEnterpriseDb } from '../services/enterpriseDb';
+import { createAnalysisResultSnapshotRepository } from '../services/analysisResultSnapshotStore';
+import {
+  createTraceSimilarityService,
+  type TraceSimilaritySnapshotRepository,
+} from '../services/similarity/similarityService';
 import {
   enterpriseKnowledgeStoreEnabled,
   type KnowledgeScope,
@@ -1035,6 +1050,7 @@ export interface ClaudeMcpServerOptions {
   caseLibrary?: CaseLibrary;
   /** Test hook / alternate case RAG store. */
   ragStore?: RagStore;
+  analysisResultSnapshotRepository?: TraceSimilaritySnapshotRepository;
 }
 
 /**
@@ -1045,7 +1061,7 @@ export interface ClaudeMcpServerOptions {
 export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
   const { traceId, traceProcessorService, skillExecutor, packageName, emitUpdate, onSkillResult, analysisNotes, artifactStore } = options;
   const recentSqlErrors: SqlErrorFixPair[] = options.recentSqlErrors || [];
-  const skillAdapter = getSkillAnalysisAdapter(traceProcessorService);
+  const skillAdapter = createSkillAnalysisAdapter(traceProcessorService);
   const watchdogRef = options.watchdogWarning;
   const skillNotesBudget = options.skillNotesBudget;
   const outputLanguage = options.outputLanguage ?? DEFAULT_OUTPUT_LANGUAGE;
@@ -1060,6 +1076,25 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     sessionId: options.sessionId ?? traceId,
     hasCodebaseAccess: codeAwareMode !== 'off' && codebaseIds.length > 0,
   };
+  let boundSkillRegistryFingerprint: string | undefined;
+
+  async function bindSkillRuntimeRegistry(): Promise<SkillRegistry> {
+    if (!knowledgeScope?.tenantId || !knowledgeScope.workspaceId) {
+      return skillRegistry;
+    }
+    const handle = await getWorkspaceSkillRegistry({
+      tenantId: knowledgeScope.tenantId,
+      workspaceId: knowledgeScope.workspaceId,
+      userId: knowledgeScope.userId,
+    });
+    if (boundSkillRegistryFingerprint !== handle.registryFingerprint) {
+      skillAdapter.setSkillRegistry(handle.registry, handle.registryFingerprint);
+      skillExecutor.replaceRegisteredSkills(handle.registry.getAllSkills());
+      skillExecutor.setFragmentRegistry(handle.registry.getFragmentCache());
+      boundSkillRegistryFingerprint = handle.registryFingerprint;
+    }
+    return handle.registry;
+  }
 
   function buildArchitectureTriggerContext(info: Partial<ArchitectureInfo> | undefined | null): string[] {
     if (!info) return [];
@@ -2358,7 +2393,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           });
         }
 
-        let emittedEvidence: { evidenceRefId: string; queryHash: string } | undefined;
+        let emittedEvidence: { evidenceRefId: string; queryHash: string; queryReview?: QueryReviewV1 } | undefined;
 
         if (emitUpdate && !success && result.error) {
           emitUpdate({
@@ -2425,7 +2460,14 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
               producer,
               processIdentityWarning,
               sqlArtifact?.artifactId,
+              {
+                durationMs: result.durationMs,
+                truncated: false,
+                sqlRewrites,
+                toolName: 'execute_sql',
+              },
             );
+            updateSqlArtifactQueryReview(artifactStore, sqlArtifact, emittedEvidence.queryReview);
           }
           return {
             content: [{
@@ -2450,6 +2492,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
                 traceId: traceProvenance.traceId,
                 traceProvenance,
                 evidenceRefId: emittedEvidence?.evidenceRefId,
+                ...(emittedEvidence?.queryReview ? { queryReview: compactQueryReviewForToolResponse(emittedEvidence.queryReview) } : {}),
                 sourceToolCallId: producer.sourceToolCallId,
                 paramsHash: producer.paramsHash,
                 planPhaseId: producer.planPhaseId,
@@ -2463,7 +2506,24 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         }
 
         if (emitUpdate && success && result.columns.length > 0) {
-          emittedEvidence = emitSqlDataEnvelope(emitUpdate, result.columns, rows, finalSql, injected, traceProvenance, producer, processIdentityWarning);
+          emittedEvidence = emitSqlDataEnvelope(
+            emitUpdate,
+            result.columns,
+            rows,
+            finalSql,
+            injected,
+            traceProvenance,
+            producer,
+            processIdentityWarning,
+            undefined,
+            {
+              durationMs: result.durationMs,
+              truncated,
+              sqlRewrites,
+              toolName: 'execute_sql',
+              rowCount: result.rows.length,
+            },
+          );
         }
 
         return {
@@ -2480,6 +2540,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
               traceId: traceProvenance.traceId,
               traceProvenance,
               evidenceRefId: emittedEvidence?.evidenceRefId,
+              ...(emittedEvidence?.queryReview ? { queryReview: compactQueryReviewForToolResponse(emittedEvidence.queryReview) } : {}),
               sourceToolCallId: producer.sourceToolCallId,
               paramsHash: producer.paramsHash,
               planPhaseId: producer.planPhaseId,
@@ -2631,24 +2692,24 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         }
       }
 
-      // Guard: metadata-only skills are not executable single-trace analysis skills
-      const skillDef = skillRegistry.getSkill(skillId);
-      if (skillDef?.type === 'pipeline_definition' || skillDef?.type === 'comparison') {
-        const useHint = skillDef.type === 'comparison'
-          ? 'It describes analysis result comparison. Use the multi-trace comparison API/tools instead.'
-          : 'Use `detect_architecture` to detect the rendering pipeline, or call a composite analysis skill like `scrolling_analysis`, `gpu_analysis`, etc.';
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              success: false,
-              error: `Skill "${skillId}" is metadata-only and cannot be used for single-trace analysis. ${useHint}`,
-            }),
-          }],
-        };
-      }
-
       try {
+        const effectiveSkillRegistry = await bindSkillRuntimeRegistry();
+        const skillDef = effectiveSkillRegistry.getSkill(skillId);
+        if (skillDef?.type === 'pipeline_definition' || skillDef?.type === 'comparison') {
+          const useHint = skillDef.type === 'comparison'
+            ? 'It describes analysis result comparison. Use the multi-trace comparison API/tools instead.'
+            : 'Use `detect_architecture` to detect the rendering pipeline, or call a composite analysis skill like `scrolling_analysis`, `gpu_analysis`, etc.';
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                success: false,
+                error: `Skill "${skillId}" is metadata-only and cannot be used for single-trace analysis. ${useHint}`,
+              }),
+            }],
+          };
+        }
+
         const effectiveParams = normalizeSkillParams(params, packageName);
         const producer = createEvidenceProducerContext(
           'invoke_skill',
@@ -2707,6 +2768,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         let diagnosticsArtifactId: string | undefined;
         let synthesizeArtifacts: Array<{ artifactId: string; stepId: string; rowCount: number; columns: string[] }> | undefined;
         const artifactIdsByStepId = new Map<string, string>();
+        const queryReviewsByStepId = new Map<string, QueryReviewV1>();
         if (artifactStore && result.displayResults?.length) {
           artifacts = result.displayResults.map(dr => {
             const evidenceRefId = stableSkillEvidenceRefId(
@@ -2731,6 +2793,18 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
               paramsHash: producer.paramsHash,
               identityResolution: result.identityResolution,
             });
+            const queryReview = buildSkillQueryReview({
+              skillId: result.skillId || skillId,
+              displayResult: dr as SkillDisplayResult,
+              traceProvenance: skillTraceProvenance,
+              producer,
+              artifactId: artId,
+              evidenceRefId,
+            });
+            if (queryReview) {
+              artifactStore.updateQueryReview(artId, queryReview);
+              if (dr.stepId) queryReviewsByStepId.set(dr.stepId, queryReview);
+            }
             if (dr.stepId) artifactIdsByStepId.set(dr.stepId, artId);
             const summary = artifactStore.generateCompactSummary(artId);
             const preview = summary?.preview ?? previewFromColumnarData(dr.data);
@@ -2800,6 +2874,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             producer,
             result.identityResolution,
             artifactIdsByStepId,
+            queryReviewsByStepId,
           );
         }
 
@@ -2828,7 +2903,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         let vendorOverrideHint: { vendor: string; displayName?: string; additionalStepIds: string[] } | undefined;
         const detectedVendor = options.cachedVendor;
         if (detectedVendor && detectedVendor !== 'aosp' && result.success) {
-          const vendorOverride = skillRegistry.getVendorOverride(skillId, detectedVendor);
+          const vendorOverride = effectiveSkillRegistry.getVendorOverride(skillId, detectedVendor);
           if (vendorOverride && vendorOverride.additionalSteps.length > 0) {
             vendorOverrideHint = {
               vendor: vendorOverride.vendor,
@@ -2943,6 +3018,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     },
     async ({ category }) => {
       try {
+        await bindSkillRuntimeRegistry();
         const allSkills = await skillAdapter.listSkills();
         const filtered = category
           ? allSkills.filter(s =>
@@ -2961,6 +3037,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
                 description: s.description,
                 type: s.type,
                 keywords: s.keywords.slice(0, 5),
+                origin: s.origin,
               }))
             ),
           }],
@@ -4070,6 +4147,90 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           text: JSON.stringify({success: true, hits, count: hits.length}),
         }],
       };
+    },
+    { annotations: { readOnlyHint: true } },
+  );
+
+  const recallSimilarResult = tool(
+    'recall_similar_result',
+    'Recall similar persisted analysis-result snapshots for navigation. Read-only. Returns navigation_hint_only hints; not diagnostic evidence.',
+    {
+      snapshot_id: z.string().describe('Current analysis result snapshot id.'),
+      include_cases: z.boolean().optional().describe('Also include published case-library hints when structured evidence is available (default false).'),
+      top_k: z.number().int().min(1).max(20).optional().describe('Maximum hints returned, default 5.'),
+    },
+    async ({ snapshot_id, include_cases, top_k }) => {
+      const snapshotId = snapshot_id.trim();
+      if (!snapshotId) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              allowedUse: 'navigation_hint_only',
+              error: 'snapshot_id is required',
+            }),
+          }],
+          isError: true,
+        };
+      }
+
+      const scope = {
+        tenantId: knowledgeScope?.tenantId || DEFAULT_TENANT_ID,
+        workspaceId: knowledgeScope?.workspaceId || DEFAULT_WORKSPACE_ID,
+        userId: knowledgeScope?.userId || DEFAULT_DEV_USER_ID,
+      };
+      let closeDb: (() => void) | undefined;
+      let snapshotRepository = options.analysisResultSnapshotRepository;
+      if (!snapshotRepository) {
+        const db = openEnterpriseDb();
+        closeDb = () => db.close();
+        snapshotRepository = createAnalysisResultSnapshotRepository(db);
+      }
+
+      try {
+        const service = createTraceSimilarityService({
+          snapshotRepository,
+          ...(include_cases
+            ? {
+              caseLibrary: options.caseLibrary ?? getCaseLibrary(),
+              ragStore: options.ragStore ?? getRagStore(),
+            }
+            : {}),
+        });
+        const result = service.findSimilarAnalysisResult({
+          scope,
+          knowledgeScope: scope,
+          snapshotId,
+          includeCases: include_cases ?? false,
+          limit: top_k,
+        });
+        if (!result) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                success: false,
+                allowedUse: 'navigation_hint_only',
+                error: 'Analysis result snapshot not found',
+              }),
+            }],
+            isError: true,
+          };
+        }
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: true,
+              allowedUse: 'navigation_hint_only',
+              ...result,
+            }),
+          }],
+        };
+      } finally {
+        closeDb?.();
+      }
     },
     { annotations: { readOnlyHint: true } },
   );
@@ -5383,7 +5544,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             })
           : undefined;
         const shouldReturnSqlSummary = success && result.rows.length > 0 && (summary || !!sqlArtifact);
-        let emittedEvidence: { evidenceRefId: string; queryHash: string } | undefined;
+        let emittedEvidence: { evidenceRefId: string; queryHash: string; queryReview?: QueryReviewV1 } | undefined;
 
         if (shouldReturnSqlSummary) {
           const summaryResult = summarizeSqlResult(result.columns, result.rows);
@@ -5398,7 +5559,14 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
               producer,
               processIdentityWarning,
               sqlArtifact?.artifactId,
+              {
+                durationMs,
+                truncated: false,
+                sqlRewrites,
+                toolName: 'execute_sql_on',
+              },
             );
+            updateSqlArtifactQueryReview(artifactStore, sqlArtifact, emittedEvidence.queryReview);
           }
           const text = JSON.stringify({
             success: true,
@@ -5419,6 +5587,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             } : {}),
             durationMs,
             evidenceRefId: emittedEvidence?.evidenceRefId,
+            ...(emittedEvidence?.queryReview ? { queryReview: compactQueryReviewForToolResponse(emittedEvidence.queryReview) } : {}),
             sourceToolCallId: producer.sourceToolCallId,
             paramsHash: producer.paramsHash,
             planPhaseId: producer.planPhaseId,
@@ -5441,6 +5610,14 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             traceProvenance,
             producer,
             processIdentityWarning,
+            undefined,
+            {
+              durationMs,
+              truncated,
+              sqlRewrites,
+              toolName: 'execute_sql_on',
+              rowCount: result.rows.length,
+            },
           );
         }
 
@@ -5456,6 +5633,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           truncated,
           durationMs,
           evidenceRefId: emittedEvidence?.evidenceRefId,
+          ...(emittedEvidence?.queryReview ? { queryReview: compactQueryReviewForToolResponse(emittedEvidence.queryReview) } : {}),
           sourceToolCallId: producer.sourceToolCallId,
           paramsHash: producer.paramsHash,
           planPhaseId: producer.planPhaseId,
@@ -5739,6 +5917,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     registry.registerSdk(compareBaselines, 'compare_baselines', 'public');
     registry.registerSdk(recallProjectMemory, 'recall_project_memory', 'public');
     registry.registerSdk(recallSimilarCase, 'recall_similar_case', 'public');
+    registry.registerSdk(recallSimilarResult, 'recall_similar_result', 'public');
     if (writeAnalysisNote) registry.registerSdk(writeAnalysisNote, 'write_analysis_note', 'internal');
     if (fetchArtifact) registry.registerSdk(fetchArtifact, 'fetch_artifact', 'public');
     if (submitPlan) registry.registerSdk(submitPlan, 'submit_plan', 'internal');
@@ -5843,6 +6022,16 @@ function storeSqlResultArtifact(
   };
 }
 
+function updateSqlArtifactQueryReview(
+  artifactStore: ArtifactStore | undefined,
+  sqlArtifact: { artifactId: string; artifactSummary?: CompactArtifactSummary | undefined } | undefined,
+  queryReview: QueryReviewV1 | undefined,
+): void {
+  if (!artifactStore || !sqlArtifact || !queryReview) return;
+  artifactStore.updateQueryReview(sqlArtifact.artifactId, queryReview);
+  sqlArtifact.artifactSummary = artifactStore.generateCompactSummary(sqlArtifact.artifactId);
+}
+
 function stableSqlEvidenceRefId(
   sql: string | undefined,
   columns: string[],
@@ -5942,13 +6131,37 @@ function emitSqlDataEnvelope(
   producer?: EvidenceProducerContext,
   processIdentityWarning?: string,
   artifactId?: string,
-): { evidenceRefId: string; queryHash: string } {
+  options?: {
+    durationMs?: number;
+    truncated?: boolean;
+    sqlRewrites?: string[];
+    toolName?: 'execute_sql' | 'execute_sql_on';
+    rowCount?: number;
+  },
+): { evidenceRefId: string; queryHash: string; queryReview?: QueryReviewV1 } {
   const { evidenceRefId, queryHash } = stableSqlEvidenceRefId(sql, columns, rows, traceProvenance, producer);
+  const toolName = options?.toolName ?? 'execute_sql';
+  const queryReview = buildSqlQueryReview({
+    producerKind: toolName,
+    executableSql: sql,
+    outputColumns: columns.map((col: string) => ({ name: col, type: inferSqlColumnType(col) })),
+    traceProvenance,
+    producer,
+    evidenceRefId,
+    queryHash,
+    artifactId,
+    durationMs: options?.durationMs,
+    rowCount: options?.rowCount ?? rows.length,
+    truncated: options?.truncated,
+    sqlRewrites: options?.sqlRewrites,
+    stdlibInjectedModules,
+    processIdentityWarning,
+  });
   const envelope = createDataEnvelope(
     { columns, rows },
     {
       type: 'sql_result',
-      source: 'execute_sql',
+      source: toolName,
       title: `SQL Query (${rows.length} rows)`,
       layer: 'list',
       format: 'table',
@@ -5960,6 +6173,7 @@ function emitSqlDataEnvelope(
       traceSide: traceProvenance?.traceSide,
       traceId: traceProvenance?.traceId,
       queryHash,
+      queryReview,
       ...producerEnvelopeOptions(producer),
       artifactId,
       sourceArtifactId: artifactId,
@@ -5982,7 +6196,7 @@ function emitSqlDataEnvelope(
     }],
     timestamp: Date.now(),
   });
-  return { evidenceRefId, queryHash };
+  return { evidenceRefId, queryHash, queryReview };
 }
 
 /** Emit a DataEnvelope for SQL summary-mode results. */
@@ -5995,7 +6209,13 @@ function emitSqlSummaryDataEnvelope(
   producer?: EvidenceProducerContext,
   processIdentityWarning?: string,
   artifactId?: string,
-): { evidenceRefId: string; queryHash: string } {
+  options?: {
+    durationMs?: number;
+    truncated?: boolean;
+    sqlRewrites?: string[];
+    toolName?: 'execute_sql' | 'execute_sql_on';
+  },
+): { evidenceRefId: string; queryHash: string; queryReview?: QueryReviewV1 } {
   const { evidenceRefId, queryHash } = stableSqlEvidenceRefId(
     sql,
     summary.columns,
@@ -6004,6 +6224,24 @@ function emitSqlSummaryDataEnvelope(
     producer,
     'summary',
   );
+  const toolName = options?.toolName ?? 'execute_sql';
+  const queryReview = buildSqlQueryReview({
+    producerKind: toolName,
+    executableSql: sql,
+    outputColumns: summary.columns,
+    traceProvenance,
+    producer,
+    evidenceRefId,
+    queryHash,
+    artifactId,
+    durationMs: options?.durationMs,
+    rowCount: summary.totalRows,
+    truncated: options?.truncated,
+    sqlRewrites: options?.sqlRewrites,
+    stdlibInjectedModules,
+    processIdentityWarning,
+    title: `SQL Summary Review (${summary.totalRows} rows)`,
+  });
   const envelope = createDataEnvelope(
     {
       summary: {
@@ -6014,7 +6252,7 @@ function emitSqlSummaryDataEnvelope(
     },
     {
       type: 'sql_result',
-      source: 'execute_sql',
+      source: toolName,
       title: `SQL Summary (${summary.totalRows} rows)`,
       layer: 'overview',
       format: 'summary',
@@ -6022,6 +6260,7 @@ function emitSqlSummaryDataEnvelope(
       traceSide: traceProvenance?.traceSide,
       traceId: traceProvenance?.traceId,
       queryHash,
+      queryReview,
       ...producerEnvelopeOptions(producer),
       artifactId,
       sourceArtifactId: artifactId,
@@ -6044,7 +6283,7 @@ function emitSqlSummaryDataEnvelope(
     }],
     timestamp: Date.now(),
   });
-  return { evidenceRefId, queryHash };
+  return { evidenceRefId, queryHash, queryReview };
 }
 
 interface SqlFailureToolPayloadInput {
@@ -6066,6 +6305,27 @@ interface SqlFailureToolPayloadInput {
 
 function buildSqlFailureToolPayload(input: SqlFailureToolPayloadInput): Record<string, unknown> {
   const outputLanguage = input.outputLanguage ?? DEFAULT_OUTPUT_LANGUAGE;
+  const queryReview = input.executableSql
+    ? buildSqlQueryReview({
+        producerKind: input.sourceToolCallId?.startsWith('execute_sql_on') ? 'execute_sql_on' : 'execute_sql',
+        executableSql: input.executableSql,
+        outputColumns: [],
+        traceProvenance: input.traceProvenance,
+        producer: {
+          sourceToolCallId: input.sourceToolCallId,
+          paramsHash: input.paramsHash,
+          planPhaseId: input.planPhaseId,
+        },
+        durationMs: input.durationMs,
+        rowCount: 0,
+        truncated: false,
+        sqlRewrites: input.sqlRewrites,
+        stdlibInjectedModules: input.stdlibInjectedModules,
+        processIdentityWarning: input.processIdentityWarning,
+        title: 'Failed SQL review',
+        purpose: `Review attempted SQL after execution failure: ${input.error}`,
+      })
+    : undefined;
   return {
     success: false,
     ...(input.trace ? { trace: input.trace } : {}),
@@ -6081,6 +6341,7 @@ function buildSqlFailureToolPayload(input: SqlFailureToolPayloadInput): Record<s
     paramsHash: input.paramsHash,
     planPhaseId: input.planPhaseId,
     executableSql: input.executableSql,
+    ...(queryReview ? { queryReview: compactQueryReviewForToolResponse(queryReview) } : {}),
     ...(input.sqlRewrites && input.sqlRewrites.length > 0 ? { sqlRewrites: input.sqlRewrites } : {}),
     stdlibInjectedModules: input.stdlibInjectedModules || [],
     ...(input.processIdentityWarning ? { processIdentityWarning: input.processIdentityWarning } : {}),
@@ -6121,6 +6382,7 @@ function emitSkillDataEnvelopes(
   producer?: EvidenceProducerContext,
   identityResolution?: IdentityResolutionV1,
   artifactIdsByStepId?: Map<string, string>,
+  queryReviewsByStepId?: Map<string, QueryReviewV1>,
 ): void {
   const envelopes = displayResults
     .filter(dr => Boolean(dr.data))
@@ -6144,6 +6406,16 @@ function emitSkillDataEnvelopes(
       const artifactId = envelope.meta.stepId
         ? artifactIdsByStepId?.get(envelope.meta.stepId)
         : undefined;
+      const queryReview = envelope.meta.stepId
+        ? queryReviewsByStepId?.get(envelope.meta.stepId) ?? buildSkillQueryReview({
+            skillId,
+            displayResult: dr,
+            traceProvenance,
+            producer,
+            artifactId,
+            evidenceRefId,
+          })
+        : undefined;
       const withEvidence = {
         ...envelope,
         meta: {
@@ -6152,6 +6424,7 @@ function emitSkillDataEnvelopes(
           traceSide: traceProvenance?.traceSide,
           traceId: traceProvenance?.traceId,
           ...(artifactId ? { artifactId, sourceArtifactId: artifactId } : {}),
+          ...(queryReview ? { queryReview } : {}),
           ...(identityResolution ? {
             identityRefId: identityResolution.identityRefId,
             identityStatus: identityResolution.status,

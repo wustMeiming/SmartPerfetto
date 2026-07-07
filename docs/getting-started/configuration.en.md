@@ -240,6 +240,7 @@ Read these `/health` fields before debugging provider complaints:
 | `aiEngine.providerOverridesEnv` | `true` means `.env` changes will not affect analysis until the active provider is disabled |
 | `aiEngine.runtime` | Must be `claude-agent-sdk`, `openai-agents-sdk`, `pi-agent-core`, or `opencode`, not a provider name |
 | `aiEngine.providerMode` | Shows the effective connection family, such as `anthropic_compatible_proxy` or `openai_chat_completions_compatible` |
+| `aiPolicy.aiEnabled` / `aiEngine.aiEnabled` | `false` means model-backed analysis is disabled; `aiPolicy.disabledReason` explains the source |
 
 `aiEngine.providerMode` can be:
 
@@ -254,6 +255,28 @@ Read these `/health` fields before debugging provider complaints:
 | `pi-agent-core` | Uses Pi Agent Core custom model JSON through the shared SmartPerfetto analysis pipeline |
 | `opencode` | Uses OpenCode custom model JSON or OpenAI-compatible fields through the shared SmartPerfetto analysis pipeline |
 | `unconfigured` | No explicit env credentials; if local `claude` works, the SDK can still use Claude Code local auth/config during analysis |
+
+### Temporarily Disable Model-Backed Analysis
+
+To keep trace reads, SQL, reports, Provider configuration, and deterministic
+Skills available while blocking all model calls, set:
+
+```bash
+SMARTPERFETTO_AI_ENABLED=false
+```
+
+When the variable is absent, AI is enabled by default. Explicit values accept
+`1/0`, `true/false`, `yes/no`, `on/off`, and `enabled/disabled`; invalid values
+fail closed and are reported through `/health.aiPolicy.env.valid=false` and
+`smp doctor`.
+
+Still available while disabled: trace upload/read, SQL queries, capture config
+proposals, Android capture without `--analyze`, report reads, Provider profile
+list/edit/activate/runtime switching, and deterministic Skills that do not call
+an LLM. Blocked: agent analyze/resume, cold scene reconstruction start,
+Provider connection tests, `smp provider test`, `smp capture android --analyze`,
+and LLM Skill steps. Blocked responses include `code: "AI_DISABLED"` and
+`retryable: false`.
 
 ## Budgets and Timeouts
 

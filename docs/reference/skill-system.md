@@ -22,6 +22,7 @@
 12. [开发工作流](#12-开发工作流)
 13. [与 Claude 标准 Skill 的区别](#13-与-claude-标准-skill-的区别)
 14. [Skill tier 与校验规则](#14-skill-tier-与校验规则)
+15. [本地 Skill Pack](#15-本地-skill-pack)
 
 ---
 
@@ -748,3 +749,61 @@ Skill 可以声明顶层 `tier: S | A | B`，用于表达目标复杂度和 revi
 | `skill-vendor-override-runtime-conformant` | Vendor override 必须有真实 `additional_steps`、vendor signatures，并指向已注册 base Skill |
 
 `backend/skills/_template/` 是作者模板，不进入运行时 registry。复制模板后必须删除占位符，放入正式 Skill 目录，再运行 `validate:skills` 和匹配的 trace regression。
+
+## 15. 本地 Skill Pack
+
+本地 Skill Pack 用于把已经 review 过的团队/OEM Skill 以 workspace 范围安装，
+不需要直接修改 `backend/skills/`。第一版是本机目录导入，不是远程 marketplace：
+不支持 HTTPS URL、自动同步、`.well-known` 发现或 archive 解包。
+
+目录必须包含 `smartperfetto-skill-pack.json`：
+
+```json
+{
+  "schemaVersion": 1,
+  "packId": "vendor-scroll-pack",
+  "name": "Vendor Scroll Pack",
+  "version": "1.0.0",
+  "publisher": "vendor-team",
+  "description": "Reviewed scrolling diagnostics",
+  "license": "AGPL-3.0-or-later",
+  "compatibility": {
+    "smartPerfettoMinVersion": "0.1.0"
+  },
+  "assets": [
+    {
+      "kind": "skill",
+      "path": "atomic/vendor_scroll.skill.yaml",
+      "sha256": "<64 hex chars>",
+      "sizeBytes": 1234
+    }
+  ]
+}
+```
+
+允许的 asset 根目录：`atomic/`、`composite/`、`deep/`、`system/`、
+`comparison/`、`modules/`、`pipelines/`、`fragments/`、`docs/`。
+禁止 `strategies/`、`vendors/`、`custom/`、隐藏文件、symlink、可执行扩展和
+未在 manifest 声明的文件。每个 asset 的 `sha256` 和 `sizeBytes` 必须和实际文件一致。
+
+Workspace 管理接口：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/api/workspaces/:workspaceId/skill-packs/preview` | 只读预检 |
+| `POST` | `/api/workspaces/:workspaceId/skill-packs/install` | 重新预检后安装 |
+| `GET` | `/api/workspaces/:workspaceId/skill-packs` | 列出已安装 pack |
+| `PATCH` | `/api/workspaces/:workspaceId/skill-packs/:packId` | 启用或禁用 |
+| `DELETE` | `/api/workspaces/:workspaceId/skill-packs/:packId` | 禁用并删除受管副本 |
+
+安装会复制声明资产到受管目录，并在 `skill_registry_entries.metadata_json`
+记录 manifest hash、content hash、审批人、Skill ID、fragment key 和 docs 路径。
+同一个 `packId + version` 已安装时，如果 content hash 不一致会被拒绝。
+外部 Skill ID 不能覆盖内置 Skill；SQL fragment key 不能覆盖不同内容的内置 fragment。
+
+带有 workspace 上下文的 agent 会在运行时加载内置 Skill 加该 workspace 已启用的
+Skill Pack。`list_skills` 会返回外部 pack 的 `origin` metadata，
+`invoke_skill` 会在 registry fingerprint 变化时刷新 executor 和 SQL fragment cache，
+因此启用、禁用或删除 pack 后不会继续执行旧内容。旧版全局 `/api/admin/skills`
+和当前 `smp skill` CLI 路径仍只使用内置 Skill；CLI 执行 workspace pack 需要未来显式
+tenant/workspace 上下文支持。

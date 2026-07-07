@@ -4,7 +4,10 @@
 
 import { describe, expect, it } from '@jest/globals';
 
-import { QUICK_TRIAGE_MAX_CLAIMS } from '../../agentv3/quickAnswerContract';
+import {
+  QUICK_TRIAGE_MAX_CHINESE_CHARS,
+  QUICK_TRIAGE_MAX_CLAIMS,
+} from '../../agentv3/quickAnswerContract';
 import { runClaimVerification } from '../../services/verifier/claimVerificationRunner';
 import type { DataEnvelope } from '../../types/dataContract';
 import {
@@ -191,6 +194,9 @@ describe('buildQuickScrollingTriageDirectAnswer', () => {
     expect(directAnswer?.conclusion).toContain('## 快速 Triage');
     expect(directAnswer?.conclusion).toContain('共 347 帧');
     expect(directAnswer?.conclusion).toContain('Input 延迟概览');
+    expect(directAnswer?.conclusion).toContain('证据索引：');
+    expect(directAnswer?.conclusion).toContain('evidence_ref_id=');
+    expect(directAnswer?.conclusion.length ?? 0).toBeLessThanOrEqual(QUICK_TRIAGE_MAX_CHINESE_CHARS);
     expect(directAnswer?.conclusionContract.metadata?.rounds).toBe(0);
     expect(directAnswer?.conclusionContract.claims).toHaveLength(QUICK_TRIAGE_MAX_CLAIMS);
 

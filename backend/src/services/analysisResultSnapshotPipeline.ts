@@ -38,6 +38,8 @@ export interface CompletedAnalysisSnapshotInput {
   terminationReason?: string;
   terminationMessage?: string;
   dataEnvelopes?: DataEnvelope[];
+  analysisReceipt?: import('../types/dataContract').AnalysisReceiptV1;
+  uiActionProposals?: import('../types/dataContract').UiActionProposalV1[];
   createdAt?: number;
 }
 
@@ -441,6 +443,8 @@ export function buildCompletedAnalysisResultSnapshot(
       headline,
       ...(input.confidence !== undefined ? { confidence: input.confidence } : {}),
       ...(partialReasons.length > 0 ? { partialReasons } : {}),
+      ...(input.analysisReceipt ? { analysisReceipt: input.analysisReceipt } : {}),
+      ...(input.uiActionProposals && input.uiActionProposals.length > 0 ? { uiActionProposals: input.uiActionProposals } : {}),
     },
     ...(input.conclusionContract ? { conclusionContract: input.conclusionContract } : {}),
     ...(input.claimSupport ? { claimSupport: input.claimSupport } : {}),

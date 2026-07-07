@@ -23,6 +23,8 @@ import {
 import { getHTMLReportGenerator } from '../services/htmlReportGenerator';
 import { buildAgentDrivenReportData } from '../services/agentReportData';
 import { persistAgentTurn } from '../services/persistAgentSession';
+import { buildAnalysisReceipt } from '../services/analysisReceiptBuilder';
+import { deriveUiActionProposals } from '../services/uiActionProposalDeriver';
 import { buildRawTraceComparisonReportSection } from '../services/comparisonAppendixService';
 import { applyFinalResultQualityGate } from '../services/finalResultQualityGate';
 import {
@@ -40,6 +42,11 @@ import {
   type ResourceOwnerFields,
 } from '../services/resourceOwnership';
 import { hasRbacPermission, sendForbidden } from '../services/rbac';
+import {
+  requireAiEnabledForHttp,
+  sendAiDisabledErrorIfPresent,
+} from './aiCapabilityPolicyHttp';
+import { AiDisabledError, assertAiFeatureEnabled } from '../services/aiCapabilityPolicy';
 import { readTraceMetadataForContext } from '../services/traceMetadataStore';
 import {
   sessionContextManager,
@@ -183,7 +190,7 @@ import {
 } from '../services/scopedKnowledgeStore';
 import type { CaseCandidateCaptureInput, CaseEvolutionConfig } from '../types/caseEvolution';
 
-const COMPLETED_ANALYSIS_SSE_EVENTS_QUALITY_GATE_VERSION = 1;
+const COMPLETED_ANALYSIS_SSE_EVENTS_QUALITY_GATE_VERSION = 3;
 
 const router = express.Router();
 
@@ -745,6 +752,7 @@ interface AnalysisSession {
   providerSnapshotChanged?: boolean;
   providerSnapshotChangeReason?: string;
   agentQuery?: string;
+  analysisMode?: AnalyzeMode;
   continuityBreaks?: import('../agentv3/sessionStateSnapshot').ProviderContinuityBreak[];
   codeAwareMode?: import('../services/codebase/codeAwareFeature').CodeAwareMode;
   codebaseIds?: string[];
@@ -809,6 +817,12 @@ interface AnalysisSession {
 const assistantAppService = new AssistantApplicationService<AnalysisSession>();
 const streamProjector = new StreamProjector();
 const smartCancelBridge = new SmartCancelBridge();
+
+function normalizeReceiptAnalysisMode(value: unknown): AnalyzeMode | undefined {
+  return value === 'fast' || value === 'full' || value === 'auto'
+    ? value
+    : undefined;
+}
 
 function agentEventScopeFromSession(
   session: AnalysisSession,
@@ -1700,6 +1714,10 @@ async function handleAnalyzeRequest(
       return;
     }
 
+    if (!requireAiEnabledForHttp(res, 'agent_analyze')) {
+      return;
+    }
+
     const tenantDecision = evaluateTenantMutationPolicy(requestContext);
     if (!tenantDecision.allowed) {
       res.status(tenantDecision.httpStatus).json(sendTenantMutationDeniedPayload(tenantDecision));
@@ -2194,6 +2212,9 @@ async function handleAnalyzeRequest(
       },
     });
   } catch (error: any) {
+    if (sendAiDisabledErrorIfPresent(res, error)) {
+      return;
+    }
     console.error('[AgentRoutes] Analyze error:', error);
     res.status(500).json({
       success: false,
@@ -2508,6 +2529,8 @@ router.get('/:sessionId/status', (req, res) => {
         reportUrl: finalArtifacts?.reportUrl,
         reportError: finalArtifacts?.reportError,
         resultSnapshotId: finalArtifacts?.resultSnapshotId,
+        analysisReceipt: completedPayload?.analysisReceipt,
+        uiActionProposals: completedPayload?.uiActionProposals,
         findings: recoveredResult.findings,
         findingsCount: recoveredResult.findings.length,
         resultContract,
@@ -3075,6 +3098,7 @@ async function runSmartAnalysis(
 
   const startedAt = Date.now();
   const runId = options.runContext.runId;
+  session.analysisMode = normalizeReceiptAnalysisMode(options.analysisMode) ?? session.analysisMode;
   setCurrentSessionRun(session, {
     ...options.runContext,
     query,
@@ -3910,6 +3934,19 @@ export async function captureCaseCandidatesAfterQualityArtifacts(
   input: CaptureCaseCandidatesAfterQualityArtifactsInput,
 ): Promise<void> {
   try {
+    try {
+      assertAiFeatureEnabled('background_review_agent');
+    } catch (error) {
+      if (error instanceof AiDisabledError) {
+        input.logger.info('CaseEvolution', 'Skipping background candidate capture because AI is disabled', {
+          sessionId: input.sessionId,
+          runId: input.runIdForAnalysis,
+          feature: error.feature,
+        });
+        return;
+      }
+      throw error;
+    }
     const config = input.caseEvolutionConfig || loadCaseEvolutionConfig();
     if (!isCaseEvolutionCaptureEnabled(config)) return;
 
@@ -3995,6 +4032,7 @@ async function runAgentDrivenAnalysis(
   }
 
   const { logger } = session;
+  session.analysisMode = normalizeReceiptAnalysisMode(options.analysisMode) ?? session.analysisMode;
   session.status = 'running';
   session.lastActivityAt = Date.now();
   const runIdForAnalysis = session.activeRun?.runId;
@@ -5947,7 +5985,8 @@ function normalizeNarrativeForClient(narrative: string): string {
 
 function conclusionHasEvidenceIndex(conclusion: string): boolean {
   const text = conclusion || '';
-  return /(^|\n)\s*##\s*证据(?:表)?索引\b/.test(text);
+  return /(^|\n)\s*##\s*证据(?:表)?索引\b/.test(text) ||
+    /(^|\n)\s*证据(?:表)?索引[:：]/.test(text);
 }
 
 function markdownCell(value: unknown, maxLen = 80): string {
@@ -6199,6 +6238,8 @@ interface CompletedAnalysisResultPayload {
     identityResolutions?: IdentityResolutionV1[];
   };
   quickRun?: AgentRuntimeAnalysisResult['quickRun'];
+  analysisReceipt?: AgentRuntimeAnalysisResult['analysisReceipt'];
+  uiActionProposals?: AgentRuntimeAnalysisResult['uiActionProposals'];
   clientFindings: ReturnType<typeof buildClientFindings>;
   resultContract: ReturnType<typeof buildSessionResultContract>;
   finalArtifacts: CompletedAnalysisFinalArtifacts;
@@ -6266,9 +6307,29 @@ function ensureCompletedAnalysisFinalArtifacts(
       }
 
       const generator = getHTMLReportGenerator();
+      const reportUrl = `/api/reports/${reportId}`;
+      // Report generation needs a receipt before the final snapshot ID exists,
+      // so this projection is intentionally report-scoped.
+      const reportReceipt = buildAnalysisReceipt({
+        session,
+        result: input.resultForClient,
+        runId,
+        qualityArtifacts: input.qualityArtifacts,
+        quickRun: input.resultForClient.quickRun,
+        finalArtifacts: {
+          reportId,
+          reportUrl,
+          generatedAt: finalArtifacts.generatedAt,
+        },
+        providerId: session.providerId ?? null,
+      });
+      const resultForReport = {
+        ...input.resultForClient,
+        analysisReceipt: reportReceipt,
+      };
       const reportData = buildAgentDrivenReportData({
         session,
-        result: input.resultForClient as any,
+        result: resultForReport,
       });
       console.log(`[AgentRoutes] Generating HTML report, data keys:`, {
         hasResult: !!result,
@@ -6304,7 +6365,7 @@ function ensureCompletedAnalysisFinalArtifacts(
       });
 
       finalArtifacts.reportId = reportId;
-      finalArtifacts.reportUrl = `/api/reports/${reportId}`;
+      finalArtifacts.reportUrl = reportUrl;
       console.log(`[AgentRoutes] Generated agent-driven HTML report: ${reportId} (${html.length} bytes)`);
     } catch (error: any) {
       reportId = undefined;
@@ -6337,6 +6398,17 @@ function ensureCompletedAnalysisFinalArtifacts(
 
   if (input.hasEvidenceBackedConclusion) {
     try {
+      // Snapshot persistence needs the latest report artifacts, but the
+      // snapshot ID is only known after persistCompletedAnalysisResultSnapshot.
+      const snapshotReceipt = buildAnalysisReceipt({
+        session,
+        result: input.resultForClient,
+        runId,
+        qualityArtifacts: input.qualityArtifacts,
+        quickRun: input.resultForClient.quickRun,
+        finalArtifacts,
+        providerId: session.providerId ?? null,
+      });
       const resultSnapshot = persistCompletedAnalysisResultSnapshot({
         tenantId: session.tenantId,
         workspaceId: session.workspaceId,
@@ -6357,6 +6429,8 @@ function ensureCompletedAnalysisFinalArtifacts(
         terminationReason: result.terminationReason,
         terminationMessage: result.terminationMessage,
         dataEnvelopes: session.dataEnvelopes,
+        analysisReceipt: snapshotReceipt,
+        uiActionProposals: input.resultForClient.uiActionProposals,
       });
       finalArtifacts.resultSnapshotId = resultSnapshot?.id;
       if (resultSnapshot) {
@@ -6466,7 +6540,7 @@ function ensureCompletedAnalysisResultPayload(
       }
     }
   }
-  const resultForClient =
+  let resultForClient: AgentRuntimeAnalysisResult =
     normalizedConclusion === result.conclusion &&
       normalizedConclusionContract === result.conclusionContract &&
       qualityArtifacts.claimSupport === result.claimSupport &&
@@ -6481,6 +6555,16 @@ function ensureCompletedAnalysisResultPayload(
         ...qualityArtifacts,
         quickRun,
       };
+  const uiActionProposals = replayOnlyScene ? [] : deriveUiActionProposals({
+    dataEnvelopes: session.dataEnvelopes || [],
+    currentTraceId: session.traceId,
+    existingProposals: result.uiActionProposals,
+  });
+  result.uiActionProposals = uiActionProposals;
+  resultForClient = {
+    ...resultForClient,
+    uiActionProposals,
+  };
   const clientFindings = replayOnlyScene ? [] : buildClientFindings(result.findings, session.scenes || []);
   const resultContract = buildSessionResultContract(session, clientFindings);
   const finalArtifacts = ensureCompletedAnalysisFinalArtifacts(session, {
@@ -6492,6 +6576,20 @@ function ensureCompletedAnalysisResultPayload(
     resultForClient: resultForClient as AgentRuntimeAnalysisResult,
     runId: completedRunId,
   });
+  const analysisReceipt = buildAnalysisReceipt({
+    session,
+    result: resultForClient,
+    runId: completedRunId,
+    qualityArtifacts,
+    quickRun,
+    finalArtifacts,
+    providerId: session.providerId ?? null,
+  });
+  result.analysisReceipt = analysisReceipt;
+  resultForClient = {
+    ...resultForClient,
+    analysisReceipt,
+  };
   return {
     result,
     replayOnlyScene,
@@ -6499,6 +6597,8 @@ function ensureCompletedAnalysisResultPayload(
     normalizedConclusionContract,
     qualityArtifacts,
     quickRun,
+    analysisReceipt,
+    uiActionProposals,
     clientFindings,
     resultContract,
     finalArtifacts,
@@ -6549,6 +6649,8 @@ function ensureCompletedAnalysisSseEvents(session: AnalysisSession, runId?: stri
     normalizedConclusionContract,
     qualityArtifacts,
     quickRun,
+    analysisReceipt,
+    uiActionProposals,
     clientFindings,
     resultContract,
     finalArtifacts,
@@ -6601,6 +6703,8 @@ function ensureCompletedAnalysisSseEvents(session: AnalysisSession, runId?: stri
       terminationReason: result.terminationReason,
       terminationMessage: result.terminationMessage,
       quickRun,
+      analysisReceipt,
+      uiActionProposals,
       smartScenePreview: result.smartScenePreview,
       findings: clientFindings,
       resultContract,

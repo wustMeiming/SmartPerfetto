@@ -488,6 +488,7 @@ export interface StepResult {
   success: boolean;
   data?: any;
   error?: string;
+  code?: string;
   executionTimeMs: number;
   display?: DisplayConfig;
 }

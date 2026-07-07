@@ -38,6 +38,7 @@ import type { ClaimSupportV1 } from '../../types/evidenceContract';
 import type { ClaimVerificationResult } from '../../types/claimVerification';
 import type { IdentityResolutionV1 } from '../../types/identityContract';
 import type { CodeAwareMode } from '../../services/codebase/codeAwareFeature';
+import type { AnalysisReceiptV1, UiActionProposalV1 } from '../../types/dataContract';
 
 // =============================================================================
 // Agent ID Constants
@@ -235,6 +236,8 @@ export interface AnalysisResult {
   smartScenePreview?: SmartScenePreviewPayload;
   /** User-visible quick-mode run receipt. Metadata only; never claim support evidence. */
   quickRun?: QuickRunReceipt;
+  analysisReceipt?: AnalysisReceiptV1;
+  uiActionProposals?: UiActionProposalV1[];
 }
 
 export type AgentRuntimeAnalysisResult = AnalysisResult;

@@ -28,6 +28,15 @@ import type { AnalysisPlanV3, AnalysisNote, Hypothesis, UncertaintyFlag } from '
 jest.mock('../../services/skillEngine/skillAnalysisAdapter', () => ({
   getSkillAnalysisAdapter: jest.fn(() => ({
     adaptSkillResult: jest.fn((r: any) => r),
+    setSkillRegistry: jest.fn(),
+    listSkills: jest.fn(async () => [
+      { id: 'scrolling_analysis', displayName: 'Scrolling Analysis', description: 'Analyze scrolling jank', type: 'composite', keywords: ['scroll', 'jank'] },
+      { id: 'cpu_analysis', displayName: 'CPU Analysis', description: 'Analyze CPU usage', type: 'atomic', keywords: ['cpu'] },
+    ]),
+  })),
+  createSkillAnalysisAdapter: jest.fn(() => ({
+    adaptSkillResult: jest.fn((r: any) => r),
+    setSkillRegistry: jest.fn(),
     listSkills: jest.fn(async () => [
       { id: 'scrolling_analysis', displayName: 'Scrolling Analysis', description: 'Analyze scrolling jank', type: 'composite', keywords: ['scroll', 'jank'] },
       { id: 'cpu_analysis', displayName: 'CPU Analysis', description: 'Analyze CPU usage', type: 'atomic', keywords: ['cpu'] },
@@ -44,11 +53,16 @@ jest.mock('../../agent/detectors/architectureDetector', () => ({
 jest.mock('../../services/skillEngine/skillLoader', () => ({
   skillRegistry: {
     getSkill: jest.fn(() => ({ type: 'atomic', name: 'test_skill' })),
+    getVendorOverride: jest.fn(() => undefined),
     getAllSkills: jest.fn(() => [
       { name: 'scrolling_analysis', type: 'composite', description: 'Scrolling analysis' },
       { name: 'cpu_analysis', type: 'atomic', description: 'CPU analysis' },
     ]),
   },
+}));
+
+jest.mock('../../services/skillPacks/workspaceSkillRegistryProvider', () => ({
+  getWorkspaceSkillRegistry: jest.fn(),
 }));
 
 jest.mock('../artifactStore', () => ({
@@ -71,7 +85,18 @@ jest.mock('../artifactStore', () => ({
         ...(artifact.planPhaseTitle ? { planPhaseTitle: artifact.planPhaseTitle } : {}),
         ...(artifact.traceProvenance?.traceSide ? { traceSide: artifact.traceProvenance.traceSide } : {}),
         ...(artifact.traceProvenance?.traceId ? { traceId: artifact.traceProvenance.traceId } : {}),
+        ...(artifact.queryReview ? { queryReview: artifact.queryReview } : {}),
       };
+    }),
+    updateQueryReview: jest.fn(function(
+      this: { _artifacts: Map<string, { queryReview?: unknown }> },
+      id: string,
+      queryReview: unknown,
+    ) {
+      const artifact = this._artifacts.get(id);
+      if (!artifact || !queryReview) return false;
+      artifact.queryReview = queryReview;
+      return true;
     }),
     fetch: jest.fn(function(this: any, id: string, detail: string, offset?: number, limit?: number) {
       const artifact = this._artifacts.get(id);
@@ -92,6 +117,7 @@ jest.mock('../artifactStore', () => ({
           planPhaseGoal: artifact?.planPhaseGoal,
           sourceToolCallId: artifact?.sourceToolCallId,
           identityResolution: artifact?.identityResolution,
+          queryReview: artifact?.queryReview,
         };
       }
       const effectiveOffset = offset ?? 0;
@@ -118,6 +144,7 @@ jest.mock('../artifactStore', () => ({
         traceSide: artifact?.traceProvenance?.traceSide,
         traceId: artifact?.traceProvenance?.traceId,
         traceProvenance: artifact?.traceProvenance,
+        queryReview: artifact?.queryReview,
       };
     }),
     get: jest.fn(function(this: any, id: string) {
@@ -196,6 +223,13 @@ import {
 } from '../claudeMcpServer';
 import { ArtifactStore } from '../artifactStore';
 import { createArchitectureDetector } from '../../agent/detectors/architectureDetector';
+import { createSkillAnalysisAdapter } from '../../services/skillEngine/skillAnalysisAdapter';
+import { getWorkspaceSkillRegistry } from '../../services/skillPacks/workspaceSkillRegistryProvider';
+import {
+  ANALYSIS_RESULT_SNAPSHOT_SCHEMA_VERSION,
+  type AnalysisResultSnapshot,
+} from '../../types/multiTraceComparison';
+import type { TraceSimilaritySnapshotRepository } from '../../services/similarity/similarityService';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -211,6 +245,8 @@ function createTestServer(options: {
   codebaseIds?: string[];
   caseLibrary?: any;
   ragStore?: any;
+  analysisResultSnapshotRepository?: TraceSimilaritySnapshotRepository;
+  knowledgeScope?: { tenantId: string; workspaceId: string; userId?: string };
 } = {}) {
   const analysisNotes: AnalysisNote[] = [];
   const hypotheses: Hypothesis[] = [];
@@ -246,7 +282,10 @@ function createTestServer(options: {
       displayResults: [{ stepId: 'result', title: 'Result', layer: 'list', format: 'table', data: { rows: [[1]], columns: ['a'] } }],
       layers: {},
     })),
+    replaceRegisteredSkills: jest.fn(),
+    registerSkills: jest.fn(),
     registerSkill: jest.fn(),
+    setFragmentRegistry: jest.fn(),
   };
 
   const { server, allowedTools, toolDefinitions } = createClaudeMcpServer({
@@ -266,6 +305,8 @@ function createTestServer(options: {
     codebaseIds: options.codebaseIds,
     caseLibrary: options.caseLibrary,
     ragStore: options.ragStore,
+    analysisResultSnapshotRepository: options.analysisResultSnapshotRepository,
+    knowledgeScope: options.knowledgeScope,
     ...(options.lightweight ? { lightweight: true } : { analysisPlan }),
     ...(options.referenceTraceId ? {
       referenceTraceId: options.referenceTraceId,
@@ -353,6 +394,52 @@ function parseLeadingJsonObject(text: string): unknown | null {
   return null;
 }
 
+function analysisSnapshot(
+  id: string,
+  overrides: Partial<AnalysisResultSnapshot> = {},
+): AnalysisResultSnapshot {
+  return {
+    id,
+    tenantId: 'tenant-a',
+    workspaceId: 'workspace-a',
+    traceId: `${id}-trace`,
+    sessionId: `${id}-trace-session`,
+    runId: `${id}-trace-run`,
+    createdBy: 'user-a',
+    visibility: 'workspace',
+    sceneType: 'scrolling',
+    title: id,
+    userQuery: 'analyze scrolling',
+    traceLabel: id,
+    traceMetadata: {
+      appPackage: 'com.example.app',
+      processName: 'com.example.app',
+      deviceModel: 'Pixel 9',
+      androidVersion: '16',
+      reason_code: 'shader_compile',
+      responsibility: 'app',
+    },
+    summary: {headline: 'ok'},
+    metrics: [{
+      key: 'scrolling.jank_count',
+      label: 'Jank count',
+      group: 'jank',
+      value: 10,
+      confidence: 0.9,
+      source: {type: 'skill', skillId: 'scrolling'},
+    }],
+    evidenceRefs: [{
+      id: `${id}-evidence`,
+      type: 'skill_step',
+      metadata: {render_slices: ['makePipeline']},
+    }],
+    status: 'ready',
+    schemaVersion: ANALYSIS_RESULT_SNAPSHOT_SCHEMA_VERSION,
+    createdAt: 1_700_000_000_000,
+    ...overrides,
+  };
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────
 
 describe('createClaudeMcpServer', () => {
@@ -373,8 +460,8 @@ describe('createClaudeMcpServer', () => {
       // *removes* a critical tool still fails loudly.
       const { tools } = createTestServer();
       expect(tools.size).toBeGreaterThanOrEqual(15);
-      expect(tools.size).toBeLessThanOrEqual(25);
-      for (const required of ['execute_sql', 'invoke_skill', 'lookup_sql_schema', 'submit_plan']) {
+      expect(tools.size).toBeLessThanOrEqual(26);
+      for (const required of ['execute_sql', 'invoke_skill', 'lookup_sql_schema', 'submit_plan', 'recall_similar_result']) {
         expect(tools.has(required)).toBe(true);
       }
     });
@@ -443,6 +530,73 @@ describe('createClaudeMcpServer', () => {
       });
     });
 
+    it('recalls similar analysis results as navigation-only MCP hints', async () => {
+      const current = analysisSnapshot('current');
+      const similar = analysisSnapshot('similar', {
+        traceId: 'similar-trace',
+        sessionId: 'similar-session',
+        runId: 'similar-run',
+      });
+      const snapshots = new Map([
+        [current.id, current],
+        [similar.id, similar],
+      ]);
+      const repository: TraceSimilaritySnapshotRepository = {
+        getSnapshot(_scope, snapshotId) {
+          return snapshots.get(snapshotId) ?? null;
+        },
+        listSnapshots() {
+          return [...snapshots.values()];
+        },
+      };
+      const { tools } = createTestServer({
+        knowledgeScope: {tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'user-a'},
+        analysisResultSnapshotRepository: repository,
+      });
+
+      const result = await callTool(tools, 'recall_similar_result', {
+        snapshot_id: 'current',
+        top_k: 3,
+      });
+
+      expect(result).toMatchObject({
+        success: true,
+        allowedUse: 'navigation_hint_only',
+        snapshotId: 'current',
+      });
+      expect(result.hints[0]).toMatchObject({
+        source: 'analysis_result_snapshot',
+        sourceId: 'similar',
+        allowedUse: 'navigation_hint_only',
+      });
+      expect(result.hints[0].limitations.join('\n')).toContain('navigation hint only');
+    });
+
+    it('reports missing analysis-result snapshots without fabricating hints', async () => {
+      const repository: TraceSimilaritySnapshotRepository = {
+        getSnapshot() {
+          return null;
+        },
+        listSnapshots() {
+          return [];
+        },
+      };
+      const { tools } = createTestServer({
+        knowledgeScope: {tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'user-a'},
+        analysisResultSnapshotRepository: repository,
+      });
+
+      const result = await callTool(tools, 'recall_similar_result', {
+        snapshot_id: 'missing',
+      });
+
+      expect(result).toEqual({
+        success: false,
+        allowedUse: 'navigation_hint_only',
+        error: 'Analysis result snapshot not found',
+      });
+    });
+
     it('should auto-derive allowedTools matching registered tools (P2-G1)', () => {
       const { tools, allowedTools } = createTestServer();
       // Every tool should have a matching allowedTools entry (with prefix)
@@ -460,10 +614,87 @@ describe('createClaudeMcpServer', () => {
         'lookup_sql_schema', 'submit_plan', 'update_plan_phase', 'revise_plan',
         'submit_hypothesis', 'resolve_hypothesis', 'write_analysis_note',
         'fetch_artifact', 'query_perfetto_source', 'flag_uncertainty', 'recall_patterns',
+        'recall_similar_result',
       ];
       for (const name of expected) {
         expect(tools.has(name)).toBe(true);
       }
+    });
+
+    it('binds workspace skill registry for list_skills and invoke_skill', async () => {
+      const workspaceSkill = {
+        name: 'external_skill',
+        type: 'atomic',
+        meta: { display_name: 'External Skill', description: 'Workspace approved skill' },
+      };
+      const workspaceRegistry = {
+        getAllSkills: jest.fn(() => [workspaceSkill]),
+        getFragmentCache: jest.fn(() => new Map([['fragments/external.sql', 'external AS (SELECT 1 AS value)']])),
+        getSkill: jest.fn(() => ({ type: 'atomic', name: 'external_skill' })),
+        getVendorOverride: jest.fn(() => undefined),
+        getSkillOrigin: jest.fn(() => ({
+          origin: 'external_pack',
+          packId: 'local-pack',
+          packVersion: '1.0.0',
+          trustState: 'approved',
+          sourcePath: '/managed/local-pack',
+        })),
+      };
+      const adapter = {
+        adaptSkillResult: jest.fn((r: unknown) => r),
+        setSkillRegistry: jest.fn(),
+        listSkills: jest.fn(async () => [{
+          id: 'external_skill',
+          displayName: 'External Skill',
+          description: 'Workspace approved skill',
+          type: 'atomic',
+          keywords: ['external'],
+          origin: workspaceRegistry.getSkillOrigin(),
+        }]),
+      } as unknown as ReturnType<typeof createSkillAnalysisAdapter>;
+      (createSkillAnalysisAdapter as jest.MockedFunction<typeof createSkillAnalysisAdapter>)
+        .mockReturnValueOnce(adapter);
+      (getWorkspaceSkillRegistry as jest.MockedFunction<typeof getWorkspaceSkillRegistry>)
+        .mockResolvedValue({
+          registry: workspaceRegistry,
+          registryFingerprint: 'workspace-fingerprint-1',
+          enabledPacks: [],
+          getSkillOrigin: workspaceRegistry.getSkillOrigin,
+        } as unknown as Awaited<ReturnType<typeof getWorkspaceSkillRegistry>>);
+      const { tools, mockSkillExecutor } = createTestServer({
+        knowledgeScope: { tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'user-a' },
+      });
+
+      const skills = await callTool(tools, 'list_skills', {});
+      await callTool(tools, 'submit_plan', {
+        phases: [{ id: 'p1', name: 'Workspace skill', goal: 'Run approved workspace skill', expectedTools: ['invoke_skill'] }],
+        successCriteria: 'Workspace skill executes through the request-scoped registry',
+      });
+      await callTool(tools, 'invoke_skill', { skillId: 'external_skill', params: {} });
+
+      expect(adapter.setSkillRegistry).toHaveBeenCalledWith(
+        expect.objectContaining({ getAllSkills: expect.any(Function) }),
+        'workspace-fingerprint-1',
+      );
+      expect(mockSkillExecutor.replaceRegisteredSkills).toHaveBeenCalledWith([workspaceSkill]);
+      expect(mockSkillExecutor.setFragmentRegistry).toHaveBeenCalledWith(workspaceRegistry.getFragmentCache());
+      expect(skills).toEqual([
+        expect.objectContaining({
+          id: 'external_skill',
+          origin: expect.objectContaining({
+            origin: 'external_pack',
+            packId: 'local-pack',
+            packVersion: '1.0.0',
+            trustState: 'approved',
+          }),
+        }),
+      ]);
+      expect(mockSkillExecutor.execute).toHaveBeenCalledWith(
+        'external_skill',
+        'test-trace-123',
+        {},
+        expect.objectContaining({ signal: undefined }),
+      );
     });
 
     it('keeps fetch_artifact available in lightweight mode for skill artifacts', () => {

@@ -26,6 +26,7 @@ import {
   SkillExecutionResult,
   StepResult,
   DisplayConfig,
+  SkillEvent,
 } from '../types';
 import {
   SkillExecutor,
@@ -67,6 +68,16 @@ const createMockContext = (): SkillExecutionContext => ({
 const createMeta = (displayName: string): { display_name: string; description: string } => ({
   display_name: displayName,
   description: `Test skill: ${displayName}`,
+});
+
+const originalAiEnabled = process.env.SMARTPERFETTO_AI_ENABLED;
+
+afterEach(() => {
+  if (originalAiEnabled === undefined) {
+    delete process.env.SMARTPERFETTO_AI_ENABLED;
+  } else {
+    process.env.SMARTPERFETTO_AI_ENABLED = originalAiEnabled;
+  }
 });
 
 // =============================================================================
@@ -1327,6 +1338,66 @@ describe('Diagnostic Step 执行', () => {
     expect(result.success).toBe(true);
     expect(result.diagnostics.length).toBe(0);
   });
+
+  it('AI disabled 时不会调用 diagnostic fallback AI 服务', async () => {
+    process.env.SMARTPERFETTO_AI_ENABLED = 'false';
+    const mockAiService = {
+      chat: jest.fn<() => Promise<string>>().mockResolvedValue('AI fallback diagnosis'),
+    };
+    const emitted: SkillEvent[] = [];
+    const localExecutor = createSkillExecutor(
+      mockTraceProcessor,
+      mockAiService,
+      event => emitted.push(event),
+    );
+    mockTraceProcessor.query.mockResolvedValue({
+      columns: ['jank_rate'],
+      rows: [[1]],
+    });
+    const fallbackSkill: SkillDefinition = {
+      name: 'diagnostic_fallback_disabled',
+      type: 'composite',
+      version: '1.0',
+      meta: createMeta('Diagnostic Fallback Disabled'),
+      steps: [
+        {
+          id: 'data',
+          type: 'atomic',
+          sql: 'SELECT jank_rate FROM stats',
+          save_as: 'stats',
+        },
+        {
+          id: 'diagnose',
+          type: 'diagnostic',
+          inputs: ['stats'],
+          rules: [
+            {
+              condition: 'stats.data[0]?.jank_rate > 50',
+              confidence: 0.9,
+              diagnosis: 'Very high jank',
+              suggestions: [],
+            },
+          ],
+          ai_assist: true,
+          fallback: {
+            type: 'ai_decision',
+            prompt: 'Diagnose fallback',
+          },
+        },
+      ],
+    };
+    localExecutor.registerSkill(fallbackSkill);
+
+    const result = await localExecutor.execute('diagnostic_fallback_disabled', 'trace-1');
+    const completedEvent = emitted.find(e => e.type === 'step_completed' && e.stepId === 'diagnose');
+
+    expect(result.success).toBe(true);
+    expect(mockAiService.chat).not.toHaveBeenCalled();
+    expect(completedEvent?.data).toMatchObject({
+      success: false,
+      code: 'AI_DISABLED',
+    });
+  });
 });
 
 // =============================================================================
@@ -1706,6 +1777,34 @@ describe('AI Decision Step 执行', () => {
     // The overall skill still succeeds because failed steps are silently skipped
     // This allows partial execution of composite skills
   });
+
+  it('AI disabled 时不会调用 ai_decision 服务，并发出 AI_DISABLED step code', async () => {
+    process.env.SMARTPERFETTO_AI_ENABLED = 'false';
+    const skill: SkillDefinition = {
+      name: 'ai_decision_disabled_test',
+      type: 'composite',
+      version: '1.0',
+      meta: createMeta('AI Decision Disabled Test'),
+      steps: [
+        {
+          id: 'decide',
+          type: 'ai_decision',
+          prompt: 'Test',
+        },
+      ],
+    };
+    executor.registerSkill(skill);
+
+    const result = await executor.execute('ai_decision_disabled_test', 'trace-1');
+    const completedEvent = emittedEvents.find(e => e.type === 'step_completed' && e.stepId === 'decide');
+
+    expect(result.success).toBe(true);
+    expect(mockAiService.chat).not.toHaveBeenCalled();
+    expect(completedEvent?.data).toMatchObject({
+      success: false,
+      code: 'AI_DISABLED',
+    });
+  });
 });
 
 // =============================================================================
@@ -1787,6 +1886,52 @@ describe('AI Summary Step 执行', () => {
     await executor.execute('var_summary', 'trace-1');
     // 验证 AI 服务被调用时 prompt 中的变量已被替换
     expect(mockAiService.chat).toHaveBeenCalled();
+  });
+
+  it('AI disabled 时不会调用 ai_summary 服务', async () => {
+    process.env.SMARTPERFETTO_AI_ENABLED = 'false';
+    const emitted: SkillEvent[] = [];
+    const localExecutor = createSkillExecutor(
+      mockTraceProcessor,
+      mockAiService,
+      event => emitted.push(event),
+    );
+    mockTraceProcessor.query.mockResolvedValue({
+      columns: ['metric', 'value'],
+      rows: [['fps', 60]],
+    });
+    const skill: SkillDefinition = {
+      name: 'ai_summary_disabled_test',
+      type: 'composite',
+      version: '1.0',
+      meta: createMeta('AI Summary Disabled Test'),
+      steps: [
+        {
+          id: 'get_data',
+          type: 'atomic',
+          sql: 'SELECT metric, value FROM stats',
+          save_as: 'stats',
+        },
+        {
+          id: 'summarize',
+          type: 'ai_summary',
+          prompt: '总结 ${stats}',
+        },
+      ],
+    };
+    localExecutor.registerSkill(skill);
+
+    const result = await localExecutor.execute('ai_summary_disabled_test', 'trace-1');
+    const completedEvent = emitted.find(e => e.type === 'step_completed' && e.stepId === 'summarize');
+
+    expect(result.success).toBe(true);
+    expect(result.aiSummary).toBeUndefined();
+    expect(mockAiService.chat).not.toHaveBeenCalled();
+    expect(result.rawResults?.get_data?.success).toBe(true);
+    expect(completedEvent?.data).toMatchObject({
+      success: false,
+      code: 'AI_DISABLED',
+    });
   });
 });
 

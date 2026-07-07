@@ -269,12 +269,10 @@ function buildReferenceLines(claims: DirectClaim[]): string {
       .join(', ');
     const parts = [
       first?.evidenceRefId ? `evidence_ref_id=\`${first.evidenceRefId}\`` : undefined,
-      `source_ref=${first?.sourceRef ?? first?.sourceToolCallId ?? 'runtime evidence'}`,
-      typeof first?.rowIndex === 'number' ? `row=${first.rowIndex}` : undefined,
-      columns ? `columns=\`${columns}\`` : undefined,
-      values ? `values=\`${values}\`` : undefined,
+      columns ? `cols=\`${columns}\`` : undefined,
+      values ? `vals=\`${values}\`` : undefined,
     ].filter(Boolean);
-    return `- Q${index + 1} (${claim.label})\n  - ${parts.join('; ')}`;
+    return `- Q${index + 1}: ${parts.join('; ')}`;
   }).join('\n');
 }
 
@@ -285,10 +283,15 @@ function buildConclusionText(input: {
 }): string {
   const summaryLines = input.claims.map(claim => `- ${truncateQuickStatement(claim.statement)}`).join('\n');
   const refs = buildReferenceLines(input.claims);
+  const evidenceIndexLine = localize(
+    input.outputLanguage,
+    '证据索引：以下 evidence_ref_id 对应已发送结构化数据。',
+    'Evidence index: the evidence_ref_id values below map to emitted structured data.',
+  );
   return localize(
     input.outputLanguage,
-    `${QUICK_TRIAGE_HEADING}\n${summaryLines}\n\n边界：${input.boundary}\n\n${QUICK_REFERENCE_HEADING}\n${refs}`,
-    `## Quick Triage\n${summaryLines}\n\nBoundary: ${input.boundary}\n\n## Sentence-Level Data References\n${refs}`,
+    `${QUICK_TRIAGE_HEADING}\n${summaryLines}\n\n边界：${input.boundary}\n\n${QUICK_REFERENCE_HEADING}\n${evidenceIndexLine}\n${refs}`,
+    `## Quick Triage\n${summaryLines}\n\nBoundary: ${input.boundary}\n\n## Sentence-Level Data References\n${evidenceIndexLine}\n${refs}`,
   );
 }
 

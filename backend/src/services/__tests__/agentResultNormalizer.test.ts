@@ -555,4 +555,64 @@ describe('normalizeResultForReport', () => {
       claim.references.some(ref => ref.column === 'ttid_ms' && ref.value === 1912),
     )).toBe(true);
   });
+
+  test('preserves sidecar metadata while normalizing report text', () => {
+    const receipt = {
+      schemaVersion: 1,
+      runId: 'run-1',
+      sessionId: 'agent-test',
+      traceId: 'trace-1',
+      mode: 'auto',
+      resolvedMode: 'full',
+      providerId: null,
+      generatedAt: 1,
+      traceEvidence: {
+        sqlCount: 0,
+        skillCount: 0,
+        dataEnvelopeCount: 0,
+        artifactCount: 0,
+        evidenceRefCount: 0,
+      },
+      nonEvidenceContext: {
+        frontendPrequeryCount: 0,
+        memoryHintCount: 0,
+        conversationContextCount: 0,
+        strategyHintCount: 0,
+      },
+      claimAudit: {
+        totalClaims: 0,
+        verifiedClaims: 0,
+        unsupportedClaims: 0,
+        uncertainClaims: 0,
+      },
+      qualityGates: {
+        finalReportContract: 'not_applicable',
+        claimVerification: 'not_applicable',
+        identityResolution: 'not_applicable',
+      },
+      outputs: {},
+    } as const;
+    const r = makeResult({
+      conclusion: '快速回答：帧耗时 45.6ms（ev_deadbeef1234）。',
+      analysisReceipt: receipt,
+      uiActionProposals: [
+        {
+          schemaVersion: 1,
+          id: 'ui-navigate_timeline-1',
+          kind: 'navigate_timeline',
+          title: '跳到帧',
+          reason: '来自证据表',
+          source: { evidenceRefId: 'ev_deadbeef1234' },
+          payload: { ts: '123456789' },
+          requiresConfirmation: true,
+        },
+      ],
+    });
+
+    const out = normalizeResultForReport(r);
+
+    expect(out.conclusion).not.toContain('ev_deadbeef1234');
+    expect(out.analysisReceipt).toBe(receipt);
+    expect(out.uiActionProposals).toBe(r.uiActionProposals);
+  });
 });

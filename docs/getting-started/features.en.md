@@ -133,6 +133,8 @@ Entry points:
 - Click the `fact_check` icon to open analysis result comparison.
 - Choose one `Baseline` and one or more `Candidate` results.
 - Optional: `Share` a private result to make it workspace-visible.
+- Optional: click the row-level `travel_explore` icon to view similar snapshot
+  or case hints. These hints are `navigation_hint_only`.
 - Click `Start comparison`.
 
 Output:
@@ -140,6 +142,8 @@ Output:
 - Standard metric matrix and deltas between baseline/candidates.
 - Standardized metrics such as startup duration and FPS/Jank when available.
 - 2 or more snapshots in one comparison.
+- Similar historical result hints before starting a formal comparison, without
+  treating similarity as diagnostic evidence.
 - When there is exactly one clear other candidate, the AI can start the comparison from a natural-language request; when the target is ambiguous, it asks you to choose.
 - Significant change count and an HTML comparison report.
 

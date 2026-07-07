@@ -247,6 +247,7 @@ curl http://localhost:3000/health
 | `aiEngine.providerOverridesEnv` | `true` 表示 `.env` 修改不会影响当前分析，除非停用 active provider |
 | `aiEngine.runtime` | 只能是 `claude-agent-sdk`、`openai-agents-sdk`、`pi-agent-core` 或 `opencode`，不是 provider 名称 |
 | `aiEngine.providerMode` | 显示实际连接族，例如 `anthropic_compatible_proxy` 或 `openai_chat_completions_compatible` |
+| `aiPolicy.aiEnabled` / `aiEngine.aiEnabled` | `false` 表示后端禁止模型分析；`aiPolicy.disabledReason` 会说明来源 |
 
 响应中的 `aiEngine.providerMode` 会显示：
 
@@ -261,6 +262,18 @@ curl http://localhost:3000/health
 | `pi-agent-core` | 使用 Pi Agent Core custom model JSON 和共享 SmartPerfetto 分析管线 |
 | `opencode` | 使用 OpenCode custom model JSON 或 OpenAI-compatible 字段，并复用共享 SmartPerfetto 分析管线 |
 | `unconfigured` | 没有显式 env 凭证；如果本机 `claude` 已经能正常请求，SDK 仍可在分析时走 Claude Code 本地 auth/config 路径 |
+
+### 临时禁用模型分析
+
+需要保留 trace 读取、SQL、报告、Provider 配置和确定性 Skill，但禁止所有模型调用时，设置：
+
+```bash
+SMARTPERFETTO_AI_ENABLED=false
+```
+
+未设置该变量时默认启用 AI。显式值接受 `1/0`、`true/false`、`yes/no`、`on/off`、`enabled/disabled`；无效值会 fail closed，也就是按禁用处理，并在 `/health.aiPolicy.env.valid=false` 和 `smp doctor` 中暴露原因。
+
+禁用后仍可用：trace 上传/读取、SQL 查询、capture config proposal、Android capture（不带 `--analyze`）、报告读取、Provider profile 列表/编辑/激活/runtime 切换，以及不调用 LLM 的确定性 Skill。会被阻断：agent analyze/resume、场景还原冷启动、Provider connection test、`smp provider test`、`smp capture android --analyze`、LLM Skill step。阻断响应统一包含 `code: "AI_DISABLED"` 和 `retryable: false`。
 
 ## 分析预算与超时
 

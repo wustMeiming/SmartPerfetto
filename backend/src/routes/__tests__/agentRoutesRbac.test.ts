@@ -39,6 +39,7 @@ const originalEnterpriseDbPath = process.env[ENTERPRISE_DB_PATH_ENV];
 const originalEnterpriseDataDir = process.env[ENTERPRISE_DATA_DIR_ENV];
 const originalUploadDir = process.env.UPLOAD_DIR;
 const originalAgentRuntime = process.env.SMARTPERFETTO_AGENT_RUNTIME;
+const originalAiEnabled = process.env.SMARTPERFETTO_AI_ENABLED;
 
 type DeferredRuntime = {
   promise: Promise<unknown>;
@@ -187,6 +188,7 @@ afterEach(async () => {
   restoreEnvValue(ENTERPRISE_DATA_DIR_ENV, originalEnterpriseDataDir);
   restoreEnvValue('UPLOAD_DIR', originalUploadDir);
   restoreEnvValue('SMARTPERFETTO_AGENT_RUNTIME', originalAgentRuntime);
+  restoreEnvValue('SMARTPERFETTO_AI_ENABLED', originalAiEnabled);
   sessionContextManager.remove('session-resume-integration');
 });
 
@@ -244,6 +246,79 @@ describe('agent route RBAC', () => {
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it('rejects analyze requests while AI is disabled before trace access is evaluated', async () => {
+    delete process.env.SMARTPERFETTO_API_KEY;
+    process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
+    process.env.SMARTPERFETTO_AI_ENABLED = 'false';
+    const traceService = { getOrLoadTrace: jest.fn() };
+    setTraceProcessorServiceForTests(traceService as unknown as TraceProcessorService);
+
+    const res = await analystHeaders(request(makeApp()).post('/api/agent/v1/analyze'))
+      .send({ traceId: 'trace-a', query: 'analyze this trace' });
+
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'AI_DISABLED',
+      feature: 'agent_analyze',
+    });
+    expect(traceService.getOrLoadTrace).not.toHaveBeenCalled();
+  });
+
+  it('rejects session run requests while AI is disabled before trace access is evaluated', async () => {
+    delete process.env.SMARTPERFETTO_API_KEY;
+    process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
+    process.env.SMARTPERFETTO_AI_ENABLED = 'false';
+    const traceService = { getOrLoadTrace: jest.fn() };
+    setTraceProcessorServiceForTests(traceService as unknown as TraceProcessorService);
+
+    const res = await analystHeaders(request(makeApp()).post('/api/agent/v1/sessions/session-a/runs'))
+      .send({ traceId: 'trace-a', query: 'continue analysis' });
+
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'AI_DISABLED',
+      feature: 'agent_analyze',
+    });
+    expect(traceService.getOrLoadTrace).not.toHaveBeenCalled();
+  });
+
+  it('rejects scene reconstruction start while AI is disabled before trace access is evaluated', async () => {
+    delete process.env.SMARTPERFETTO_API_KEY;
+    process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
+    process.env.SMARTPERFETTO_AI_ENABLED = 'false';
+    const traceService = { getOrLoadTrace: jest.fn() };
+    setTraceProcessorServiceForTests(traceService as unknown as TraceProcessorService);
+
+    const res = await analystHeaders(request(makeApp()).post('/api/agent/v1/scene-reconstruct'))
+      .send({ traceId: 'trace-a' });
+
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'AI_DISABLED',
+      feature: 'scene_reconstruct_start',
+    });
+    expect(traceService.getOrLoadTrace).not.toHaveBeenCalled();
+  });
+
+  it('rejects resume requests while AI is disabled before persistence restore is evaluated', async () => {
+    delete process.env.SMARTPERFETTO_API_KEY;
+    process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
+    process.env.SMARTPERFETTO_AI_ENABLED = 'false';
+
+    const res = await analystHeaders(request(makeApp()).post('/api/agent/v1/resume'))
+      .send({ sessionId: 'session-disabled' });
+
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'AI_DISABLED',
+      feature: 'agent_resume',
+    });
   });
 
   it('rejects analyze when the scoped trace processor lease is draining', async () => {
@@ -467,6 +542,54 @@ describe('agent route RBAC', () => {
             confidence: 0.9,
             findings: [],
             reportUrl: '/api/reports/report-from-db',
+            analysisReceipt: {
+              schemaVersion: 1,
+              runId,
+              sessionId,
+              traceId,
+              mode: 'full',
+              resolvedMode: 'full',
+              providerId: 'provider-a',
+              generatedAt: 1_777_000_002_000,
+              traceEvidence: {
+                sqlCount: 2,
+                skillCount: 1,
+                dataEnvelopeCount: 3,
+                artifactCount: 1,
+                evidenceRefCount: 4,
+              },
+              nonEvidenceContext: {
+                frontendPrequeryCount: 0,
+                memoryHintCount: 0,
+                conversationContextCount: 2,
+                strategyHintCount: 1,
+              },
+              claimAudit: {
+                totalClaims: 2,
+                verifiedClaims: 2,
+                unsupportedClaims: 0,
+                uncertainClaims: 0,
+              },
+              qualityGates: {
+                finalReportContract: 'passed',
+                claimVerification: 'passed',
+                identityResolution: 'passed',
+              },
+              outputs: {
+                reportId: 'report-from-db',
+                reportUrl: '/api/reports/report-from-db',
+              },
+            },
+            uiActionProposals: [{
+              schemaVersion: 1,
+              id: 'ui-pin_evidence-db',
+              kind: 'pin_evidence',
+              title: '固定启动证据',
+              reason: '用于后续追问',
+              source: { evidenceRefId: 'data:startup:summary:123' },
+              payload: { evidenceRefId: 'data:startup:summary:123' },
+              requiresConfirmation: true,
+            }],
           },
         }),
         createdAt: 1_777_000_002_000,
@@ -483,6 +606,12 @@ describe('agent route RBAC', () => {
       expect(streamRes.text).toContain('id: 99');
       expect(streamRes.text).toContain('event: analysis_completed');
       expect(streamRes.text).toContain('/api/reports/report-from-db');
+      expect(streamRes.text).toContain('"analysisReceipt"');
+      expect(streamRes.text).toContain('"uiActionProposals"');
+      expect(streamRes.text).toContain('ui-pin_evidence-db');
+      expect(streamRes.text).toContain('"schemaVersion":1');
+      expect(streamRes.text).toContain(`"runId":"${runId}"`);
+      expect(streamRes.text).toContain('"claimVerification":"passed"');
       expect(streamRes.text).toContain('"partial":true');
       expect(streamRes.text).toContain('最终结果质量闸门');
 
@@ -496,6 +625,12 @@ describe('agent route RBAC', () => {
       expect(legacyQueryStreamRes.text).toContain('id: 99');
       expect(legacyQueryStreamRes.text).toContain('event: analysis_completed');
       expect(legacyQueryStreamRes.text).toContain('/api/reports/report-from-db');
+      expect(legacyQueryStreamRes.text).toContain('"analysisReceipt"');
+      expect(legacyQueryStreamRes.text).toContain('"uiActionProposals"');
+      expect(legacyQueryStreamRes.text).toContain('ui-pin_evidence-db');
+      expect(legacyQueryStreamRes.text).toContain('"schemaVersion":1');
+      expect(legacyQueryStreamRes.text).toContain(`"runId":"${runId}"`);
+      expect(legacyQueryStreamRes.text).toContain('"claimVerification":"passed"');
       expect(legacyQueryStreamRes.text).toContain('"partial":true');
       expect(legacyQueryStreamRes.text).toContain('最终结果质量闸门');
       leaseStore = getTraceProcessorLeaseStore();

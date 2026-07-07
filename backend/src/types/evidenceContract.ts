@@ -46,6 +46,7 @@ export interface EvidenceContextV1 {
   skillId?: string;
   stepId?: string;
   queryHash?: string;
+  queryReviewId?: string;
   sqlTextRef?: string;
   paramsHash?: string;
   /** Canonical artifact id used by Evidence Contract consumers. */

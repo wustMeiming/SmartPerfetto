@@ -83,6 +83,12 @@ import {
   rethrowIfTraceProcessorQueryCancelled,
   throwIfTraceProcessorQueryCancelled,
 } from '../traceProcessorCancellation';
+import {
+  AiDisabledError,
+  assertAiFeatureEnabled,
+  getAiCapabilityPolicy,
+  isAiFeatureEnabled,
+} from '../aiCapabilityPolicy';
 
 // =============================================================================
 // Layered Result Types
@@ -1175,6 +1181,11 @@ export class SkillExecutor {
     }
   }
 
+  replaceRegisteredSkills(skills: SkillDefinition[]): void {
+    this.skillRegistry.clear();
+    this.registerSkills(skills);
+  }
+
   /**
    * 发送事件到前端
    */
@@ -1204,6 +1215,30 @@ export class SkillExecutor {
       startTs: target.startTs ?? null,
       endTs: target.endTs ?? null,
     });
+  }
+
+  private buildAiDisabledStepResult(
+    stepId: string,
+    stepType: StepResult['stepType'],
+    startTime: number,
+  ): StepResult | null {
+    const policy = getAiCapabilityPolicy();
+    if (isAiFeatureEnabled('llm_skill_step', policy)) {
+      return null;
+    }
+    const error = new AiDisabledError('llm_skill_step', policy);
+    return {
+      stepId,
+      stepType,
+      success: false,
+      error: error.message,
+      code: error.code,
+      data: {
+        code: error.code,
+        feature: error.feature,
+      },
+      executionTimeMs: Date.now() - startTime,
+    };
   }
 
   private toNumber(value: any): number | undefined {
@@ -2780,11 +2815,16 @@ export class SkillExecutor {
     } catch (error: any) {
       rethrowIfTraceProcessorQueryCancelled(error);
       const failedStep = step as SkillStep;
+      const aiDisabledError = error instanceof AiDisabledError ? error : null;
       result = {
         stepId: failedStep.id,
         stepType: failedStep.type || 'skill',
         success: false,
         error: error.message,
+        code: aiDisabledError?.code,
+        data: aiDisabledError
+          ? { code: aiDisabledError.code, feature: aiDisabledError.feature }
+          : undefined,
         executionTimeMs: Date.now() - startTime,
       };
     }
@@ -2793,7 +2833,7 @@ export class SkillExecutor {
       type: 'step_completed',
       skillId: parentSkillId,
       stepId: step.id,
-      data: { success: result.success, error: result.error },
+      data: { success: result.success, error: result.error, code: result.code },
     });
 
     return result;
@@ -3190,6 +3230,10 @@ export class SkillExecutor {
 
     // 如果没有匹配的规则且配置了 AI 辅助，调用 AI
     if (diagnostics.length === 0 && step.ai_assist && step.fallback && this.aiService) {
+      const disabledResult = this.buildAiDisabledStepResult(step.id, 'diagnostic', startTime);
+      if (disabledResult) {
+        return disabledResult;
+      }
       const aiResult = await this.callAI(step.fallback.prompt, context);
       if (aiResult) {
         diagnostics.push({
@@ -3355,6 +3399,11 @@ export class SkillExecutor {
   ): Promise<StepResult> {
     const startTime = Date.now();
 
+    const disabledResult = this.buildAiDisabledStepResult(step.id, 'ai_decision', startTime);
+    if (disabledResult) {
+      return disabledResult;
+    }
+
     if (!this.aiService) {
       return {
         stepId: step.id,
@@ -3405,6 +3454,11 @@ export class SkillExecutor {
     context: SkillExecutionContext
   ): Promise<StepResult> {
     const startTime = Date.now();
+
+    const disabledResult = this.buildAiDisabledStepResult(step.id, 'ai_summary', startTime);
+    if (disabledResult) {
+      return disabledResult;
+    }
 
     if (!this.aiService) {
       return {
@@ -3664,11 +3718,12 @@ export class SkillExecutor {
   /**
    * 调用 AI 服务
    */
-  private async callAI(prompt: string, _context: SkillExecutionContext, taskType: any = 'general'): Promise<string> {
+  private async callAI(prompt: string, _context: SkillExecutionContext, taskType: string = 'general'): Promise<string> {
     if (!this.aiService) {
       return '';
     }
 
+    assertAiFeatureEnabled('llm_skill_step');
     const safePrompt = redactTextForLLM(prompt).text;
     try {
       if (typeof this.aiService.chat === 'function') {
@@ -3680,6 +3735,9 @@ export class SkillExecutor {
       }
       throw new Error('AI service does not implement chat');
     } catch (error: any) {
+      if (error instanceof AiDisabledError) {
+        throw error;
+      }
       console.error('[SkillExecutor] AI call failed:', error.message);
       return '';
     }

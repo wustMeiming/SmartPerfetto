@@ -133,6 +133,8 @@ Trace 实时对比用于在同一个 AI 对话中选择一条 reference Trace，
 - 点击顶部 `fact_check` 图标打开“分析结果对比”。
 - 选择一个 `基线` 和一个或多个 `候选`。
 - 可选：把 private 结果 `共享` 为 workspace 可见。
+- 可选：点结果行上的 `travel_explore` 查看相似 snapshot / case hint，
+  这些 hint 只作为 `navigation_hint_only`。
 - 点击 `开始对比`。
 
 效果：
@@ -140,6 +142,7 @@ Trace 实时对比用于在同一个 AI 对话中选择一条 reference Trace，
 - 输出 baseline/candidate 的标准指标矩阵和 delta。
 - 支持启动耗时、FPS/Jank 等可标准化指标。
 - 支持 2 个或更多 snapshot。
+- 支持在开始正式对比前查看相似历史结果提示，但不会把相似度当作诊断证据。
 - 当存在唯一的其他候选结果时，AI 可以直接从自然语言请求触发对比；对象不唯一时会要求选择。
 - 输出显著变化数量，并提供 HTML comparison report。
 

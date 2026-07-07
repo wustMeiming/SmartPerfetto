@@ -67,6 +67,7 @@ Agent wants a tool call
 | `compare_baselines` | Compare baseline metrics |
 | `recall_project_memory` | Retrieve project memory |
 | `recall_similar_case` | Retrieve similar analysis cases |
+| `recall_similar_result` | Retrieve similar analysis-result snapshots as `navigation_hint_only` output |
 | `recall_patterns` | Retrieve patterns or anti-patterns, usually as internal analysis support |
 
 Knowledge and memory support the investigation; they must not override current trace evidence.

@@ -29,11 +29,13 @@ import { runConfigInitCommand } from './commands/config';
 import { runProviderListCommand, runProviderTestCommand } from './commands/provider';
 import { runQueryCommand } from './commands/query';
 import { runSkillCommand } from './commands/skill';
+import { runBatchSkillCommand } from './commands/batch';
 import { runCompareCommand } from './commands/compare';
 import {
   runCaptureAndroidCommand,
   runCaptureConfigCommand,
   runCapturePresetsCommand,
+  runCaptureSuggestCommand,
 } from './commands/capture';
 import { isCapturePresetId } from './services/captureConfig';
 import {
@@ -483,6 +485,39 @@ function main(): void {
       }));
     });
 
+  const batchCmd = program.command('batch').description('run deterministic batch workflows');
+  batchCmd
+    .command('skill <skillId> [trace...]')
+    .description('execute a SmartPerfetto skill across a bounded local trace set')
+    .option('--trace-list <file>', 'file containing one trace path per line')
+    .option('--params <json>', 'skill params as a JSON object')
+    .option('--concurrency <n>', 'max local trace concurrency')
+    .option('--format <format>', 'output format: text, json, ndjson')
+    .option('--out <html>', 'write HTML report to this path')
+    .option('--json-out <json>', 'write JSON result to this path')
+    .action(async (skillId: string, traces: string[] | undefined, opts: {
+      traceList?: string;
+      params?: string;
+      concurrency?: string;
+      format?: string;
+      out?: string;
+      jsonOut?: string;
+    }) => {
+      const g = globals();
+      await runAndExit(() => runBatchSkillCommand({
+        skillId,
+        traces: traces ?? [],
+        traceList: opts.traceList,
+        params: opts.params,
+        concurrency: opts.concurrency,
+        envFile: g.envFile,
+        sessionDir: g.sessionDir,
+        format: format(opts.format),
+        out: opts.out,
+        jsonOut: opts.jsonOut,
+      }));
+    });
+
   program
     .command('compare <currentTrace> <referenceTrace>')
     .description('compare two traces with AI-assisted analysis')
@@ -517,6 +552,27 @@ function main(): void {
     .action(async (opts: { format?: string }) => {
       const g = globals();
       await runAndExit(() => runCapturePresetsCommand({
+        envFile: g.envFile,
+        sessionDir: g.sessionDir,
+        format: textJsonFormat(opts.format),
+      }));
+    });
+  captureCmd
+    .command('suggest <request...>')
+    .description('suggest a side-effect-free Android trace config proposal')
+    .option('--app <package>', 'target Android package name or *', '*')
+    .option('--duration <seconds>', 'capture duration in seconds', (v) => Number.parseFloat(v))
+    .option('--categories <category...>', 'additional atrace categories to include in the proposal')
+    .option('--cuj <name>', 'optional CUJ name to annotate generated config metadata')
+    .option('--format <format>', 'output format: text, json')
+    .action(async (requestParts: string[], opts: { app?: string; duration?: number; categories?: string[]; cuj?: string; format?: string }) => {
+      const g = globals();
+      await runAndExit(() => runCaptureSuggestCommand({
+        request: requestParts.join(' '),
+        app: opts.app,
+        durationSeconds: opts.duration,
+        categories: opts.categories,
+        cuj: opts.cuj,
         envFile: g.envFile,
         sessionDir: g.sessionDir,
         format: textJsonFormat(opts.format),
