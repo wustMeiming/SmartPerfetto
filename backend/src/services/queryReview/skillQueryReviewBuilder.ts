@@ -94,6 +94,7 @@ export function buildSkillQueryReview(input: BuildSkillQueryReviewInput): QueryR
       planPhaseId: input.producer?.planPhaseId,
       planPhaseTitle: input.producer?.planPhaseTitle,
       traceSide: input.traceProvenance?.traceSide,
+      paneSide: input.traceProvenance?.paneSide,
       traceId: input.traceProvenance?.traceId,
     },
     title: `${input.skillId}:${input.displayResult.stepId} review`,

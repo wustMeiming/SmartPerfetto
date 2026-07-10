@@ -139,6 +139,7 @@ export type QueryReviewProducerKind = 'execute_sql' | 'execute_sql_on' | 'invoke
 export type QueryReviewConfidence = 'declared' | 'observed' | 'partial';
 export type QueryReviewGuardrailSeverity = 'info' | 'warning';
 export type QueryReviewAllowedUse = 'review_metadata_only';
+export type QueryReviewPaneSide = 'left' | 'right' | 'top' | 'bottom';
 
 export interface QueryReviewProducerV1 {
   kind: QueryReviewProducerKind;
@@ -147,6 +148,7 @@ export interface QueryReviewProducerV1 {
   planPhaseId?: string;
   planPhaseTitle?: string;
   traceSide?: 'current' | 'reference';
+  paneSide?: QueryReviewPaneSide;
   traceId?: string;
 }
 
@@ -370,6 +372,8 @@ export interface DataEnvelopeMeta {
 
   /** Trace side for comparison-mode outputs */
   traceSide?: 'current' | 'reference';
+
+  paneSide?: 'left' | 'right' | 'top' | 'bottom';
 
   /** Backend trace identifier used to produce this data */
   traceId?: string;

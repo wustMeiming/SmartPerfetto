@@ -283,6 +283,7 @@ describe('analysis result snapshot pipeline', () => {
         timestamp: 0,
         evidenceRefId: 'data:sql:current:trace-a:q1',
         traceSide: 'current' as const,
+        paneSide: 'left' as const,
         traceId: 'trace-a',
         queryHash: 'q1',
         sourceToolCallId: 'execute_sql_on:1:params_hash:current',
@@ -309,6 +310,7 @@ describe('analysis result snapshot pipeline', () => {
         ...currentSql.meta,
         evidenceRefId: 'data:sql:reference:trace-b:q1',
         traceSide: 'reference' as const,
+        paneSide: 'right' as const,
         traceId: 'trace-b',
         sourceToolCallId: 'execute_sql_on:2:params_hash:reference',
         toolNarration: '执行对比 SQL：查询参考 Trace 帧率',
@@ -338,6 +340,7 @@ describe('analysis result snapshot pipeline', () => {
     ]);
     expect(dataRefs?.[0].metadata).toEqual(expect.objectContaining({
       traceSide: 'current',
+      paneSide: 'left',
       traceId: 'trace-a',
       queryHash: 'q1',
       sourceToolCallId: 'execute_sql_on:1:params_hash:current',
@@ -350,6 +353,7 @@ describe('analysis result snapshot pipeline', () => {
     }));
     expect(dataRefs?.[1].metadata).toEqual(expect.objectContaining({
       traceSide: 'reference',
+      paneSide: 'right',
       traceId: 'trace-b',
       queryHash: 'q1',
       sourceToolCallId: 'execute_sql_on:2:params_hash:reference',

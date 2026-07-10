@@ -138,6 +138,9 @@ reports or snapshots.
 | Raw Trace Compare | frontend reference trace, CLI `smp compare` | live current trace + reference trace queries | shared comparison identity, evidence pack, session snapshot, and report section |
 | Analysis Result Compare | frontend multi-result comparison API | persisted completed-analysis snapshots | keeps workspace/RBAC/matrix behavior and reuses the shared report section |
 
+For the Web UI dual trace workspace state machine, see
+[Dual Trace Workspace Operation Model](dual-trace-workspace.en.md).
+
 ## Content Boundaries
 
 | Content | Location | Runtime role |

@@ -66,6 +66,9 @@ export interface ArtifactSummary {
   sourceToolCallId?: string;
   identityResolution?: IdentityResolutionV1;
   queryReview?: CompactQueryReviewForToolResponse;
+  traceSide?: TraceProcessorQueryProvenance['traceSide'];
+  paneSide?: TraceProcessorQueryProvenance['paneSide'];
+  traceId?: string;
 }
 
 /**
@@ -86,6 +89,7 @@ export interface CompactArtifactSummary {
   planPhaseId?: string;
   planPhaseTitle?: string;
   traceSide?: TraceProcessorQueryProvenance['traceSide'];
+  paneSide?: TraceProcessorQueryProvenance['paneSide'];
   traceId?: string;
   queryReview?: CompactQueryReviewForToolResponse;
 }
@@ -192,6 +196,9 @@ export class ArtifactStore {
       planPhaseGoal: artifact.planPhaseGoal,
       sourceToolCallId: artifact.sourceToolCallId,
       identityResolution: artifact.identityResolution,
+      ...(artifact.traceProvenance?.traceSide ? { traceSide: artifact.traceProvenance.traceSide } : {}),
+      ...(artifact.traceProvenance?.paneSide ? { paneSide: artifact.traceProvenance.paneSide } : {}),
+      ...(artifact.traceProvenance?.traceId ? { traceId: artifact.traceProvenance.traceId } : {}),
       ...(artifact.queryReview ? { queryReview: compactQueryReviewForToolResponse(artifact.queryReview) } : {}),
     };
   }
@@ -226,6 +233,7 @@ export class ArtifactStore {
       ...(full.planPhaseId ? { planPhaseId: full.planPhaseId } : {}),
       ...(full.planPhaseTitle ? { planPhaseTitle: full.planPhaseTitle } : {}),
       ...(artifact?.traceProvenance?.traceSide ? { traceSide: artifact.traceProvenance.traceSide } : {}),
+      ...(artifact?.traceProvenance?.paneSide ? { paneSide: artifact.traceProvenance.paneSide } : {}),
       ...(artifact?.traceProvenance?.traceId ? { traceId: artifact.traceProvenance.traceId } : {}),
       ...(artifact?.queryReview ? { queryReview: compactQueryReviewForToolResponse(artifact.queryReview) } : {}),
     };
@@ -267,6 +275,7 @@ export class ArtifactStore {
           paramsHash: artifact.paramsHash,
           identityResolution: artifact.identityResolution,
           traceSide: artifact.traceProvenance?.traceSide,
+          paneSide: artifact.traceProvenance?.paneSide,
           traceId: artifact.traceProvenance?.traceId,
           traceProvenance: artifact.traceProvenance,
           ...(artifact.queryReview ? { queryReview: compactQueryReviewForToolResponse(artifact.queryReview) } : {}),
@@ -295,6 +304,7 @@ export class ArtifactStore {
           paramsHash: artifact.paramsHash,
           identityResolution: artifact.identityResolution,
           traceSide: artifact.traceProvenance?.traceSide,
+          paneSide: artifact.traceProvenance?.paneSide,
           traceId: artifact.traceProvenance?.traceId,
           traceProvenance: artifact.traceProvenance,
           queryReview: artifact.queryReview,

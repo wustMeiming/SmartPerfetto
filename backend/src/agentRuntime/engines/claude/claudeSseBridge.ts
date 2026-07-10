@@ -9,7 +9,7 @@ import {
   SDK_MAX_TURNS_SUBTYPE,
 } from '../../../agentv3/analysisTermination';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from '../../../agentv3/outputLanguage';
-import { formatToolCallNarration } from '../../../agentv3/toolNarration';
+import { formatToolCallNarration, type ToolNarrationOptions } from '../../../agentv3/toolNarration';
 
 export type UpdateEmitter = (update: StreamingUpdate) => void;
 
@@ -57,6 +57,7 @@ export interface SseBridge {
 export function createSseBridge(
   emit: UpdateEmitter,
   language: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE,
+  narrationOptions: ToolNarrationOptions = {},
 ): SseBridge {
   let lastToolUseId: string | undefined;
   /**
@@ -238,7 +239,7 @@ export function createSseBridge(
       for (const block of content) {
         if (block.type === 'tool_use') {
           lastToolUseId = block.id;
-          const friendlyMsg = formatToolCallNarration(block.name, block.input, language);
+          const friendlyMsg = formatToolCallNarration(block.name, block.input, language, narrationOptions);
           emit({
             type: 'agent_task_dispatched',
             content: { taskId: block.id, toolName: block.name, args: block.input, message: friendlyMsg },

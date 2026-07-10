@@ -43,6 +43,9 @@ interface ClaimSourceLookupEntry {
   count: number;
 }
 
+type ReportTraceSide = 'current' | 'reference';
+type ReportPaneSide = NonNullable<DataEnvelope['meta']['paneSide']>;
+
 export interface ReportData {
   sessionId: string;
   traceId: string;
@@ -5738,7 +5741,14 @@ export class HTMLReportGenerator {
       outputLanguage,
     );
     const source = envelope.meta?.source || '';
-    const traceSide = (envelope.meta as any)?.traceSide || (envelope as any)?.traceSide || '';
+    const envelopeRecord = this.asReportRecord(envelope) || {};
+    const metaRecord = this.asReportRecord(envelope.meta) || {};
+    const traceProvenance = this.asReportRecord(envelopeRecord.traceProvenance) || {};
+    const traceLocation = this.formatReportTraceLocation(
+      metaRecord.traceSide || envelopeRecord.traceSide || traceProvenance.traceSide,
+      metaRecord.paneSide || envelopeRecord.paneSide || traceProvenance.paneSide,
+      outputLanguage,
+    );
     const planPhaseId = envelope.meta?.planPhaseId || '';
     const planPhaseTitle = envelope.meta?.planPhaseTitle || '';
     const producerReason = this.getReportEnvelopePurpose(envelope, title, outputLanguage);
@@ -5746,11 +5756,7 @@ export class HTMLReportGenerator {
     const layer = envelope.display?.layer || '';
 
     const metaParts: string[] = [];
-    if (traceSide) {
-      metaParts.push(this.escapeHtml(traceSide === 'reference'
-        ? localize(outputLanguage, '参考 Trace', 'Reference trace')
-        : localize(outputLanguage, '当前 Trace', 'Current trace')));
-    }
+    if (traceLocation) metaParts.push(this.escapeHtml(traceLocation));
     if (source) metaParts.push(`${this.escapeHtml(localize(outputLanguage, '来源', 'Source'))}: ${this.escapeHtml(this.formatEnvelopeSource(source))}`);
     if (layer) metaParts.push(this.escapeHtml(`DataEnvelope.${layer}`));
     if (planPhaseId || planPhaseTitle) {
@@ -5785,6 +5791,59 @@ export class HTMLReportGenerator {
         </div>
       </div>
     `;
+  }
+
+  private normalizeReportTraceSide(value: unknown): ReportTraceSide | undefined {
+    return value === 'current' || value === 'reference' ? value : undefined;
+  }
+
+  private normalizeReportPaneSide(value: unknown): ReportPaneSide | undefined {
+    switch (value) {
+      case 'left':
+      case 'right':
+      case 'top':
+      case 'bottom':
+        return value;
+      default:
+        return undefined;
+    }
+  }
+
+  private formatReportTraceSideLabel(
+    traceSide: ReportTraceSide | undefined,
+    outputLanguage: OutputLanguage,
+  ): string {
+    if (traceSide === 'current') return localize(outputLanguage, '当前 Trace', 'Current trace');
+    if (traceSide === 'reference') return localize(outputLanguage, '参考 Trace', 'Reference trace');
+    return '';
+  }
+
+  private formatReportPaneLabel(
+    paneSide: ReportPaneSide | undefined,
+    outputLanguage: OutputLanguage,
+  ): string {
+    if (paneSide === 'left') return localize(outputLanguage, '左侧', 'Left pane');
+    if (paneSide === 'right') return localize(outputLanguage, '右侧', 'Right pane');
+    if (paneSide === 'top') return localize(outputLanguage, '上方', 'Top pane');
+    if (paneSide === 'bottom') return localize(outputLanguage, '下方', 'Bottom pane');
+    return '';
+  }
+
+  private formatReportTraceLocation(
+    traceSide: unknown,
+    paneSide: unknown,
+    outputLanguage: OutputLanguage,
+  ): string {
+    const traceLabel = this.formatReportTraceSideLabel(
+      this.normalizeReportTraceSide(traceSide),
+      outputLanguage,
+    );
+    const paneLabel = this.formatReportPaneLabel(
+      this.normalizeReportPaneSide(paneSide),
+      outputLanguage,
+    );
+    if (paneLabel && traceLabel) return `${paneLabel}/${traceLabel}`;
+    return paneLabel || traceLabel;
   }
 
   private renderEnvelopeQueryReview(

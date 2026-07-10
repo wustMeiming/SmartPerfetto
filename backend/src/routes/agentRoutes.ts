@@ -1285,6 +1285,35 @@ function requestedSessionIsVisible(sessionId: string, context: RequestContext): 
   return !persistedSession || isOwnedByContext(persistedSession.metadata, context);
 }
 
+function normalizeRouteReferenceTraceId(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function resolveVisibleSessionReferenceTraceIdForTrace(
+  sessionId: string | undefined,
+  traceId: string,
+  context: RequestContext,
+): string | undefined {
+  if (!sessionId) return undefined;
+
+  const activeSession = assistantAppService.getSession(sessionId);
+  if (activeSession) {
+    if (activeSession.traceId !== traceId || !isOwnedByContext(activeSession, context)) {
+      return undefined;
+    }
+    return normalizeRouteReferenceTraceId(activeSession.referenceTraceId);
+  }
+
+  const persistenceService = SessionPersistenceService.getInstance();
+  const persistedSession = persistenceService.getSession(sessionId);
+  if (!persistedSession || persistedSession.traceId !== traceId || !isOwnedByContext(persistedSession.metadata, context)) {
+    return undefined;
+  }
+  return normalizeRouteReferenceTraceId(persistedSession.metadata?.referenceTraceId)
+    ?? normalizeRouteReferenceTraceId(persistedSession.metadata?.sessionStateSnapshot?.referenceTraceId)
+    ?? normalizeRouteReferenceTraceId(persistenceService.loadSessionStateSnapshot(sessionId)?.referenceTraceId);
+}
+
 function buildTurnSeverityCounts(turn: ConversationTurn): Record<string, number> {
   const counts: Record<string, number> = {
     critical: 0,
@@ -1750,11 +1779,22 @@ async function handleAnalyzeRequest(
       return;
     }
 
+    const inheritedReferenceTraceId = resolveVisibleSessionReferenceTraceIdForTrace(
+      requestedSessionId,
+      traceId,
+      requestContext,
+    );
     let options: ReturnType<typeof normalizeAnalyzeOptions>;
     try {
       options = normalizeAnalyzeOptions(rawOptions, {
         endpoint: requestedSessionIdOverride ? '/sessions/:id/runs' : '/analyze',
-        hasReferenceTraceId: !!referenceTraceId,
+        hasReferenceTraceId: !!referenceTraceId || !!inheritedReferenceTraceId,
+        ...(typeof traceId === 'string' ? { traceId } : {}),
+        ...(typeof referenceTraceId === 'string'
+          ? { referenceTraceId }
+          : typeof inheritedReferenceTraceId === 'string'
+            ? { referenceTraceId: inheritedReferenceTraceId }
+            : {}),
       });
     } catch (error: any) {
       if (error instanceof AnalyzeOptionsError) {
@@ -4232,6 +4272,7 @@ async function runAgentDrivenAnalysis(
         analysisMode: options.analysisMode,
         traceContext: decoratedTraceContext,
         referenceTraceId: options.referenceTraceId,
+        tracePairContext: options.tracePairContext,
         providerId: options.providerId,
         codeAwareMode: options.codeAwareMode,
         codebaseIds: Array.isArray(options.codebaseIds) ? options.codebaseIds : undefined,
@@ -4505,6 +4546,46 @@ function summarizeTimelineToolCall(content: Record<string, any>): string {
   return message;
 }
 
+function normalizeTimelineTraceSide(value: unknown): 'current' | 'reference' | undefined {
+  return value === 'current' || value === 'reference' ? value : undefined;
+}
+
+function normalizeTimelinePaneSide(value: unknown): 'left' | 'right' | 'top' | 'bottom' | undefined {
+  return value === 'left' || value === 'right' || value === 'top' || value === 'bottom'
+    ? value
+    : undefined;
+}
+
+function timelineTraceRoleLabel(traceSide: 'current' | 'reference'): string {
+  return traceSide === 'reference' ? '参考' : '当前';
+}
+
+function timelinePaneLabel(paneSide: 'left' | 'right' | 'top' | 'bottom'): string {
+  switch (paneSide) {
+    case 'left':
+      return '左侧';
+    case 'right':
+      return '右侧';
+    case 'top':
+      return '上方';
+    case 'bottom':
+      return '下方';
+  }
+}
+
+function timelineTraceLocationLabel(envelope: Record<string, any>): string | undefined {
+  const traceSide = normalizeTimelineTraceSide(
+    envelope?.meta?.traceSide || envelope?.traceSide || envelope?.traceProvenance?.traceSide,
+  );
+  if (!traceSide) return undefined;
+
+  const paneSide = normalizeTimelinePaneSide(
+    envelope?.meta?.paneSide || envelope?.paneSide || envelope?.traceProvenance?.paneSide,
+  );
+  const roleLabel = timelineTraceRoleLabel(traceSide);
+  return paneSide ? `${timelinePaneLabel(paneSide)}/${roleLabel}` : roleLabel;
+}
+
 function summarizeTimelineResult(content: Record<string, any>): string {
   const candidates = [
     content.summary,
@@ -4539,11 +4620,11 @@ function summarizeDataEnvelopeForTimeline(update: StreamingUpdate): string {
   const rowText = rows.length > 0
     ? `，共 ${rows.reduce((sum, rowCount) => sum + rowCount, 0)} 行`
     : '';
-  const traceSides = [...new Set(envelopes
-    .map((env) => env?.meta?.traceSide || env?.traceSide || env?.traceProvenance?.traceSide)
-    .filter((side): side is string => side === 'current' || side === 'reference'))];
-  const traceText = traceSides.length > 0
-    ? `，Trace: ${traceSides.map(side => side === 'reference' ? '参考' : '当前').join('/')}`
+  const traceLocations = [...new Set(envelopes
+    .map(timelineTraceLocationLabel)
+    .filter((label): label is string => !!label))];
+  const traceText = traceLocations.length > 0
+    ? `，Trace: ${traceLocations.join('/')}`
     : '';
   const evidenceRefs = envelopes
     .map((env) => sanitizeConversationText(env?.meta?.evidenceRefId))

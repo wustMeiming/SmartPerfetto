@@ -5,11 +5,24 @@
 import type { TraceDataset } from '../agent/core/orchestratorTypes';
 import type { QuickRunContextInjectedCounts } from '../agent/core/orchestratorTypes';
 import type { Finding, SubAgentResult } from '../agent/types';
+import type { ComparisonContext, TracePairContext } from '../agentv3/types';
 import {
   DEFAULT_OUTPUT_LANGUAGE,
   localize,
   type OutputLanguage,
 } from '../agentv3/outputLanguage';
+
+export function buildRuntimeTracePairComparisonContext(input: {
+  readonly referenceTraceId?: string;
+  readonly tracePairContext?: TracePairContext;
+}): ComparisonContext | undefined {
+  if (!input.referenceTraceId) return undefined;
+  return {
+    referenceTraceId: input.referenceTraceId,
+    ...(input.tracePairContext ? { tracePairContext: input.tracePairContext } : {}),
+    commonCapabilities: [],
+  };
+}
 
 export function formatTraceContext(
   datasets: TraceDataset[] | undefined,
@@ -22,6 +35,7 @@ export function formatTraceContext(
       d.sourceToolCallId ? `- source_tool_call_id: \`${d.sourceToolCallId}\`` : undefined,
       d.queryHash ? `- query_hash: \`${d.queryHash}\`` : undefined,
       d.traceSide ? `- trace_side: \`${d.traceSide}\`` : undefined,
+      d.paneSide ? `- pane_side: \`${d.paneSide}\`` : undefined,
     ].filter(Boolean).join('\n');
     const header = `| ${d.columns.join(' | ')} |`;
     const sep = `| ${d.columns.map(() => '---').join(' | ')} |`;

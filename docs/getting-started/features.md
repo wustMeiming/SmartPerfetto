@@ -114,13 +114,21 @@ Trace 实时对比用于在同一个 AI 对话中选择一条 reference Trace，
 
 - 在 AI Assistant 顶部点击 `compare_arrows`。
 - 选择一条 reference Trace。
-- 继续提问，例如 `对比当前 trace 和参考 trace 的滑动差异`。
+- 选择后仍保持单窗默认视图；AI 对话已经进入 current/reference 双 Trace 上下文。
+- 需要同时操作两条完整 timeline 时，点击对比条里的 `打开双窗`。
+- 双窗打开后，当前 Trace 在左侧或上侧，reference Trace 在右侧或下侧；可以切换横向/纵向、拖动分隔条、最大化/最小化任意一边，或把某一边在新标签页打开。
+- 可以随时 `收起双窗` 回到单窗，但继续保留双 Trace AI 上下文；也可以 `退出对比` 清空 reference Trace。
+- 继续提问，例如 `对比当前 trace 和参考 trace 的滑动差异`、`左边启动为什么慢`、`上面的 trace 和下面的 trace 频率差异是什么`。
 
 效果：
 
 - AI 可以在同一次分析中访问 current/reference 两条 raw trace。
+- AI Panel 会把 current/reference、left/right、top/bottom、当前激活侧、双窗是否打开、分隔比例、最大化/最小化状态一起传给后端。
+- 用户说“左边、右边、上面、下面、current、reference”时，AI 会按当前双窗布局解析到对应 Trace；双窗收起时仍可继续用 current/reference 提问。
 - 适合临时对比两条已加载或可访问的 Trace。
 - 这个模式偏实时分析，不是跨窗口、跨用户的持久结果对比。
+
+完整操作模型见 [双 Trace 工作区操作模型](../architecture/dual-trace-workspace.md)。
 
 ## 7. 多 Trace 分析结果对比
 

@@ -57,7 +57,7 @@ import {
 import { isConclusionLikePlanPhase } from '../../../agentv3/planPhaseSemantics';
 import {
   formatPlanEvidenceGap,
-  recordPlanToolCall,
+  recordPlanOrPrePlanToolCall,
 } from '../../../agentv3/planToolCallRecorder';
 import {
   assessFinalResultQuality,
@@ -76,6 +76,7 @@ import type { RuntimeSelection } from '../../runtimeSelection';
 import type { RuntimeEngineDefinition, RuntimeFactoryInput } from '../../runtimeRegistry';
 import type { EngineCapabilities } from '../../runtimeDescriptorTypes';
 import { createAnalysisRunSpec, type AnalysisRunSpec } from '../../analysisRunSpec';
+import { buildRuntimeTracePairComparisonContext } from '../../runtimePromptContext';
 import { loadPromptTemplate } from '../../../agentv3/strategyLoader';
 import {
   EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
@@ -750,7 +751,7 @@ export function createPiAgentCoreToolFromSharedSpec(
         signal,
         ...(options.extra && typeof options.extra === 'object' ? options.extra : {}),
       });
-      recordPlanToolCall(options.analysisPlan?.current, {
+      recordPlanOrPrePlanToolCall(options.analysisPlan, {
         toolName: spec.name,
         input: toolArgs,
         resultText: summarizePiToolResult(result),
@@ -1713,6 +1714,10 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     const knowledgeScope = analysisRunSpec.scopes.knowledge;
     const recentSqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope);
     const skillNotesBudget = createRuntimeSkillNotesBudget(quickMode);
+    const comparisonContext = buildRuntimeTracePairComparisonContext({
+      ...(options.referenceTraceId ? { referenceTraceId: options.referenceTraceId } : {}),
+      ...(options.tracePairContext ? { tracePairContext: options.tracePairContext } : {}),
+    });
     const { toolDefinitions } = createClaudeMcpServer({
       sessionId,
       traceId,
@@ -1740,6 +1745,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
       referenceTraceId: options.referenceTraceId,
+      ...(comparisonContext ? { comparisonContext } : {}),
     });
     const allowedToolNames = new Set(toolDefinitions.map(definition => definition.name));
     const tools = toolDefinitions.map(definition => (
@@ -1847,6 +1853,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       outputLanguage,
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
+      ...(comparisonContext ? { comparison: comparisonContext } : {}),
     };
     const sharedSystemPrompt = buildSystemPrompt(analysisContext);
     return {

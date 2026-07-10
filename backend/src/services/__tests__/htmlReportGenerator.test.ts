@@ -324,6 +324,7 @@ describe('HTMLReportGenerator', () => {
         timestamp: Date.now(),
         evidenceRefId: 'data:sql_summary:reference:trace-hash:query-hash:tool-hash',
         traceSide: 'reference',
+        paneSide: 'right',
         traceId: 'trace-ref',
         queryHash: 'query-hash',
         sourceToolCallId: 'execute_sql_on:1:params_hash:reference',
@@ -370,6 +371,7 @@ describe('HTMLReportGenerator', () => {
     });
 
     expect(html).toContain('Reference SQL Summary');
+    expect(html).toContain('右侧/参考 Trace');
     expect(html).toContain('来源: execute_sql');
     expect(html).toContain('DataEnvelope.overview');
     expect(html).toContain('阶段: p1 Compare baseline');

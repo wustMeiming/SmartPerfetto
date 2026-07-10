@@ -28,13 +28,18 @@ describe('skillQueryReviewBuilder', () => {
     const review = buildSkillQueryReview({
       skillId: 'sched_analysis',
       displayResult: displayResult(),
-      traceProvenance: buildTraceProcessorQueryProvenance({traceId: 'trace-current', traceSide: 'current'}),
+      traceProvenance: buildTraceProcessorQueryProvenance({
+        traceId: 'trace-current',
+        traceSide: 'current',
+        paneSide: 'left',
+      }),
       producer: {sourceToolCallId: 'invoke_skill:1', paramsHash: 'params:1'},
       artifactId: 'art-1',
       evidenceRefId: 'data:skill:1',
     });
 
     expect(review?.producer.kind).toBe('invoke_skill');
+    expect(review?.producer.paneSide).toBe('left');
     expect(review?.source.skillId).toBe('sched_analysis');
     expect(review?.source.stepId).toBe('thread_states');
     expect(review?.reads.map(read => read.table)).toContain('thread_state');

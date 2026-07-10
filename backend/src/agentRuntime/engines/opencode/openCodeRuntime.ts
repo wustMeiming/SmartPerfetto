@@ -54,7 +54,7 @@ import {
 import { isConclusionLikePlanPhase } from '../../../agentv3/planPhaseSemantics';
 import {
   formatPlanEvidenceGap,
-  recordPlanToolCall,
+  recordPlanOrPrePlanToolCall,
 } from '../../../agentv3/planToolCallRecorder';
 import {
   createOpenCodeSnapshotEngineState,
@@ -78,6 +78,7 @@ import type { RuntimeSelection } from '../../runtimeSelection';
 import type { EngineCapabilities } from '../../runtimeDescriptorTypes';
 import type { RuntimeEngineDefinition, RuntimeFactoryInput } from '../../runtimeRegistry';
 import { createAnalysisRunSpec, type AnalysisRunSpec } from '../../analysisRunSpec';
+import { buildRuntimeTracePairComparisonContext } from '../../runtimePromptContext';
 import {
   buildQuickRunReceipt,
   buildEntityContext,
@@ -746,7 +747,7 @@ export async function dispatchOpenCodeBridgeRequest(
           signal: options.getSignal?.(),
         }),
       );
-      recordPlanToolCall(options.analysisPlan?.current, {
+      recordPlanOrPrePlanToolCall(options.analysisPlan, {
         toolName: definition.name,
         input: args,
         resultText: summarizeOpenCodeToolResult(result),
@@ -2207,6 +2208,10 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     const knowledgeScope = analysisRunSpec.scopes.knowledge;
     const recentSqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope);
     const skillNotesBudget = createRuntimeSkillNotesBudget(quickMode);
+    const comparisonContext = buildRuntimeTracePairComparisonContext({
+      ...(options.referenceTraceId ? { referenceTraceId: options.referenceTraceId } : {}),
+      ...(options.tracePairContext ? { tracePairContext: options.tracePairContext } : {}),
+    });
     const { toolDefinitions } = createClaudeMcpServer({
       sessionId,
       traceId,
@@ -2234,6 +2239,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
       referenceTraceId: options.referenceTraceId,
+      ...(comparisonContext ? { comparisonContext } : {}),
     });
     const allowedToolNames = new Set(toolDefinitions.map(definition => definition.name));
 
@@ -2331,6 +2337,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       outputLanguage,
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
+      ...(comparisonContext ? { comparison: comparisonContext } : {}),
     };
     const sharedSystemPrompt = buildSystemPrompt(analysisContext);
     const extraSystemPrompt = normalizeOptionalString(

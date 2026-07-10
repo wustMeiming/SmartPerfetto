@@ -510,6 +510,52 @@ describe('experimental Pi agent-core runtime contract', () => {
     expect(updates.map((update) => update.type)).not.toContain('answer_token');
   });
 
+  it('injects dual-trace pane mapping into the Pi comparison system prompt', async () => {
+    const runtime = new PiAgentCoreRuntime(
+      createFakeTraceProcessorService(),
+      { kind: 'pi-agent-core', source: 'env' },
+      {
+        env: { [PI_AGENT_CORE_MODEL_JSON_ENV]: PI_TEST_MODEL_JSON },
+        moduleLoader: async () => ({ Agent: FakePiAgent }),
+      },
+    );
+
+    await runtime.analyze('对比左右 Trace 的启动速度差异', 'session-pi-compare', 'trace-current', {
+      analysisMode: 'full',
+      packageName: 'com.example',
+      referenceTraceId: 'trace-reference',
+      tracePairContext: {
+        schemaVersion: 1,
+        layout: 'horizontal',
+        primarySide: 'left',
+        referenceSide: 'right',
+        workspaceOpen: true,
+        panes: [
+          {
+            side: 'left',
+            traceSide: 'current',
+            traceId: 'trace-current',
+            traceName: 'Current Trace',
+            visualState: 'live',
+          },
+          {
+            side: 'right',
+            traceSide: 'reference',
+            traceId: 'trace-reference',
+            traceName: 'Reference Trace',
+            visualState: 'live',
+          },
+        ],
+      },
+    });
+
+    const agent = FakePiAgent.instances[0];
+    expect(agent.state.systemPrompt).toContain('## 对比模式');
+    expect(agent.state.systemPrompt).toContain('### 窗口映射');
+    expect(agent.state.systemPrompt).toContain('左侧/当前 Trace');
+    expect(agent.state.systemPrompt).toContain('右侧/参考 Trace');
+  });
+
   it('hydrates Pi agent-core transcript state from opaque snapshots on follow-up', async () => {
     FakePiAgent.promptMessages = [
       {

@@ -310,6 +310,8 @@ export interface AnalysisOptions {
    */
   referenceTraceId?: string;
 
+  tracePairContext?: import('../../agentv3/types').TracePairContext;
+
   /**
    * Analysis mode override from UI/CLI.
    * - 'fast': force quick path (target 5 turns, hard-cap protected)
@@ -361,6 +363,7 @@ export interface TraceDataset {
   sourceToolCallId?: string;
   queryHash?: string;
   traceSide?: 'current' | 'reference';
+  paneSide?: import('../../agentv3/types').TracePaneSide;
   traceId?: string;
 }
 

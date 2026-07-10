@@ -114,13 +114,21 @@ Entry points:
 
 - Click `compare_arrows` in the AI Assistant header.
 - Select a reference trace.
-- Ask a comparison question, for example `Compare scrolling behavior between this trace and the reference trace`.
+- After selection, the UI stays in the default single-window view; the AI conversation already has current/reference two-trace context.
+- When you need to operate two full timelines at the same time, click `Open Dual View` in the comparison bar.
+- In dual view, the current trace is on the left or top and the reference trace is on the right or bottom. You can switch horizontal/vertical layout, drag the splitter, maximize/minimize either side, or open either side in a new tab.
+- You can `Collapse Dual View` at any time and keep the two-trace AI context, or `Exit Comparison` to clear the reference trace.
+- Ask a comparison question, for example `Compare scrolling behavior between this trace and the reference trace`, `Why is the left trace slower to start`, or `What frequency difference exists between the top and bottom traces`.
 
 Output:
 
 - The AI can access both current/reference raw traces in one analysis.
+- The AI Panel sends current/reference, left/right, top/bottom, active side, dual-view open state, split ratio, and maximized/minimized state to the backend.
+- When the user says "left", "right", "top", "bottom", "current", or "reference", the AI resolves that wording against the current dual-view layout; when dual view is collapsed, current/reference wording still works.
 - Useful for temporary two-trace comparison.
 - This mode is live analysis, not cross-window or cross-user persistent result comparison.
+
+See [Dual Trace Workspace Operation Model](../architecture/dual-trace-workspace.en.md) for the full interaction model.
 
 ## 7. Multi-Trace Analysis Result Comparison
 

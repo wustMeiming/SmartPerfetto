@@ -106,7 +106,7 @@ Code-aware output can appear in reports, exports, and snapshots; do not validate
 |---|---|
 | `execute_sql_on` | Run SQL on the current or reference trace |
 | `compare_skill` | Run a Skill on both traces and compare results |
-| `get_comparison_context` | Fetch trace-pair metadata and comparison context |
+| `get_comparison_context` | Fetch trace-pair metadata, left/right or top/bottom pane mapping, and comparison context |
 
 Comparison tools are registered only when `referenceTraceId` and comparison context are available. Raw trace comparison and analysis-result comparison should reuse the shared evidence/report contract.
 

@@ -87,6 +87,7 @@ export function buildSqlQueryReview(input: BuildSqlQueryReviewInput): QueryRevie
       planPhaseId: input.producer?.planPhaseId,
       planPhaseTitle: input.producer?.planPhaseTitle,
       traceSide: input.traceProvenance?.traceSide,
+      paneSide: input.traceProvenance?.paneSide,
       traceId: input.traceProvenance?.traceId,
     },
     title: input.title || localize(outputLanguage, '已执行 SQL review', 'Executed SQL review'),

@@ -16,7 +16,11 @@ describe('queryReviewBuilder', () => {
         WHERE ts BETWEEN \${start_ts} AND \${end_ts}
       `,
       outputColumns: [{name: 'total_dur', type: 'duration'}],
-      traceProvenance: buildTraceProcessorQueryProvenance({traceId: 'trace-reference', traceSide: 'reference'}),
+      traceProvenance: buildTraceProcessorQueryProvenance({
+        traceId: 'trace-reference',
+        traceSide: 'reference',
+        paneSide: 'right',
+      }),
       producer: {
         sourceToolCallId: 'execute_sql_on:1',
         paramsHash: 'params:1',
@@ -33,6 +37,7 @@ describe('queryReviewBuilder', () => {
 
     expect(review?.producer.kind).toBe('execute_sql_on');
     expect(review?.producer.traceSide).toBe('reference');
+    expect(review?.producer.paneSide).toBe('right');
     expect(review?.source.artifactId).toBe('art-1');
     expect(review?.reads.map(read => read.table)).toContain('thread_state');
     expect(review?.guardrails.map(item => item.ruleId)).toEqual(expect.arrayContaining([

@@ -84,7 +84,7 @@ function stableEnvelopeContentHash(env: DataEnvelope): string {
 
 function envelopeTraceValue(
   env: DataEnvelope,
-  key: 'traceSide' | 'traceId',
+  key: 'traceSide' | 'traceId' | 'paneSide',
 ): string | undefined {
   const envelopeAny = env as any;
   const metaValue = env.meta?.[key];
@@ -255,6 +255,7 @@ function evidenceRefsFromInput(input: CompletedAnalysisSnapshotInput): EvidenceR
         stepId: env.meta?.stepId,
         evidenceRefId: env.meta?.evidenceRefId,
         traceSide: envelopeTraceValue(env, 'traceSide'),
+        paneSide: envelopeTraceValue(env, 'paneSide'),
         traceId: envelopeTraceValue(env, 'traceId'),
         queryHash: env.meta?.queryHash,
         sourceToolCallId: env.meta?.sourceToolCallId,

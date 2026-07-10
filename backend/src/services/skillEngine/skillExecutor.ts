@@ -60,6 +60,7 @@ import {
 } from '../../types/teaching.types';
 import {
   DataEnvelope,
+  DataEnvelopeMeta,
   DataEnvelopeTraceSide,
   ColumnDefinition,
   createDataEnvelope,
@@ -4475,7 +4476,7 @@ export class SkillExecutor {
   public static toDataEnvelopes(
     result: SkillExecutionResult,
     columnDefinitions?: Record<string, Partial<ColumnDefinition>[]>,
-    provenance?: { traceId?: string; traceSide?: DataEnvelopeTraceSide },
+    provenance?: { traceId?: string; traceSide?: DataEnvelopeTraceSide; paneSide?: DataEnvelopeMeta['paneSide'] },
   ): DataEnvelope[] {
     return result.displayResults.map(dr => {
       // Prefer external columnDefinitions, fallback to embedded columnDefinitions in DisplayResult
@@ -4499,15 +4500,16 @@ export class SkillExecutor {
 
   public static attachTraceProvenanceToEnvelope(
     envelope: DataEnvelope,
-    provenance?: { traceId?: string; traceSide?: DataEnvelopeTraceSide },
+    provenance?: { traceId?: string; traceSide?: DataEnvelopeTraceSide; paneSide?: DataEnvelopeMeta['paneSide'] },
   ): DataEnvelope {
-    if (!provenance?.traceId && !provenance?.traceSide) return envelope;
+    if (!provenance?.traceId && !provenance?.traceSide && !provenance?.paneSide) return envelope;
     return {
       ...envelope,
       meta: {
         ...envelope.meta,
         ...(provenance.traceId && !envelope.meta.traceId ? { traceId: provenance.traceId } : {}),
         ...(provenance.traceSide && !envelope.meta.traceSide ? { traceSide: provenance.traceSide } : {}),
+        ...(provenance.paneSide && !envelope.meta.paneSide ? { paneSide: provenance.paneSide } : {}),
       },
     };
   }

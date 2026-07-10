@@ -13,6 +13,7 @@ import type { ComparisonReportSection } from '../../agentv3/sessionStateSnapshot
 import type { DataEnvelope, DataPayload, DataEnvelopeTraceSide } from '../../types/dataContract';
 import type {
   ClaimKindV1,
+  EvidencePaneSide,
   ClaimSupportV1,
   EvidenceAnchorV1,
   EvidenceCellV1,
@@ -305,6 +306,12 @@ function normalizeTraceSide(value: DataEnvelopeTraceSide | undefined): 'current'
   return value === 'current' || value === 'reference' ? value : 'unknown';
 }
 
+function normalizePaneSide(value: unknown): EvidencePaneSide | undefined {
+  return value === 'left' || value === 'right' || value === 'top' || value === 'bottom'
+    ? value
+    : undefined;
+}
+
 function toNumber(value: unknown): number | undefined {
   if (value === undefined || value === null || value === '') return undefined;
   const n = Number(value);
@@ -428,6 +435,7 @@ function buildAnchor(
       context: {
         traceId: meta.traceId || 'unknown',
         traceSide: normalizeTraceSide(meta.traceSide),
+        paneSide: normalizePaneSide(meta.paneSide),
         sourceToolCallId: meta.sourceToolCallId,
         toolCallId: meta.sourceToolCallId,
         producerKind: inferProducerKind(envelope, ref),
@@ -453,6 +461,7 @@ function buildAnchor(
     context: {
       traceId: meta.traceId || 'unknown',
       traceSide: normalizeTraceSide(meta.traceSide),
+      paneSide: normalizePaneSide(meta.paneSide),
       sourceToolCallId: meta.sourceToolCallId,
       toolCallId: meta.sourceToolCallId,
       producerKind: inferProducerKind(envelope, ref),

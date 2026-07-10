@@ -1018,8 +1018,15 @@ describe('Iterator Step 执行', () => {
     expect((dr as any).data.columns).toEqual(['primary_cause', 'deep_reason', 'confidence']);
     expect((dr as any).data.rows).toEqual([['主线程耗时过长', 'RecyclerView 绑定耗时', '高']]);
 
-    const envelopes = SkillExecutor.toDataEnvelopes(result);
+    const envelopes = SkillExecutor.toDataEnvelopes(result, undefined, {
+      traceId: 'trace-reference',
+      traceSide: 'reference',
+      paneSide: 'right',
+    });
     expect(envelopes).toHaveLength(1);
+    expect(envelopes[0].meta.traceId).toBe('trace-reference');
+    expect(envelopes[0].meta.traceSide).toBe('reference');
+    expect(envelopes[0].meta.paneSide).toBe('right');
     expect(envelopes[0].display.columns?.map(c => c.name)).toEqual([
       'primary_cause',
       'deep_reason',

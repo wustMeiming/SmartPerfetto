@@ -711,6 +711,63 @@ describe('experimental OpenCode runtime contract', () => {
     ]));
   });
 
+  it('injects dual-trace pane mapping into the OpenCode comparison system prompt', async () => {
+    const record: { createOptions?: Record<string, unknown>; promptInput?: unknown; closeCount: number } = {
+      closeCount: 0,
+    };
+    const runtime = new OpenCodeRuntime(
+      createFakeRuntimeInput({
+        selection: { kind: OPENCODE_RUNTIME_KIND, source: 'env' },
+      }),
+      {
+        env: {
+          SMARTPERFETTO_OPENCODE_MODEL_JSON: '{"providerID":"smartperfetto","modelID":"test-model"}',
+        },
+        moduleLoader: createFakeModuleLoader(record),
+      },
+    );
+
+    await runtime.analyze(
+      '对比左右 Trace 的启动速度差异',
+      'session-opencode-compare',
+      'trace-current',
+      {
+        analysisMode: 'full',
+        packageName: 'com.example',
+        referenceTraceId: 'trace-reference',
+        tracePairContext: {
+          schemaVersion: 1,
+          layout: 'horizontal',
+          primarySide: 'left',
+          referenceSide: 'right',
+          workspaceOpen: true,
+          panes: [
+            {
+              side: 'left',
+              traceSide: 'current',
+              traceId: 'trace-current',
+              traceName: 'Current Trace',
+              visualState: 'live',
+            },
+            {
+              side: 'right',
+              traceSide: 'reference',
+              traceId: 'trace-reference',
+              traceName: 'Reference Trace',
+              visualState: 'live',
+            },
+          ],
+        },
+      },
+    );
+
+    const promptInput = record.promptInput as { body?: { system?: string } } | undefined;
+    expect(promptInput?.body?.system).toContain('## 对比模式');
+    expect(promptInput?.body?.system).toContain('### 窗口映射');
+    expect(promptInput?.body?.system).toContain('左侧/当前 Trace');
+    expect(promptInput?.body?.system).toContain('右侧/参考 Trace');
+  });
+
   it('answers default auto trace facts directly without loading the OpenCode SDK', async () => {
     const traceProcessorService = createFakeTraceProcessorService();
     traceProcessorService.query.mockImplementation(async (_traceId: string, sql: string) => {

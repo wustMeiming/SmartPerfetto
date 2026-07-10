@@ -30,6 +30,9 @@ import {
   setTraceProcessorServiceForTests,
   type TraceProcessor,
 } from '../../services/traceProcessorService';
+import { ClaudeRuntime } from '../../agentRuntime/engines/claude';
+import type { AnalysisOptions, AnalysisResult } from '../../agent/core/orchestratorTypes';
+import type { TracePairContext } from '../../agentv3/types';
 import agentRoutes from '../agentRoutes';
 
 const originalApiKey = process.env.SMARTPERFETTO_API_KEY;
@@ -736,6 +739,199 @@ describe('agent route RBAC', () => {
     } finally {
       await rejectPendingDeferredRuntimes(deferreds, 'trace context replay cleanup');
       leaseStore?.close();
+      setTraceProcessorLeaseStoreForTests(null);
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('passes dual-trace pane context through continued comparison session runs', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'smartperfetto-agent-dual-pane-'));
+    const capturedOptions: AnalysisOptions[] = [];
+    const analyzeResult = (sessionId: string): AnalysisResult => ({
+      sessionId,
+      success: true,
+      findings: [],
+      hypotheses: [],
+      conclusion: 'ok',
+      confidence: 0.8,
+      rounds: 1,
+      totalDurationMs: 1,
+    });
+    const waitForAnalyzeCallCount = async (count: number): Promise<void> => {
+      for (let attempt = 0; attempt < 20 && capturedOptions.length < count; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      expect(capturedOptions).toHaveLength(count);
+    };
+
+    try {
+      const traceId = 'trace-dual-pane-current';
+      const referenceTraceId = 'trace-dual-pane-reference';
+      const tracePath = path.join(tmpDir, `${traceId}.trace`);
+      const referenceTracePath = path.join(tmpDir, `${referenceTraceId}.trace`);
+      await fs.writeFile(tracePath, 'current trace bytes');
+      await fs.writeFile(referenceTracePath, 'reference trace bytes');
+      delete process.env.SMARTPERFETTO_API_KEY;
+      process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
+      process.env[ENTERPRISE_FEATURE_FLAG_ENV] = 'true';
+      process.env[ENTERPRISE_DB_PATH_ENV] = path.join(tmpDir, 'enterprise.sqlite');
+      process.env[ENTERPRISE_DATA_DIR_ENV] = path.join(tmpDir, 'data');
+      process.env.UPLOAD_DIR = path.join(tmpDir, 'uploads');
+      process.env.SMARTPERFETTO_AGENT_RUNTIME = 'claude-agent-sdk';
+
+      await writeTraceMetadata({
+        id: traceId,
+        filename: `${traceId}.trace`,
+        size: 19,
+        uploadedAt: new Date().toISOString(),
+        status: 'ready',
+        path: tracePath,
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+        userId: 'analyst-user',
+      });
+      await writeTraceMetadata({
+        id: referenceTraceId,
+        filename: `${referenceTraceId}.trace`,
+        size: 21,
+        uploadedAt: new Date().toISOString(),
+        status: 'ready',
+        path: referenceTracePath,
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+        userId: 'analyst-user',
+      });
+
+      const traceProcessorService = new TraceProcessorService(process.env.UPLOAD_DIR);
+      jest.spyOn(traceProcessorService, 'getOrLoadTrace').mockImplementation(async (id: string) => ({
+        id,
+        filename: `${id}.trace`,
+        size: id === referenceTraceId ? 21 : 19,
+        filePath: id === referenceTraceId ? referenceTracePath : tracePath,
+        uploadTime: new Date(),
+        status: 'ready',
+      }));
+      jest.spyOn(traceProcessorService, 'ensureProcessorForLease').mockResolvedValue({
+        id: 'processor-dual-pane',
+        traceId,
+        status: 'ready',
+        activeQueries: 0,
+        query: jest.fn(async () => ({ columns: [], rows: [], durationMs: 1 })),
+        queryRaw: jest.fn(async () => Buffer.alloc(0)),
+        destroy: jest.fn(),
+      });
+      jest.spyOn(traceProcessorService, 'runWithLease').mockImplementation(async (_context, callback) => callback());
+      jest.spyOn(traceProcessorService, 'runWithLeases').mockImplementation(async (_contexts, callback) => callback());
+      jest.spyOn(traceProcessorService, 'query').mockResolvedValue({
+        columns: [],
+        rows: [],
+        durationMs: 1,
+      });
+      setTraceProcessorServiceForTests(traceProcessorService);
+      jest.spyOn(ClaudeRuntime.prototype, 'analyze').mockImplementation(async (
+        _query,
+        sessionId,
+        _traceId,
+        options = {},
+      ) => {
+        capturedOptions.push(options);
+        return analyzeResult(sessionId);
+      });
+
+      const initialTracePairContext: TracePairContext = {
+        schemaVersion: 1,
+        layout: 'horizontal',
+        primarySide: 'left',
+        referenceSide: 'right',
+        activeSide: 'left',
+        workspaceOpen: true,
+        splitPercent: 55,
+        aliases: { left: 'current', right: 'reference', main: 'current', baseline: 'reference' },
+        panes: [
+          {
+            side: 'left',
+            traceSide: 'current',
+            traceId,
+            traceName: 'current.trace',
+            active: true,
+            visualState: 'live',
+          },
+          {
+            side: 'right',
+            traceSide: 'reference',
+            traceId: referenceTraceId,
+            traceName: 'reference.trace',
+            visualState: 'live',
+          },
+        ],
+      };
+      const continuedTracePairContext: TracePairContext = {
+        schemaVersion: 1,
+        layout: 'vertical',
+        primarySide: 'top',
+        referenceSide: 'bottom',
+        activeSide: 'bottom',
+        workspaceOpen: true,
+        splitPercent: 42,
+        maximizedTraceSide: 'reference',
+        minimizedTraceSides: ['current'],
+        aliases: { top: 'current', bottom: 'reference', current: 'current', reference: 'reference' },
+        panes: [
+          {
+            side: 'top',
+            traceSide: 'current',
+            traceId,
+            traceName: 'current.trace',
+            visualState: 'context_only',
+          },
+          {
+            side: 'bottom',
+            traceSide: 'reference',
+            traceId: referenceTraceId,
+            traceName: 'reference.trace',
+            active: true,
+            visualState: 'live',
+          },
+        ],
+      };
+
+      const app = makeApp();
+      const firstRun = await analystHeaders(request(app).post('/api/agent/v1/analyze'))
+        .send({
+          traceId,
+          referenceTraceId,
+          query: '对比左右两个 trace',
+          options: {
+            analysisMode: 'auto',
+            tracePairContext: initialTracePairContext,
+          },
+        });
+      expect(firstRun.status).toBe(200);
+      await waitForAnalyzeCallCount(1);
+
+      const continuedRun = await analystHeaders(
+        request(app).post(`/api/agent/v1/sessions/${firstRun.body.sessionId}/runs`),
+      ).send({
+        traceId,
+        query: '现在对比上面和下面的启动耗时',
+        options: {
+          analysisMode: 'auto',
+          tracePairContext: continuedTracePairContext,
+        },
+      });
+      expect(continuedRun.status).toBe(200);
+      await waitForAnalyzeCallCount(2);
+
+      expect(capturedOptions[0]).toEqual(expect.objectContaining({
+        referenceTraceId,
+        tracePairContext: initialTracePairContext,
+      }));
+      expect(capturedOptions[1]).toEqual(expect.objectContaining({
+        referenceTraceId,
+        tracePairContext: continuedTracePairContext,
+      }));
+    } finally {
+      delete process.env.SMARTPERFETTO_AGENT_RUNTIME;
       setTraceProcessorLeaseStoreForTests(null);
       await fs.rm(tmpDir, { recursive: true, force: true });
     }

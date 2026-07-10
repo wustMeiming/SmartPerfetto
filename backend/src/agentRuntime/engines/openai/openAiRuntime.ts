@@ -50,13 +50,14 @@ import type {
   ComplexityClassifierInput,
   Hypothesis,
   PlanPhase,
+  TracePairContext,
   TraceCompleteness,
   UncertaintyFlag,
 } from '../../../agentv3/types';
 import { expectedToolNames } from '../../../agentv3/types';
 import {
   formatPlanEvidenceGap,
-  recordPlanToolCall,
+  recordPlanOrPrePlanToolCall,
   type PlanEvidenceGap,
 } from '../../../agentv3/planToolCallRecorder';
 import {
@@ -1096,6 +1097,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
                   quickMode,
                   answerStreamFilter,
                   toolInputsByTaskId,
+                  tracePairContext: options.tracePairContext,
                   onToolCalled: () => {
                     observedToolCalls++;
                   },
@@ -1900,7 +1902,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     const referenceTraceId = options.referenceTraceId;
     const shouldBuildComparisonContext = !!referenceTraceId && (!lightweight || !useEvidenceOnlyQuick);
     const comparisonContext = shouldBuildComparisonContext
-      ? await this.buildComparisonContext(traceId, referenceTraceId, config.outputLanguage)
+      ? await this.buildComparisonContext(traceId, referenceTraceId, config.outputLanguage, options.tracePairContext)
       : undefined;
     const skillRegistryReady = !useEvidenceOnlyQuick
       ? ensureSkillRegistryInitialized()
@@ -2078,6 +2080,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     traceId: string,
     referenceTraceId: string,
     outputLanguage: OutputLanguage,
+    tracePairContext?: TracePairContext,
   ): Promise<import('../../../agentv3/types').ComparisonContext> {
     this.emitUpdate({
       type: 'progress',
@@ -2125,6 +2128,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
 
     return {
       referenceTraceId,
+      ...(tracePairContext ? { tracePairContext } : {}),
       referencePackageName: refFocusResult.primaryApp,
       referenceFocusApps: refFocusResult.apps.length > 0 ? refFocusResult.apps : undefined,
       referenceArchitecture: refArchitecture,
@@ -2823,6 +2827,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       quickMode: boolean;
       answerStreamFilter: OpenAiReasoningFilterState;
       toolInputsByTaskId: Map<string, { toolName: string; args: Record<string, unknown> }>;
+      tracePairContext?: TracePairContext;
       onToolCalled?: () => void;
     },
   ): string {
@@ -2875,7 +2880,9 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           taskId: rawItem?.callId || rawItem?.id || 'unknown',
           toolName: rawItem?.name || 'unknown',
           args,
-          message: formatToolCallNarration(rawItem?.name || 'unknown', args, outputLanguage),
+          message: formatToolCallNarration(rawItem?.name || 'unknown', args, outputLanguage, {
+            tracePairContext: streamContext.tracePairContext,
+          }),
         },
         timestamp: now,
       });
@@ -2886,8 +2893,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         .map(taskId => streamContext.toolInputsByTaskId.get(taskId))
         .find(Boolean);
       if (cached) {
-        const plan = this.sessionPlans.get(streamContext.sessionId)?.current ?? null;
-        recordPlanToolCall(plan, {
+        recordPlanOrPrePlanToolCall(this.sessionPlans.get(streamContext.sessionId), {
           toolName: cached.toolName,
           input: cached.args,
           resultText: summarizeToolOutput(rawItem?.output),

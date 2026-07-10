@@ -2,7 +2,15 @@
 // Copyright (C) 2024-2026 Gracker (Chris)
 // This file is part of SmartPerfetto. See LICENSE for details.
 
-import type { ClaudeAnalysisContext, ComparisonContext, SelectionContext, SelectionTrackInfo, TraceCompleteness } from './types';
+import type {
+  ClaudeAnalysisContext,
+  ComparisonContext,
+  SelectionContext,
+  SelectionTrackInfo,
+  TraceCompleteness,
+  TracePaneSide,
+  TraceSource,
+} from './types';
 import type { SceneType } from './sceneClassifier';
 import type { ArchitectureInfo } from '../agent/detectors/types';
 import type { DetectedFocusApp } from './focusAppDetector';
@@ -234,59 +242,124 @@ export function buildSelectionContextSection(sel: SelectionContext): string {
  * Injected into system prompt when comparison mode is active (orthogonal to scene type).
  */
 function buildComparisonContextSection(ctx: ComparisonContext, currentPackageName?: string): string {
-  const lines: string[] = ['## 对比模式\n'];
-  lines.push('你正在进行**双 Trace 对比分析**。两个 Trace 已加载，你可以同时查询两侧数据。\n');
+  const template = loadPromptTemplate('comparison-context');
+  const currentTraceLabel = comparisonTraceDisplayLabel(ctx, 'current');
+  const referenceTraceLabel = comparisonTraceDisplayLabel(ctx, 'reference');
+  const vars = {
+    currentTraceLabel,
+    referenceTraceLabel,
+    currentPackageName: currentPackageName || '未知包名',
+    referencePackageName: ctx.referencePackageName || '未知包名',
+    tracePairMapping: buildTracePairMappingSection(ctx),
+    packageAlignment: buildPackageAlignmentSection(ctx, currentPackageName),
+    referenceArchitecture: buildReferenceArchitectureSection(ctx),
+    capabilityAlignment: buildCapabilityAlignmentSection(ctx),
+  };
+  return template ? renderTemplate(template, vars) : '';
+}
 
-  // Trace identity
-  lines.push('### Trace 身份');
-  lines.push(`- **当前 Trace**: ${currentPackageName || '未知包名'}`);
-  lines.push(`- **参考 Trace**: ${ctx.referencePackageName || '未知包名'}`);
+function comparisonTraceDisplayLabel(ctx: ComparisonContext, traceSide: TraceSource): string {
+  const pane = ctx.tracePairContext?.panes.find(item => item.traceSide === traceSide);
+  const role = traceSide === 'current' ? '当前 Trace' : '参考 Trace';
+  return pane ? `${tracePaneSideLabel(pane.side)}/${role}` : role;
+}
 
-  // Package alignment warning
-  if (currentPackageName && ctx.referencePackageName) {
-    if (currentPackageName === ctx.referencePackageName) {
-      lines.push(`- **包名对齐**: ✅ 相同 (${currentPackageName})`);
-    } else {
-      lines.push(`- **包名对齐**: ⚠️ 不同 — 当前=${currentPackageName}, 参考=${ctx.referencePackageName}`);
-      lines.push('  - 注意：对比不同应用的 Trace 时，部分指标可能不具可比性');
+function buildTracePairMappingSection(ctx: ComparisonContext): string {
+  const pair = ctx.tracePairContext;
+  if (!pair) return '';
+  const lines = [
+    '### 窗口映射',
+    `- 布局: ${pair.layout === 'vertical' ? '上下' : '左右'}`,
+  ];
+  if (pair.workspaceOpen !== undefined) {
+    lines.push(`- 同页双窗: ${pair.workspaceOpen ? '已打开' : '未打开'}`);
+  }
+  if (pair.splitPercent !== undefined) {
+    lines.push(`- 分割比例: 主窗口 ${pair.splitPercent}%`);
+  }
+  if (pair.maximizedTraceSide) {
+    lines.push(`- 最大化: ${pair.maximizedTraceSide === 'current' ? '当前 Trace' : '参考 Trace'}`);
+  }
+  if (pair.minimizedTraceSides && pair.minimizedTraceSides.length > 0) {
+    const minimized = pair.minimizedTraceSides
+      .map(traceSide => traceSide === 'current' ? '当前 Trace' : '参考 Trace')
+      .join('、');
+    lines.push(`- 最小化: ${minimized}`);
+  }
+  for (const pane of pair.panes) {
+    const role = pane.traceSide === 'current' ? '当前 Trace' : '参考 Trace';
+    const active = pane.active ? '，当前焦点' : '';
+    const visualState = pane.visualState === 'context_only' ? '，后端上下文' : '，可视窗口';
+    lines.push(`- ${tracePaneSideLabel(pane.side)}: ${role}${pane.traceName ? ` (${pane.traceName})` : ''}${active}${visualState}`);
+  }
+  if (pair.aliases) {
+    const currentAliases = Object.entries(pair.aliases)
+      .filter(([, traceSide]) => traceSide === 'current')
+      .map(([alias]) => alias)
+      .slice(0, 8);
+    const referenceAliases = Object.entries(pair.aliases)
+      .filter(([, traceSide]) => traceSide === 'reference')
+      .map(([alias]) => alias)
+      .slice(0, 8);
+    if (currentAliases.length > 0 || referenceAliases.length > 0) {
+      lines.push(`- 指代别名: 当前 Trace=${currentAliases.join('/') || '无'}；参考 Trace=${referenceAliases.join('/') || '无'}`);
     }
   }
+  return `\n\n${lines.join('\n')}`;
+}
 
-  // Architecture comparison
-  if (ctx.referenceArchitecture) {
-    lines.push(`- **参考 Trace 架构**: ${ctx.referenceArchitecture.type}`);
+function buildPackageAlignmentSection(ctx: ComparisonContext, currentPackageName?: string): string {
+  if (!currentPackageName || !ctx.referencePackageName) return '';
+  if (currentPackageName === ctx.referencePackageName) {
+    return `\n- **包名对齐**: 相同 (${currentPackageName})`;
   }
+  return [
+    `\n- **包名对齐**: 不同，当前=${currentPackageName}, 参考=${ctx.referencePackageName}`,
+    '- 注意：对比不同应用的 Trace 时，部分指标可能不具可比性',
+  ].join('\n');
+}
 
-  // Capability alignment
-  if (ctx.commonCapabilities.length > 0) {
-    lines.push(`\n### 能力对齐`);
-    lines.push(`- **共有表/视图**: ${ctx.commonCapabilities.length} 个 — 可安全对比`);
-    if (ctx.capabilityDiff) {
-      if (ctx.capabilityDiff.currentOnly.length > 0) {
-        lines.push(`- **仅当前 Trace 有**: ${ctx.capabilityDiff.currentOnly.slice(0, 5).join(', ')}${ctx.capabilityDiff.currentOnly.length > 5 ? '...' : ''}`);
-      }
-      if (ctx.capabilityDiff.referenceOnly.length > 0) {
-        lines.push(`- **仅参考 Trace 有**: ${ctx.capabilityDiff.referenceOnly.slice(0, 5).join(', ')}${ctx.capabilityDiff.referenceOnly.length > 5 ? '...' : ''}`);
-      }
+function buildReferenceArchitectureSection(ctx: ComparisonContext): string {
+  return ctx.referenceArchitecture
+    ? `\n- **参考 Trace 架构**: ${ctx.referenceArchitecture.type}`
+    : '';
+}
+
+function buildCapabilityAlignmentSection(ctx: ComparisonContext): string {
+  if (ctx.commonCapabilities.length === 0) return '';
+  const lines = [
+    '',
+    '### 能力对齐',
+    `- **共有表/视图**: ${ctx.commonCapabilities.length} 个，可安全对比`,
+  ];
+  if (ctx.capabilityDiff) {
+    if (ctx.capabilityDiff.currentOnly.length > 0) {
+      lines.push(`- **仅当前 Trace 有**: ${summarizeCapabilityList(ctx.capabilityDiff.currentOnly)}`);
+    }
+    if (ctx.capabilityDiff.referenceOnly.length > 0) {
+      lines.push(`- **仅参考 Trace 有**: ${summarizeCapabilityList(ctx.capabilityDiff.referenceOnly)}`);
     }
   }
-
-  // Available tools
-  lines.push(`\n### 对比工具`);
-  lines.push('- `compare_skill(skillId, params)` — 在两个 Trace 上并行运行同一 Skill，返回对比结果 + schema 对齐信息');
-  lines.push('- `execute_sql_on(trace, sql)` — 在指定 Trace 上执行 SQL（"current" 或 "reference"）');
-  lines.push('- `get_comparison_context()` — 获取两个 Trace 的元数据和能力对齐信息');
-  lines.push('- 默认 `execute_sql` 和 `invoke_skill` 仍然作用于**当前 Trace**\n');
-
-  // Analysis rules
-  lines.push('### 对比分析规则');
-  lines.push('1. **首先调用 `get_comparison_context()`** 确认两个 Trace 的可比性');
-  lines.push('2. 数值对比必须标注**归一化方式**（绝对值 / 百分比 / 相对于总时长）');
-  lines.push('3. 只在共有能力（commonCapabilities）范围内做定量对比');
-  lines.push('4. 所有数据引用必须标注来源：[当前 Trace] 或 [参考 Trace]');
-  lines.push('5. 结论格式：先列 delta 表（指标 | 当前值 | 参考值 | 变化），再分析根因');
-
   return lines.join('\n');
+}
+
+function summarizeCapabilityList(capabilities: string[]): string {
+  const visible = capabilities.slice(0, 5).join(', ');
+  return capabilities.length > 5 ? `${visible}...` : visible;
+}
+
+
+function tracePaneSideLabel(side: TracePaneSide): string {
+  switch (side) {
+    case 'left':
+      return '左侧';
+    case 'right':
+      return '右侧';
+    case 'top':
+      return '上方';
+    case 'bottom':
+      return '下方';
+  }
 }
 
 /**

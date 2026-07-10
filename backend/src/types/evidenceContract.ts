@@ -15,6 +15,7 @@ export type EvidenceProducerKind =
   | 'manual';
 
 export type EvidenceTraceSide = 'current' | 'reference' | 'unknown';
+export type EvidencePaneSide = 'left' | 'right' | 'top' | 'bottom';
 
 export type EvidenceIdentityRole =
   | 'app_main'
@@ -40,6 +41,7 @@ export type ClaimKindV1 =
 export interface EvidenceContextV1 {
   traceId: string;
   traceSide?: EvidenceTraceSide;
+  paneSide?: EvidencePaneSide;
   toolCallId?: string;
   sourceToolCallId?: string;
   producerKind: EvidenceProducerKind;

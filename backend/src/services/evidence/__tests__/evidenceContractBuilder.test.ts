@@ -37,6 +37,9 @@ describe('evidenceContractBuilder', () => {
         title: 'SQL',
         evidenceRefId: 'data:sql:anchor',
         queryHash: 'hash-anchor',
+        traceId: 'trace-reference',
+        traceSide: 'reference',
+        paneSide: 'right',
         queryReview,
       },
     );
@@ -67,6 +70,8 @@ describe('evidenceContractBuilder', () => {
     });
 
     expect(contract.anchors[0].context.queryReviewId).toBe('qr:execute_sql:anchor');
+    expect(contract.anchors[0].context.traceSide).toBe('reference');
+    expect(contract.anchors[0].context.paneSide).toBe('right');
     expect('queryReview' in contract.anchors[0].context).toBe(false);
   });
 });

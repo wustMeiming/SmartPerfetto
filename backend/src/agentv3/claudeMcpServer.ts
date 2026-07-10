@@ -36,6 +36,7 @@ import {
 } from '../services/perfettoSqlDocs';
 import {
   buildTraceProcessorQueryProvenance,
+  type TraceProcessorPaneSide,
   type TraceProcessorQueryProvenance,
   type TraceProcessorTraceSide,
 } from '../services/traceProcessorConnectionModel';
@@ -60,9 +61,10 @@ import {
   findCompletedPhaseEvidenceGaps,
   findMissingExpectedCallsForPhase,
   formatPlanEvidenceGap,
+  replayPrePlanToolCalls,
 } from './planToolCallRecorder';
 import { isConclusionLikePlanPhase } from './planPhaseSemantics';
-import { formatToolCallNarration } from './toolNarration';
+import { formatToolCallNarration, type ToolNarrationOptions } from './toolNarration';
 import type { ArtifactStore, CompactArtifactSummary } from './artifactStore';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from './outputLanguage';
 import { buildSqlQueryReview } from '../services/queryReview/queryReviewBuilder';
@@ -433,7 +435,11 @@ function normalizeExpectedCall(call: unknown): NonNullable<PlanPhase['expectedCa
   }
   if (!call || typeof call !== 'object') return undefined;
   const tool = coercePlanString(readAliasedField(call, ['tool', 'toolName', 'tool_name', 'name']));
-  const skillId = coercePlanString(readAliasedField(call, ['skillId', 'skill_id', 'skill', 'skillName', 'skill_name']));
+  const nestedParams = readAliasedField(call, ['params', 'arguments', 'args', 'input']);
+  const nestedSkillId = nestedParams && typeof nestedParams === 'object'
+    ? coercePlanString(readAliasedField(nestedParams, ['skillId', 'skill_id', 'skill', 'skillName', 'skill_name']))
+    : undefined;
+  const skillId = coercePlanString(readAliasedField(call, ['skillId', 'skill_id', 'skill', 'skillName', 'skill_name'])) || nestedSkillId;
   if (!tool) return undefined;
   const normalizedTool = shortExpectedToolName(tool.trim());
   const normalizedSkillId = skillId ? shortExpectedToolName(skillId.trim()) : undefined;
@@ -1008,7 +1014,7 @@ export interface ClaudeMcpServerOptions {
   /** Per-session SQL error-fix pairs for in-context learning */
   recentSqlErrors?: SqlErrorFixPair[];
   /** Mutable analysis plan — passed by reference from analyze() scope */
-  analysisPlan?: { current: AnalysisPlanV3 | null };
+  analysisPlan?: { current: AnalysisPlanV3 | null; prePlanToolCallLog?: ToolCallRecord[] };
   /** Mutable watchdog warning — set by runtime when repetitive failures detected, consumed by next tool call */
   watchdogWarning?: { current: string | null };
   /** Mutable hypotheses array for hypothesis-verify cycle (P0-G4) */
@@ -1077,6 +1083,60 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     hasCodebaseAccess: codeAwareMode !== 'off' && codebaseIds.length > 0,
   };
   let boundSkillRegistryFingerprint: string | undefined;
+
+  function paneSideForTraceSide(traceSide: TraceProcessorTraceSide): TraceProcessorPaneSide | undefined {
+    return options.comparisonContext?.tracePairContext?.panes.find(pane => pane.traceSide === traceSide)?.side;
+  }
+
+  function toolNarrationOptions(): ToolNarrationOptions {
+    const tracePairContext = options.comparisonContext?.tracePairContext;
+    return tracePairContext ? { tracePairContext } : {};
+  }
+
+  function tracePaneDisplayLabel(paneSide: TraceProcessorPaneSide): string {
+    switch (paneSide) {
+      case 'left':
+        return localize(outputLanguage, '左侧', 'left pane');
+      case 'right':
+        return localize(outputLanguage, '右侧', 'right pane');
+      case 'top':
+        return localize(outputLanguage, '上方', 'top pane');
+      case 'bottom':
+        return localize(outputLanguage, '下方', 'bottom pane');
+    }
+  }
+
+  function traceRoleDisplayLabel(traceSide: TraceProcessorTraceSide): string {
+    return traceSide === 'reference'
+      ? localize(outputLanguage, '参考 Trace', 'reference trace')
+      : localize(outputLanguage, '当前 Trace', 'current trace');
+  }
+
+  function traceLocationDisplayLabel(traceSide: TraceProcessorTraceSide): string {
+    const paneSide = paneSideForTraceSide(traceSide);
+    const roleLabel = traceRoleDisplayLabel(traceSide);
+    return paneSide ? `${tracePaneDisplayLabel(paneSide)}/${roleLabel}` : roleLabel;
+  }
+
+  function comparisonSqlProducerReason(traceSide: TraceProcessorTraceSide): string {
+    const traceLabel = traceLocationDisplayLabel(traceSide);
+    return localize(
+      outputLanguage,
+      `执行${traceLabel} SQL，验证对比差异。`,
+      `Run SQL on the ${traceLabel} to verify comparison deltas.`,
+    );
+  }
+
+  function buildScopedTraceProvenance(
+    targetTraceId: string,
+    traceSide: TraceProcessorTraceSide,
+  ): TraceProcessorQueryProvenance {
+    return buildTraceProcessorQueryProvenance({
+      traceId: targetTraceId,
+      traceSide,
+      paneSide: paneSideForTraceSide(traceSide),
+    });
+  }
 
   async function bindSkillRuntimeRegistry(): Promise<SkillRegistry> {
     if (!knowledgeScope?.tenantId || !knowledgeScope.workspaceId) {
@@ -1223,6 +1283,36 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     if (p.process_name && !p.package) p.package = p.process_name;
     if (p.package && !p.process_name) p.process_name = p.package;
     return p;
+  }
+
+  function referenceSharedParamsForComparison(
+    params: Record<string, any> | undefined,
+    currentDefaultPackage?: string,
+    referenceDefaultPackage?: string,
+  ): { params: Record<string, any>; identityRemapped: boolean } {
+    const p = { ...params };
+    const processName = typeof p.process_name === 'string' ? p.process_name : undefined;
+    const packageParam = typeof p.package === 'string' ? p.package : undefined;
+    const pointsAtCurrentPackage = Boolean(currentDefaultPackage && (
+      processName === currentDefaultPackage || packageParam === currentDefaultPackage
+    ));
+    const hasIdentityFilter = Boolean(processName || packageParam);
+
+    if (referenceDefaultPackage && (!hasIdentityFilter || pointsAtCurrentPackage)) {
+      if (processName !== referenceDefaultPackage || packageParam !== referenceDefaultPackage) {
+        p.process_name = referenceDefaultPackage;
+        p.package = referenceDefaultPackage;
+        return { params: p, identityRemapped: true };
+      }
+    }
+
+    if (!referenceDefaultPackage && pointsAtCurrentPackage) {
+      delete p.process_name;
+      delete p.package;
+      return { params: p, identityRemapped: true };
+    }
+
+    return { params: p, identityRemapped: false };
   }
 
   /**
@@ -1777,7 +1867,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     phase.completedAt = undefined;
     phase.summary = undefined;
 
-    const narration = formatToolCallNarration(toolName, input, outputLanguage);
+    const narration = formatToolCallNarration(toolName, input, outputLanguage, toolNarrationOptions());
     const summary = localize(
       outputLanguage,
       `自动进入阶段：${narration}`,
@@ -1907,7 +1997,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         };
       }
 
-      const narration = formatToolCallNarration(toolName, input, outputLanguage);
+      const narration = formatToolCallNarration(toolName, input, outputLanguage, toolNarrationOptions());
       const summary = localize(
         outputLanguage,
         `自动补记阶段：收到本阶段证据（${narration}），但当前已在后续阶段「${laterActive.name}」。该阶段直接标记完成，证据以推断方式绑定。`,
@@ -2232,7 +2322,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       planPhaseGoal: phaseOverride?.phaseGoal ?? phase?.goal ?? lightweightPhase?.goal,
       planPhaseAttribution: phaseOverride?.attribution ?? (lightweightPhase ? 'active' : phaseResolution?.attribution),
       planPhaseWarning: phaseOverride?.warning ?? phaseResolution?.warning,
-      toolNarration: formatToolCallNarration(toolName, input, outputLanguage),
+      toolNarration: formatToolCallNarration(toolName, input, outputLanguage, toolNarrationOptions()),
       producerReason,
     };
   }
@@ -2285,10 +2375,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     throwIfTraceProcessorQueryCancelled(signal);
     const normalized = normalizeRawSql(sql);
     const { sql: finalSql, injected } = injectStdlibIncludes(normalized.sql);
-    const traceProvenance = buildTraceProcessorQueryProvenance({
-      traceId: targetTraceId,
-      traceSide,
-    });
+    const traceProvenance = buildScopedTraceProvenance(targetTraceId, traceSide);
     if (emitUpdate && injected.length > 0) {
       emitUpdate({
         type: 'progress',
@@ -2568,10 +2655,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       } catch (err) {
         rethrowIfTraceProcessorQueryCancelled(err);
         const errMsg = (err as Error).message;
-        const traceProvenance = buildTraceProcessorQueryProvenance({
-          traceId,
-          traceSide: 'current',
-        });
+        const traceProvenance = buildScopedTraceProvenance(traceId, 'current');
         emitUpdate?.({
           type: 'progress',
           content: {
@@ -2716,10 +2800,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           { skillId, params: effectiveParams },
           localize(outputLanguage, `调用 Skill ${skillId}，收集本阶段结构化证据。`, `Run Skill ${skillId} to collect structured evidence for this phase.`),
         );
-        const skillTraceProvenance = buildTraceProcessorQueryProvenance({
-          traceId,
-          traceSide: 'current',
-        });
+        const skillTraceProvenance = buildScopedTraceProvenance(traceId, 'current');
 
         emitUpdate?.({
           type: 'progress',
@@ -2731,7 +2812,11 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         });
 
         const skillStart = Date.now();
-        const result = await skillExecutor.execute(skillId, traceId, effectiveParams, { signal });
+        const currentPaneSide = paneSideForTraceSide('current');
+        const result = await skillExecutor.execute(skillId, traceId, effectiveParams, {
+          ...(currentPaneSide ? { __paneSide: currentPaneSide } : {}),
+          signal,
+        });
         const skillDuration = Date.now() - skillStart;
 
         emitUpdate?.({
@@ -4540,6 +4625,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         ...(forcedAccept ? { unresolvedAspects: missingAspectIds } : {}),
       };
       analysisPlanRef.current = plan;
+      replayPrePlanToolCalls(analysisPlanRef);
       clearPendingPlanRevisionGate(plan);
       planReviseAttempts = 0;
       if (!forcedAccept) planSubmitAttempts = 0;
@@ -5509,15 +5595,11 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         };
       }
       const targetTraceId = trace === 'reference' ? referenceTraceId : traceId;
-      const traceLabel = trace === 'reference'
-        ? localize(outputLanguage, '[参考 Trace]', '[reference trace]')
-        : localize(outputLanguage, '[当前 Trace]', '[current trace]');
+      const traceLabel = `[${traceLocationDisplayLabel(trace)}]`;
       const producer = createEvidenceProducerContext(
         'execute_sql_on',
         { trace, sql, summary },
-        trace === 'reference'
-          ? localize(outputLanguage, '执行参考 Trace SQL，验证对比差异。', 'Run SQL on the reference trace to verify comparison deltas.')
-          : localize(outputLanguage, '执行当前 Trace SQL，验证对比差异。', 'Run SQL on the current trace to verify comparison deltas.'),
+        comparisonSqlProducerReason(trace),
         trace,
       );
       try {
@@ -5660,10 +5742,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         return { content: [{ type: 'text' as const, text: consumeWatchdogWarning(success ? text + getReasoningNudge() : text) }] };
       } catch (e: any) {
         rethrowIfTraceProcessorQueryCancelled(e);
-        const traceProvenance = buildTraceProcessorQueryProvenance({
-          traceId: targetTraceId,
-          traceSide: trace,
-        });
+        const traceProvenance = buildScopedTraceProvenance(targetTraceId, trace);
         return {
           content: [{
             type: 'text' as const,
@@ -5690,17 +5769,31 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     'compare_skill',
     'Run the same skill on both current and reference traces in parallel, returning side-by-side results with schema alignment info.\n\n' +
     'Use when: you want to compare the same analysis dimension across both traces (e.g., scrolling_analysis, cpu_analysis).\n' +
+    'When the two traces need different package names, startup IDs, or time windows, use currentParams/referenceParams for side-specific values.\n' +
     'Don\'t use when: you need different skills on each trace, or ad-hoc SQL queries (use execute_sql_on instead).\n\n' +
     'Examples:\n' +
     '1. Compare scrolling: skillId="scrolling_analysis", params={process_name: "com.example.app"}\n' +
-    '2. Compare CPU: skillId="cpu_analysis"',
+    '2. Compare startup detail with different windows: skillId="startup_detail", currentParams={startup_id:1,start_ts:100,end_ts:200}, referenceParams={startup_id:1,start_ts:500,end_ts:650}\n' +
+    '3. Compare CPU: skillId="cpu_analysis"',
     {
       skillId: z.string().describe('Skill identifier to run on both traces'),
       params: z.record(z.string(), z.any()).optional().describe(
-        'Parameters passed to both skill executions. Common: { process_name, start_ts, end_ts }'
+        'Shared parameters passed to both skill executions. Common: { process_name, start_ts, end_ts }'
+      ),
+      currentParams: z.record(z.string(), z.any()).optional().describe(
+        'Parameters for the current trace only. Overrides shared params for the current side.'
+      ),
+      referenceParams: z.record(z.string(), z.any()).optional().describe(
+        'Parameters for the reference trace only. Overrides shared params for the reference side.'
+      ),
+      current_params: z.record(z.string(), z.any()).optional().describe(
+        'Alias for currentParams for OpenAI-compatible callers.'
+      ),
+      reference_params: z.record(z.string(), z.any()).optional().describe(
+        'Alias for referenceParams for OpenAI-compatible callers.'
       ),
     },
-    async ({ skillId, params }, extra) => {
+    async ({ skillId, params, currentParams, referenceParams, current_params, reference_params }, extra) => {
       const signal = getRuntimeToolSignal(extra);
       throwIfTraceProcessorQueryCancelled(signal);
       const planError = requirePlan('compare_skill');
@@ -5708,16 +5801,35 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         return { content: [{ type: 'text' as const, text: planError }] };
       }
       try {
-        const effectiveParams = normalizeSkillParams(params, packageName);
-        // For reference trace: use its own package name if detected, otherwise
-        // omit process_name filter entirely (safer than silently using current's package)
-        const refParams = comparisonContext?.referencePackageName
-          ? normalizeSkillParams(params, comparisonContext.referencePackageName)
-          : normalizeSkillParams(params); // No default package — skill runs unfiltered
+        const currentSideParams = currentParams ?? current_params;
+        const referenceSideParams = referenceParams ?? reference_params;
+        const referenceSharedParams = referenceSharedParamsForComparison(
+          params,
+          packageName,
+          comparisonContext?.referencePackageName,
+        );
+        const effectiveParams = normalizeSkillParams(
+          { ...(params ?? {}), ...(currentSideParams ?? {}) },
+          packageName,
+        );
+        const refParams = normalizeSkillParams(
+          { ...referenceSharedParams.params, ...(referenceSideParams ?? {}) },
+          comparisonContext?.referencePackageName,
+        );
+        const producerInput = {
+          skillId,
+          params,
+          currentParams: currentSideParams,
+          referenceParams: referenceSideParams,
+        };
         const baseProducer = createEvidenceProducerContext(
           'compare_skill',
-          { skillId, params },
-          localize(outputLanguage, `对比 Skill ${skillId}，在当前和参考 Trace 上收集同构证据。`, `Compare Skill ${skillId} to collect aligned evidence on current and reference traces.`),
+          producerInput,
+          localize(
+            outputLanguage,
+            `对比 Skill ${skillId}，在${traceLocationDisplayLabel('current')}和${traceLocationDisplayLabel('reference')}上收集同构证据。`,
+            `Compare Skill ${skillId} to collect aligned evidence on ${traceLocationDisplayLabel('current')} and ${traceLocationDisplayLabel('reference')}.`,
+          ),
         );
 
         emitUpdate?.({
@@ -5726,25 +5838,27 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             phase: 'analyzing',
             message: localize(
               outputLanguage,
-              `对比技能 ${skillId}：在两个 Trace 上并行执行...`,
-              `Comparing skill ${skillId}: running on both traces in parallel...`,
+              `对比技能 ${skillId}：在${traceLocationDisplayLabel('current')}和${traceLocationDisplayLabel('reference')}上并行执行...`,
+              `Comparing skill ${skillId}: running on ${traceLocationDisplayLabel('current')} and ${traceLocationDisplayLabel('reference')} in parallel...`,
             ),
           },
           timestamp: Date.now(),
         });
 
         const compareStart = Date.now();
-        const currentTraceProvenance = buildTraceProcessorQueryProvenance({
-          traceId,
-          traceSide: 'current',
-        });
-        const referenceTraceProvenance = buildTraceProcessorQueryProvenance({
-          traceId: referenceTraceId,
-          traceSide: 'reference',
-        });
+        const currentTraceProvenance = buildScopedTraceProvenance(traceId, 'current');
+        const referenceTraceProvenance = buildScopedTraceProvenance(referenceTraceId, 'reference');
         const [currentResult, refResult] = await Promise.all([
-          skillExecutor.execute(skillId, traceId, effectiveParams, { __traceSide: 'current', signal }),
-          skillExecutor.execute(skillId, referenceTraceId, refParams, { __traceSide: 'reference', signal }),
+          skillExecutor.execute(skillId, traceId, effectiveParams, {
+            __traceSide: 'current',
+            ...(currentTraceProvenance.paneSide ? { __paneSide: currentTraceProvenance.paneSide } : {}),
+            signal,
+          }),
+          skillExecutor.execute(skillId, referenceTraceId, refParams, {
+            __traceSide: 'reference',
+            ...(referenceTraceProvenance.paneSide ? { __paneSide: referenceTraceProvenance.paneSide } : {}),
+            signal,
+          }),
         ]);
         const compareDuration = Date.now() - compareStart;
 
@@ -5771,7 +5885,11 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             {
               ...baseProducer,
               sourceToolCallId: `${baseProducer.sourceToolCallId}:current`,
-              producerReason: localize(outputLanguage, `当前 Trace 对比 Skill ${skillId} 结果。`, `Current trace result for comparison Skill ${skillId}.`),
+              producerReason: localize(
+                outputLanguage,
+                `${traceLocationDisplayLabel('current')}对比 Skill ${skillId} 结果。`,
+                `${traceLocationDisplayLabel('current')} result for comparison Skill ${skillId}.`,
+              ),
             },
             currentResult.identityResolution,
           );
@@ -5785,7 +5903,11 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             {
               ...baseProducer,
               sourceToolCallId: `${baseProducer.sourceToolCallId}:reference`,
-              producerReason: localize(outputLanguage, `参考 Trace 对比 Skill ${skillId} 结果。`, `Reference trace result for comparison Skill ${skillId}.`),
+              producerReason: localize(
+                outputLanguage,
+                `${traceLocationDisplayLabel('reference')}对比 Skill ${skillId} 结果。`,
+                `${traceLocationDisplayLabel('reference')} result for comparison Skill ${skillId}.`,
+              ),
             },
             refResult.identityResolution,
           );
@@ -5803,10 +5925,17 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         const text = JSON.stringify({
           success: true,
           durationMs: compareDuration,
+          parameterMapping: {
+            referenceIdentityRemapped: referenceSharedParams.identityRemapped,
+            currentOverrideKeys: Object.keys(currentSideParams ?? {}),
+            referenceOverrideKeys: Object.keys(referenceSideParams ?? {}),
+          },
           current: {
             traceSide: 'current',
+            paneSide: currentTraceProvenance.paneSide,
             traceId,
             traceProvenance: currentTraceProvenance,
+            effectiveParams,
             success: currentResult.success,
             stepCount: currentResult.displayResults?.length || 0,
             steps: buildStepSummary(currentResult.displayResults || []),
@@ -5816,8 +5945,10 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           },
           reference: {
             traceSide: 'reference',
+            paneSide: referenceTraceProvenance.paneSide,
             traceId: referenceTraceId,
             traceProvenance: referenceTraceProvenance,
+            effectiveParams: refParams,
             success: refResult.success,
             stepCount: refResult.displayResults?.length || 0,
             steps: buildStepSummary(refResult.displayResults || []),
@@ -5847,25 +5978,34 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
   const getComparisonContext = (referenceTraceId && comparisonContext) ? tool(
     'get_comparison_context',
     'Get metadata comparison between the current trace and the reference trace. ' +
-    'Returns device info, focus app, architecture, and capability alignment for both traces.\n\n' +
+    'Returns device info, focus app, architecture, capability alignment, and any UI pane mapping for both traces.\n\n' +
     'ALWAYS call this first in comparison mode to understand what you are comparing ' +
     'and confirm the traces are comparable (same app, compatible capabilities).',
     {},
     async () => {
       const ctx = comparisonContext!;
+      const currentPane = ctx.tracePairContext?.panes.find(pane => pane.traceSide === 'current');
+      const referencePane = ctx.tracePairContext?.panes.find(pane => pane.traceSide === 'reference');
       const text = JSON.stringify({
         success: true,
         current: {
           traceId,
+          paneSide: currentPane?.side,
+          visualState: currentPane?.visualState,
+          traceName: currentPane?.traceName,
           packageName: packageName || 'unknown',
           architecture: options.cachedArchitecture?.type || 'unknown',
           focusApps: options.cachedArchitecture ? undefined : 'detect with detect_architecture',
         },
         reference: {
           traceId: referenceTraceId,
+          paneSide: referencePane?.side,
+          visualState: referencePane?.visualState,
+          traceName: referencePane?.traceName,
           packageName: ctx.referencePackageName || 'unknown',
           architecture: ctx.referenceArchitecture?.type || 'unknown',
         },
+        tracePairContext: ctx.tracePairContext,
         packageAlignment: packageName && ctx.referencePackageName
           ? (packageName === ctx.referencePackageName ? 'same' : 'different')
           : 'unknown',
@@ -6171,6 +6311,7 @@ function emitSqlDataEnvelope(
       })),
       evidenceRefId,
       traceSide: traceProvenance?.traceSide,
+      paneSide: traceProvenance?.paneSide,
       traceId: traceProvenance?.traceId,
       queryHash,
       queryReview,
@@ -6190,6 +6331,7 @@ function emitSqlDataEnvelope(
       ...(stdlibInjectedModules?.length ? { stdlibInjectedModules } : {}),
       ...(traceProvenance ? {
         traceSide: traceProvenance.traceSide,
+        paneSide: traceProvenance.paneSide,
         traceId: traceProvenance.traceId,
         traceProvenance,
       } : {}),
@@ -6258,6 +6400,7 @@ function emitSqlSummaryDataEnvelope(
       format: 'summary',
       evidenceRefId,
       traceSide: traceProvenance?.traceSide,
+      paneSide: traceProvenance?.paneSide,
       traceId: traceProvenance?.traceId,
       queryHash,
       queryReview,
@@ -6277,6 +6420,7 @@ function emitSqlSummaryDataEnvelope(
       ...(stdlibInjectedModules?.length ? { stdlibInjectedModules } : {}),
       ...(traceProvenance ? {
         traceSide: traceProvenance.traceSide,
+        paneSide: traceProvenance.paneSide,
         traceId: traceProvenance.traceId,
         traceProvenance,
       } : {}),
@@ -6290,6 +6434,7 @@ interface SqlFailureToolPayloadInput {
   error: string;
   trace?: string;
   traceSide?: TraceProcessorTraceSide;
+  paneSide?: TraceProcessorPaneSide;
   traceId?: string;
   traceProvenance: TraceProcessorQueryProvenance;
   sourceToolCallId?: string;
@@ -6330,6 +6475,7 @@ function buildSqlFailureToolPayload(input: SqlFailureToolPayloadInput): Record<s
     success: false,
     ...(input.trace ? { trace: input.trace } : {}),
     traceSide: input.traceSide,
+    paneSide: input.paneSide ?? input.traceProvenance.paneSide,
     traceId: input.traceId,
     traceProvenance: input.traceProvenance,
     columns: [],
@@ -6422,6 +6568,7 @@ function emitSkillDataEnvelopes(
           ...envelope.meta,
           evidenceRefId,
           traceSide: traceProvenance?.traceSide,
+          paneSide: traceProvenance?.paneSide,
           traceId: traceProvenance?.traceId,
           ...(artifactId ? { artifactId, sourceArtifactId: artifactId } : {}),
           ...(queryReview ? { queryReview } : {}),
@@ -6439,6 +6586,7 @@ function emitSkillDataEnvelopes(
         ? {
           ...withEvidence,
           traceSide: traceProvenance.traceSide,
+          paneSide: traceProvenance.paneSide,
           traceId: traceProvenance.traceId,
           traceProvenance,
         }

@@ -66,7 +66,7 @@ import { buildAgentDefinitions } from './claudeAgentDefinitions';
 import { getExtendedKnowledgeBase } from '../../../services/sqlKnowledgeBase';
 import type { AnalysisNote, AnalysisPlanV3, ClaudeAnalysisContext, ComplexityClassifierInput, FailedApproach, Hypothesis, QueryComplexity, TraceCompleteness, UncertaintyFlag, VerificationIssue } from '../../../agentv3/types';
 import { ArtifactStore } from '../../../agentv3/artifactStore';
-import { recordPlanToolCall } from '../../../agentv3/planToolCallRecorder';
+import { recordPlanOrPrePlanToolCall } from '../../../agentv3/planToolCallRecorder';
 import { buildRecoveryNote } from '../../../agentv3/recoveryNoteBuilder';
 import { evaluateThreshold as evaluateContextThreshold } from '../../../agentv3/contextTokenMeter';
 import {
@@ -1212,7 +1212,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
             // Not a skill result — ignore
           }
         }
-      }, this.config.outputLanguage);
+      }, this.config.outputLanguage, { tracePairContext: ctx.analysisContextForRebuild.comparison?.tracePairContext });
 
       this.emitUpdate({
         type: 'progress',
@@ -1598,8 +1598,8 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
               }
               // Track tool call for plan adherence with phase matching (P0-1 + P1-1)
               // P1-G5: Best-fit phase-tool matching — search all eligible phases, not just first
-              if (ctx.analysisPlan.current && matchedTool) {
-                recordPlanToolCall(ctx.analysisPlan.current, {
+              if (matchedTool) {
+                recordPlanOrPrePlanToolCall(ctx.analysisPlan, {
                   toolName: matchedTool.name,
                   input: matchedTool.input,
                   resultText: resultStr,
@@ -2795,7 +2795,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
 
       const { handleMessage: bridge, getAccumulatedAnswer } = createSseBridge((update: StreamingUpdate) => {
         this.emitUpdate(update);
-      }, this.config.outputLanguage);
+      }, this.config.outputLanguage, { tracePairContext: options.tracePairContext });
 
       this.emitUpdate({
         type: 'progress',
@@ -3525,6 +3525,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
 
       comparisonContext = {
         referenceTraceId,
+        ...(options.tracePairContext ? { tracePairContext: options.tracePairContext } : {}),
         referencePackageName: refFocusResult.primaryApp,
         referenceFocusApps: refFocusResult.apps.length > 0 ? refFocusResult.apps : undefined,
         referenceArchitecture: refArchitecture,

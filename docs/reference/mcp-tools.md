@@ -108,7 +108,7 @@ Code-aware 输出会进入 report/export/snapshot；处理隐私、路径和 pat
 |---|---|
 | `execute_sql_on` | 在 current 或 reference trace 上执行 SQL |
 | `compare_skill` | 对 current/reference 并行执行同一 Skill 并对比结果 |
-| `get_comparison_context` | 获取 trace pair 元数据和 comparison context |
+| `get_comparison_context` | 获取 trace pair 元数据、左右/上下窗格映射和 comparison context |
 
 Comparison 工具只在请求包含 `referenceTraceId` 且 comparison context 可用时注册。Raw trace comparison 和 analysis-result comparison 都应复用共享 evidence/report contract，避免 CLI-only 或 frontend-only 的私有输出。
 

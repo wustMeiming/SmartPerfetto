@@ -8,6 +8,7 @@ export type QueryReviewProducerKind = 'execute_sql' | 'execute_sql_on' | 'invoke
 export type QueryReviewConfidence = 'declared' | 'observed' | 'partial';
 export type QueryReviewGuardrailSeverity = 'info' | 'warning';
 export type QueryReviewAllowedUse = 'review_metadata_only';
+export type QueryReviewPaneSide = 'left' | 'right' | 'top' | 'bottom';
 
 export interface QueryReviewProducerV1 {
   kind: QueryReviewProducerKind;
@@ -16,6 +17,7 @@ export interface QueryReviewProducerV1 {
   planPhaseId?: string;
   planPhaseTitle?: string;
   traceSide?: 'current' | 'reference';
+  paneSide?: QueryReviewPaneSide;
   traceId?: string;
 }
 
@@ -100,6 +102,7 @@ const VALID_PRODUCER_KINDS: readonly QueryReviewProducerKind[] = [
   'execute_sql_on',
   'invoke_skill',
 ];
+const VALID_PANE_SIDES: readonly QueryReviewPaneSide[] = ['left', 'right', 'top', 'bottom'];
 const VALID_CONFIDENCES: readonly QueryReviewConfidence[] = ['declared', 'observed', 'partial'];
 const VALID_SEVERITIES: readonly QueryReviewGuardrailSeverity[] = ['info', 'warning'];
 
@@ -144,6 +147,7 @@ function sanitizeProducer(value: unknown): QueryReviewProducerV1 | undefined {
     return undefined;
   }
   const traceSide = value.traceSide;
+  const paneSide = value.paneSide;
   return {
     kind: kind as QueryReviewProducerKind,
     sourceToolCallId: boundedString(value.sourceToolCallId, MAX_ID),
@@ -151,6 +155,9 @@ function sanitizeProducer(value: unknown): QueryReviewProducerV1 | undefined {
     planPhaseId: boundedString(value.planPhaseId, MAX_ID),
     planPhaseTitle: boundedString(value.planPhaseTitle),
     traceSide: traceSide === 'current' || traceSide === 'reference' ? traceSide : undefined,
+    paneSide: typeof paneSide === 'string' && VALID_PANE_SIDES.includes(paneSide as QueryReviewPaneSide)
+      ? paneSide as QueryReviewPaneSide
+      : undefined,
     traceId: boundedString(value.traceId, MAX_ID),
   };
 }

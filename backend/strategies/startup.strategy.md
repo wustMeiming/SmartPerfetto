@@ -125,14 +125,18 @@ plan_template:
     - id: startup_timing
       match_keywords: ['startup', 'ttid', 'ttfd', 'launch', '启动', 'startup_analysis']
       suggestion: '启动场景建议包含启动耗时测量阶段 (startup_analysis)'
-      required_expected_calls:
+      required_expected_call_alternatives:
         - tool: invoke_skill
+          skill_id: startup_analysis
+        - tool: compare_skill
           skill_id: startup_analysis
     - id: phase_breakdown
       match_keywords: ['phase', 'breakdown', 'block', '阶段', '分解', '阻塞', 'startup_detail']
       suggestion: '启动场景建议包含启动阶段分解和阻塞因素分析'
-      required_expected_calls:
+      required_expected_call_alternatives:
         - tool: invoke_skill
+          skill_id: startup_detail
+        - tool: compare_skill
           skill_id: startup_detail
     - id: startup_critical_artifacts
       match_keywords: ['artifact', 'fetch_artifact', 'critical_tasks', 'hot_slice_states', 'thread_blocking_graph', '关键数据', '关键任务', '阻塞关系']
@@ -142,22 +146,28 @@ plan_template:
     - id: launch_type_verdict
       match_keywords: ['type', 'cold', 'warm', 'hot', 'bindApplication', '类型', '冷启动', '温启动', '热启动', '判定']
       suggestion: '启动场景建议验证启动类型 (cold/warm/hot)：bindApplication 存在→冷启动，仅 performCreate→温启动'
-      required_expected_calls:
+      required_expected_call_alternatives:
         - tool: invoke_skill
+          skill_id: startup_analysis
+        - tool: compare_skill
           skill_id: startup_analysis
     - id: cold_start_slow_reasons
       trigger_keywords: ['cold', '冷启动', 'bindApplication', 'startup_slow_reasons', 'SR09', 'SR10', 'SR20']
       match_keywords: ['startup_slow_reasons', 'slow reason', '官方启动慢原因', 'SR09', 'SR10', 'SR20', 'dex2oat', 'baseline']
       suggestion: '冷启动或 bindApplication 证据出现时，计划必须包含 startup_slow_reasons 交叉验证；若数据不可用，执行阶段标记 skipped 并说明原因'
-      required_expected_calls:
+      required_expected_call_alternatives:
         - tool: invoke_skill
+          skill_id: startup_slow_reasons
+        - tool: compare_skill
           skill_id: startup_slow_reasons
     - id: q4_blocking_chain
       trigger_keywords: ['Q4', 'Sleeping', 'sleeping', '阻塞', 'blocking_chain', 'blocked_functions', 'futex', 'binder']
       match_keywords: ['blocking_chain_analysis', '阻塞链', '唤醒者', 'waker', 'blocked_functions']
       suggestion: '当计划涉及 Q4/Sleeping/阻塞解释时，必须声明 blocking_chain_analysis；若 trace 缺少阻塞信号，执行阶段标记 skipped 并说明'
-      required_expected_calls:
+      required_expected_call_alternatives:
         - tool: invoke_skill
+          skill_id: blocking_chain_analysis
+        - tool: compare_skill
           skill_id: blocking_chain_analysis
 ---
 
@@ -173,12 +183,12 @@ plan_template:
 - detail 是 informational：只指导如何执行，不能替代 invoke_skill / execute_sql / fetch_artifact 的 trace 证据。
 
 **Mandatory aspects**
-- startup_timing: 启动场景建议包含启动耗时测量阶段 (startup_analysis)  (required: invoke_skill(startup_analysis))
-- phase_breakdown: 启动场景建议包含启动阶段分解和阻塞因素分析  (required: invoke_skill(startup_detail))
+- startup_timing: 启动场景建议包含启动耗时测量阶段 (startup_analysis)  (required: invoke_skill(startup_analysis) or compare_skill(startup_analysis))
+- phase_breakdown: 启动场景建议包含启动阶段分解和阻塞因素分析  (required: invoke_skill(startup_detail) or compare_skill(startup_detail))
 - startup_critical_artifacts: 启动详情阶段必须计划获取 startup_detail 的关键 artifact（主线程状态、四象限、热点、关键任务/阻塞关系；缺失时阶段可 skipped+reason）  (required: fetch_artifact)
-- launch_type_verdict: 启动场景建议验证启动类型 (cold/warm/hot)：bindApplication 存在→冷启动，仅 performCreate→温启动  (required: invoke_skill(startup_analysis))
-- cold_start_slow_reasons: 冷启动或 bindApplication 证据出现时，计划必须包含 startup_slow_reasons 交叉验证；若数据不可用，执行阶段标记 skipped 并说明原因  (required: invoke_skill(startup_slow_reasons))
-- q4_blocking_chain: 当计划涉及 Q4/Sleeping/阻塞解释时，必须声明 blocking_chain_analysis；若 trace 缺少阻塞信号，执行阶段标记 skipped 并说明  (required: invoke_skill(blocking_chain_analysis))
+- launch_type_verdict: 启动场景建议验证启动类型 (cold/warm/hot)：bindApplication 存在→冷启动，仅 performCreate→温启动  (required: invoke_skill(startup_analysis) or compare_skill(startup_analysis))
+- cold_start_slow_reasons: 冷启动或 bindApplication 证据出现时，计划必须包含 startup_slow_reasons 交叉验证；若数据不可用，执行阶段标记 skipped 并说明原因  (required: invoke_skill(startup_slow_reasons) or compare_skill(startup_slow_reasons))
+- q4_blocking_chain: 当计划涉及 Q4/Sleeping/阻塞解释时，必须声明 blocking_chain_analysis；若 trace 缺少阻塞信号，执行阶段标记 skipped 并说明  (required: invoke_skill(blocking_chain_analysis) or compare_skill(blocking_chain_analysis))
 
 **Phase reminders**
 - detail_breakdown: 必须用 Phase 1 的 ttid_ts/ttfd_ts 作为 startup_detail 的时间边界参数。使用 self_ms（排除子切片）而非 wall-time。 工具: startup_detail

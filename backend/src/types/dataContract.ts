@@ -312,6 +312,8 @@ export interface DataEnvelopeMeta {
   /** Trace side for comparison-mode outputs */
   traceSide?: DataEnvelopeTraceSide;
 
+  paneSide?: 'left' | 'right' | 'top' | 'bottom';
+
   /** Backend trace identifier used to produce this data */
   traceId?: string;
 
@@ -515,6 +517,7 @@ export function createDataEnvelope<T = DataPayload>(
     defaultCollapsed?: boolean;
     evidenceRefId?: string;
     traceSide?: DataEnvelopeTraceSide;
+    paneSide?: 'left' | 'right' | 'top' | 'bottom';
     traceId?: string;
     queryHash?: string;
     queryReview?: QueryReviewV1;
@@ -551,6 +554,7 @@ export function createDataEnvelope<T = DataPayload>(
       stepId: options.stepId,
       evidenceRefId: options.evidenceRefId,
       traceSide: options.traceSide,
+      paneSide: options.paneSide,
       traceId: options.traceId,
       queryHash: options.queryHash,
       queryReview,
