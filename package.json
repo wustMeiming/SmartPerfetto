@@ -26,6 +26,7 @@
     "package:linux": "./scripts/package-portable.sh --targets linux-x64",
     "version:sync": "node scripts/sync-version.cjs",
     "version:set": "node scripts/sync-version.cjs",
+    "verify:public-skills": "./scripts/verify-public-skill-export.sh",
     "trace-processor:sync-prebuilts": "node scripts/sync-trace-processor-prebuilts.cjs",
     "release:portable": "./scripts/release-portable.sh",
     "release:windows-exe": "./scripts/release-windows-exe.sh",

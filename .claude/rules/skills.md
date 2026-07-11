@@ -95,6 +95,21 @@ Click actions should be explicit, for example:
   DataEnvelope output can feed HTML reports, CLI artifacts, evidence contracts,
   analysis-result snapshots, and comparison.
 
+## Public Agent Skill Projection
+
+- `backend/skills/` is the product runtime source of truth.
+- `backend/skills/public-export.yaml` must explicitly classify every runtime
+  candidate and every selected strategy/pipeline source for the public
+  `Gracker/Perfetto-Skills` projection. Do not infer missing entries in normal
+  export or hand-edit generated public references.
+- Keep product-only provider, session, artifact, DataEnvelope, streaming, and
+  frontend semantics in SmartPerfetto. The public projection contains portable
+  workflows, SQL, methodology, pipeline knowledge, and local scripts.
+- After a source or policy change, regenerate in the public checkout, commit the
+  updated source commit/hash provenance, and run `npm run verify:public-skills`.
+- The verification script uses sibling `../Perfetto-Skills` by default; set
+  `PERFETTO_SKILLS_DIR` for another checkout.
+
 ## Validation
 
 After changing Skill YAML:

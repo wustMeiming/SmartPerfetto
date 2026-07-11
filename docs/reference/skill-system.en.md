@@ -120,6 +120,34 @@ npm run validate:skills
 npm run test:scene-trace-regression
 ```
 
+## Relationship To Standard Agent Skills
+
+SmartPerfetto YAML Skills and standard Agent Skills serve different execution
+boundaries. YAML under `backend/skills/` remains the deterministic product
+runtime truth: it drives registry selection, multi-step execution,
+DataEnvelope output, artifacts, reports, session provenance, and frontend
+projection. It is not replaced by Markdown instructions.
+
+[Gracker/Perfetto-Skills](https://github.com/Gracker/Perfetto-Skills) is the
+generated and curated portable projection for compatible agents with local
+filesystem and terminal access. It exports agent-readable workflows, extracted
+SQL, selected strategy and knowledge methodology, rendering-pipeline material,
+and a checksum-pinned local trace-processor runtime. It does not export provider
+management, session state, artifacts, streaming, or UI behavior.
+
+`backend/skills/public-export.yaml` explicitly classifies every runtime
+candidate by workflow, disposition, and destination. The public catalog records
+the SmartPerfetto source commit and per-file SHA-256 values; normal export never
+infers missing policy entries. After changing `backend/skills/`,
+`backend/strategies/`, `docs/rendering_pipelines/`, or the export policy, run:
+
+```bash
+npm run verify:public-skills
+```
+
+The command uses the sibling `../Perfetto-Skills` checkout by default, or
+`PERFETTO_SKILLS_DIR` when set, and rejects source/catalog/generated-file drift.
+
 ## Skill Tiers And Validation Rules
 
 Skills may declare top-level `tier: S | A | B` to express target complexity and

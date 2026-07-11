@@ -694,37 +694,51 @@ cd backend && npm run test:scene-trace-regression
 2. 使用 `execute_sql` 单独测试 SQL 片段
 3. 检查 SSE 事件中的 DataEnvelope 是否正确
 
-## 13. 与 Claude 标准 Skill 的区别
+## 13. 与标准 Agent Skill 的关系
 
-SmartPerfetto Skills **不是** Claude Code Skills 的等价物，两者解决不同的问题：
+SmartPerfetto YAML Skills **不是**标准 Agent Skill 的等价物，两者解决不同的问题：
 
-| 维度 | Claude Code Skills | SmartPerfetto YAML Skills |
+| 维度 | 标准 Agent Skill | SmartPerfetto YAML Skills |
 |------|---|---|
 | **本质** | Markdown 提示词模板 | 领域 DSL (SQL 编排引擎) |
-| **执行者** | Claude 自己按 prompt 行动 | SkillExecutor 引擎确定性执行 |
+| **执行者** | 兼容 Agent 按说明和脚本行动 | SkillExecutor 引擎确定性执行 |
 | **文件格式** | `SKILL.md` (YAML frontmatter + Markdown) | `.skill.yaml` (SQL + 显示配置) |
 | **能力** | 注入上下文、指导行为 | 多步 SQL 编排 + 分层结果 + Artifact 缓存 |
-| **调用方式** | `/slash-command` 或 Claude 自动触发 | 当前 agent runtime 通过 MCP/function tool `invoke_skill` 间接调用 |
-| **可复现性** | 取决于 Claude 推理 | 确定性（同输入 = 同输出） |
-| **Token 消耗** | Claude 每步都消耗 token | 引擎内部跑完，只返回摘要 |
+| **调用方式** | Agent 自动路由或显式点名 | 当前 agent runtime 通过注册表和工具间接调用 |
+| **可复现性** | 取决于 Agent 推理与本地脚本 | 确定性（同输入 = 同输出） |
+| **产品能力** | 本地文件、终端和 `trace_processor_shell` | DataEnvelope、Artifact、报告、会话和 UI 投影 |
 
 **架构关系：**
 
 ```
-Claude Code Skills (.claude/skills/)
-    └─ 告诉 Claude "怎么思考" (prompt 层)
-        └─ 已由 .strategy.md + .template.md 实现
+Perfetto-Skills (标准 SKILL.md)
+    └─ 公开的可移植方法论、SQL、管线知识和本地查询脚本
+        └─ 由兼容 Agent 执行，不依赖 SmartPerfetto 服务
 
 SmartPerfetto Skills (backend/skills/)
-    └─ 告诉引擎 "怎么执行" (数据层)
-        └─ Claude 通过 MCP invoke_skill 触发
+    └─ 产品内确定性 DSL 与运行时真相
+        └─ 驱动 DataEnvelope、Artifact、报告和前端投影
 
-两者互补，不冲突，不需要迁移。
+backend/strategies + docs/rendering_pipelines
+    └─ 公开投影的方法论与渲染管线来源
 ```
 
-**不建议迁移的原因：**
-- 迁移到 Claude Code Skills 会**丢失**多步编排、L1-L4 分层、Artifact 压缩、确定性执行
-- SmartPerfetto 的 `.strategy.md` 已经承担了 Claude Code Skills 的角色（注入分析方法论到 system prompt）
+公开仓库 [Gracker/Perfetto-Skills](https://github.com/Gracker/Perfetto-Skills)
+是生成加人工策划的标准 Agent Skill 投影，不替代本仓库运行时。当前
+`backend/skills/public-export.yaml` 必须逐项声明每个运行候选的 workflow、
+disposition 和目标路径；公开目录记录源 commit 与逐文件 SHA-256，并导出
+SQL、策略/知识材料和渲染管线文档。Provider、会话、Artifact、DataEnvelope、
+SSE 与前端行为仍只属于 SmartPerfetto。
+
+修改 `backend/skills/`、`backend/strategies/`、`docs/rendering_pipelines/` 或
+公开策略后，在已检出 Perfetto-Skills 的环境运行：
+
+```bash
+npm run verify:public-skills
+```
+
+默认查找同级 `../Perfetto-Skills`；也可用 `PERFETTO_SKILLS_DIR` 指向其他
+checkout。门禁会拒绝未分类来源、源 hash/commit 漂移和生成文件漂移。
 
 ---
 
