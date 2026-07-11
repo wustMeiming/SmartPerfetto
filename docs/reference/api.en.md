@@ -223,7 +223,7 @@ Base path: `/api/agent/v1`
 | `POST` | `/resume` | Resume an existing session |
 | `POST` | `/:sessionId/respond` | Continue an awaiting-user session |
 | `POST` | `/sessions/:sessionId/respond` | Session-scoped alias for `respond` |
-| `POST` | `/:sessionId/cancel` | Cancel analysis |
+| `POST` | `/:sessionId/cancel` | Cancel the exact `runId` |
 | `POST` | `/:sessionId/interaction` | Record UI interaction |
 | `GET` | `/:sessionId/focus` | Query focus state |
 | `GET` | `/:sessionId/report` | Fetch generated report |
@@ -257,6 +257,20 @@ The response returns `sessionId`. Then subscribe:
 ```bash
 curl -N http://localhost:3000/api/agent/v1/<sessionId>/stream
 ```
+
+Cancellation must include the exact `runId` returned by `/analyze`. A missing,
+unknown, or no-longer-active run cannot trigger a session-level runtime abort:
+
+```bash
+curl -X POST http://localhost:3000/api/agent/v1/<sessionId>/cancel \
+  -H "Content-Type: application/json" \
+  -d '{"runId":"<runId>"}'
+```
+
+The cancellation terminal may return before the runtime has fully settled. A
+new run in the same session receives `409 CANCELLATION_IN_PROGRESS` until the
+cancelled runtime exits, preventing old-run cleanup or continuity state from
+affecting the replacement run.
 
 The terminal `analysis_completed` event can include `analysisReceipt`,
 `traceConfigProposal`, and `uiActionProposals`. `uiActionProposals` only

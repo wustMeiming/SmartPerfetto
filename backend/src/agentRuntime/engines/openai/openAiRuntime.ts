@@ -193,7 +193,54 @@ interface OpenAIModeClassification {
 }
 
 interface RuntimeAbortHandle {
+  readonly aborted: boolean;
   abort(): void;
+}
+
+interface LinkedAbortController {
+  controller: AbortController;
+  dispose(): void;
+}
+
+class RuntimeAnalysisAbortScope implements RuntimeAbortHandle {
+  private readonly controller = new AbortController();
+
+  get aborted(): boolean {
+    return this.signal.aborted;
+  }
+
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  abort(): void {
+    if (this.signal.aborted) return;
+    const error = new Error('Analysis aborted');
+    error.name = 'AbortError';
+    this.controller.abort(error);
+  }
+
+  throwIfAborted(): void {
+    if (!this.signal.aborted) return;
+    if (this.signal.reason instanceof Error) throw this.signal.reason;
+    const error = new Error('Analysis aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+
+  createLinkedController(): LinkedAbortController {
+    const controller = new AbortController();
+    const abortChild = () => controller.abort(this.signal.reason);
+    if (this.signal.aborted) {
+      abortChild();
+    } else {
+      this.signal.addEventListener('abort', abortChild, { once: true });
+    }
+    return {
+      controller,
+      dispose: () => this.signal.removeEventListener('abort', abortChild),
+    };
+  }
 }
 
 const OPENAI_SESSION_FRESHNESS_MS = SDK_SESSION_FRESHNESS_MS;
@@ -607,7 +654,19 @@ function resolveOpenAIRunInput(params: {
   };
 }
 
+async function commitAfterProviderClose<T>(
+  closeProvider: () => Promise<void>,
+  abortScope: Pick<RuntimeAnalysisAbortScope, 'throwIfAborted'>,
+  commit: () => T,
+): Promise<T> {
+  abortScope.throwIfAborted();
+  await closeProvider();
+  abortScope.throwIfAborted();
+  return commit();
+}
+
 export const __testing = {
+  RuntimeAnalysisAbortScope,
   isMissingOpenAIPreviousResponseError,
   readCompletedStreamFinalOutput,
   readPlanEligibleStreamFinalOutput,
@@ -620,6 +679,7 @@ export const __testing = {
   resolveOpenAIRunInput,
   isRecoverableOpenAIStreamTermination,
   compactProviderErrorMessage,
+  commitAfterProviderClose,
 };
 
 export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
@@ -750,41 +810,51 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     let observedToolCalls = 0;
     const config = loadOpenAIConfig(options.providerId, providerScopeFromAnalysisOptions(options));
     const sceneType = classifyScene(query);
-    const modeClassification = await this.classifyModeForRequest(query, sessionId, traceId, options, sceneType, config);
-    const quickMode = modeClassification.quickMode;
-    const inferReportedRounds = (visibleText?: string) => {
-      const hasVisibleWork = Boolean((visibleText ?? accumulatedAnswer).trim()) || observedToolCalls > 0;
-      if (quickMode) {
-        return Math.max(rounds, hasVisibleWork ? (observedToolCalls > 0 ? observedToolCalls + 1 : 1) : 0);
-      }
-      return Math.max(rounds, hasVisibleWork ? 1 : 0);
-    };
-    const sessionContext = sessionContextManager.getOrCreate(sessionId, traceId);
-    const previousTurns = sessionContext.getAllTurns?.() || [];
-    const analysisRunSpec = createAnalysisRunSpec({
-      query,
-      sessionId,
-      traceId,
-      options,
-      runtimeSelection: this.runtimeSelection,
-      sceneType,
-      outputLanguage: config.outputLanguage,
-      previousTurns,
-      resolvedMode: quickMode ? 'quick' : 'full',
-      budget: {
-        model: config.model,
-        lightModel: config.lightModel,
-        maxTurns: config.maxTurns,
-        quickMaxTurns: config.quickMaxTurns,
-        quickTargetTurns: config.quickTargetTurns,
-        maxOutputTokens: config.maxOutputTokens,
-        fullPathPerTurnMs: config.fullPathPerTurnMs,
-        quickPathPerTurnMs: config.quickPathPerTurnMs,
-        classifierTimeoutMs: config.classifierTimeoutMs,
-      },
-    });
-
+    const analysisAbortScope = new RuntimeAnalysisAbortScope();
+    const unregisterAnalysisAbortHandle = this.registerAbortHandle(sessionId, analysisAbortScope);
     try {
+      const modeClassification = await this.classifyModeForRequest(
+        query,
+        sessionId,
+        traceId,
+        options,
+        sceneType,
+        config,
+        analysisAbortScope.signal,
+      );
+      analysisAbortScope.throwIfAborted();
+      const quickMode = modeClassification.quickMode;
+      const inferReportedRounds = (visibleText?: string) => {
+        const hasVisibleWork = Boolean((visibleText ?? accumulatedAnswer).trim()) || observedToolCalls > 0;
+        if (quickMode) {
+          return Math.max(rounds, hasVisibleWork ? (observedToolCalls > 0 ? observedToolCalls + 1 : 1) : 0);
+        }
+        return Math.max(rounds, hasVisibleWork ? 1 : 0);
+      };
+      const sessionContext = sessionContextManager.getOrCreate(sessionId, traceId);
+      const previousTurns = sessionContext.getAllTurns?.() || [];
+      const analysisRunSpec = createAnalysisRunSpec({
+        query,
+        sessionId,
+        traceId,
+        options,
+        runtimeSelection: this.runtimeSelection,
+        sceneType,
+        outputLanguage: config.outputLanguage,
+        previousTurns,
+        resolvedMode: quickMode ? 'quick' : 'full',
+        budget: {
+          model: config.model,
+          lightModel: config.lightModel,
+          maxTurns: config.maxTurns,
+          quickMaxTurns: config.quickMaxTurns,
+          quickTargetTurns: config.quickTargetTurns,
+          maxOutputTokens: config.maxOutputTokens,
+          fullPathPerTurnMs: config.fullPathPerTurnMs,
+          quickPathPerTurnMs: config.quickPathPerTurnMs,
+          classifierTimeoutMs: config.classifierTimeoutMs,
+        },
+      });
       const quickBudget = quickMode
         ? resolveQuickTurnBudget({
             hardCapTurns: config.quickMaxTurns,
@@ -794,6 +864,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         : undefined;
 
       if (quickMode && quickBudget && modeClassification.quickAcknowledgementDirectAnswer) {
+        analysisAbortScope.throwIfAborted();
         const result = buildQuickDirectAcknowledgementAnalysisResult({
           sessionId,
           options,
@@ -844,6 +915,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
             emitUpdate: update => this.emitUpdate(update),
           })
         : undefined;
+      analysisAbortScope.throwIfAborted();
       if (quickBudget && directEvidenceAnswer) {
         return this.buildDirectQuickEvidenceResult({
           query,
@@ -872,6 +944,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         quickProcessIdentityPreEvidence: modeClassification.quickProcessIdentityPreEvidence,
         quickTraceFactPreEvidence: modeClassification.quickTraceFactPreEvidence,
       });
+      analysisAbortScope.throwIfAborted();
 
       const directQuickAnswer = context.directProcessIdentityAnswer ?? context.directTraceFactAnswer;
       if (quickMode && quickBudget && directQuickAnswer) {
@@ -939,6 +1012,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       });
       const input = runInput.input;
 
+      analysisAbortScope.throwIfAborted();
       setTracingDisabled(true);
       const provider = shouldUseMimoReasoningContentCompat(config)
         ? new OpenAIProvider({
@@ -983,6 +1057,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         activeController?.abort();
       }, timeoutMs);
 
+      analysisAbortScope.throwIfAborted();
       this.emitUpdate({
         type: 'progress',
         content: {
@@ -1033,16 +1108,15 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         };
 
         for (let continuation = 0; ; continuation++) {
+          analysisAbortScope.throwIfAborted();
           if (timedOut || Date.now() >= deadlineAt) {
             timedOut = true;
             markTimeoutPartial(this.getPlanCompletionStatus(sessionId, quickMode));
             break;
           }
-          const controller = new AbortController();
+          const linkedController = analysisAbortScope.createLinkedController();
+          const controller = linkedController.controller;
           activeController = controller;
-          const unregisterAbortHandle = this.registerAbortHandle(sessionId, {
-            abort: () => controller.abort(),
-          });
           let runAnswer = '';
           let runTurns = 0;
           let completedByPlanIdle = false;
@@ -1060,6 +1134,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
               return;
             }
             planCompleteIdleTimer = setTimeout(() => {
+              if (analysisAbortScope.signal.aborted) return;
               completedByPlanIdle = true;
                 this.emitUpdate({
                   type: 'progress',
@@ -1076,18 +1151,21 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
               controller.abort();
             }, OPENAI_PLAN_COMPLETE_IDLE_ABORT_MS);
           };
-          const stream = await runner.run(agent, currentInput, {
-            stream: true,
-            maxTurns: quickMode ? config.quickMaxTurns : config.maxTurns,
-            context: { signal: controller.signal },
-            signal: controller.signal,
-            ...(currentPreviousResponseId
-              ? { previousResponseId: currentPreviousResponseId }
-              : {}),
-          });
+          const runStream = () => runner.run(agent, currentInput, {
+              stream: true,
+              maxTurns: quickMode ? config.quickMaxTurns : config.maxTurns,
+              context: { signal: controller.signal },
+              signal: controller.signal,
+              ...(currentPreviousResponseId
+                ? { previousResponseId: currentPreviousResponseId }
+                : {}),
+            });
+          let stream!: Awaited<ReturnType<typeof runStream>>;
 
           let streamCompleted = false;
           try {
+            stream = await runStream();
+            analysisAbortScope.throwIfAborted();
             try {
               for await (const event of stream) {
                 clearPlanCompleteIdleTimer();
@@ -1121,9 +1199,10 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
             if (activeController === controller) {
               activeController = undefined;
             }
-            unregisterAbortHandle();
+            linkedController.dispose();
           }
 
+          analysisAbortScope.throwIfAborted();
           rounds += runTurns || stream.currentTurn || 0;
           const planStatus = this.getPlanCompletionStatus(sessionId, quickMode);
           const streamFinalOutput = readPlanEligibleStreamFinalOutput(stream, {
@@ -1233,6 +1312,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           currentPreviousResponseId = undefined;
         }
 
+        analysisAbortScope.throwIfAborted();
         clearTimeout(timeout);
         if (options.codeAwareMode && options.codeAwareMode !== 'off') {
           conclusion = sanitizeCodeAwareText(sessionId, conclusion);
@@ -1320,6 +1400,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
             emitIssueProgress: false,
           });
           let verification = await verifyCurrentConclusion();
+          analysisAbortScope.throwIfAborted();
           let verificationIssue = [
             ...verification.heuristicIssues,
             ...(verification.llmIssues || []),
@@ -1352,6 +1433,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
                 timestamp: Date.now(),
               });
               verification = await verifyCurrentConclusion();
+              analysisAbortScope.throwIfAborted();
               verificationIssue = [
                 ...verification.heuristicIssues,
                 ...(verification.llmIssues || []),
@@ -1376,6 +1458,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
             });
           }
         }
+        analysisAbortScope.throwIfAborted();
         const gateIssue = applyFinalResultQualityGate({ result, query, sceneType });
         if (gateIssue) {
           this.emitUpdate({
@@ -1390,51 +1473,56 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           });
         }
 
-        if (runInput.shouldPersistRemoteSession) {
-          this.sessionMap.set(context.sessionMapKey, {
-            history: finalHistory,
-            lastResponseId: finalLastResponseId,
-            runState: finalRunState,
-            updatedAt: Date.now(),
-          });
-        }
+        return await commitAfterProviderClose(
+          () => provider.close().catch(() => undefined),
+          analysisAbortScope,
+          () => {
+            if (runInput.shouldPersistRemoteSession) {
+              this.sessionMap.set(context.sessionMapKey, {
+                history: finalHistory,
+                lastResponseId: finalLastResponseId,
+                runState: finalRunState,
+                updatedAt: Date.now(),
+              });
+            }
 
-        this.recordTurn({
-          query,
-          sessionId,
-          result,
-          sessionContext: context.sessionContext,
-          previousTurnCount: context.previousTurns.length,
-          quickMode,
-        });
-        this.recordPatternMemory({
-          sessionId,
-          result,
-          previousTurnCount: context.previousTurns.length,
-          quickMode,
-          sceneType,
-          architecture: context.architecture,
-          packageName: context.effectivePackageName,
-          options,
-        });
+            this.recordTurn({
+              query,
+              sessionId,
+              result,
+              sessionContext: context.sessionContext,
+              previousTurnCount: context.previousTurns.length,
+              quickMode,
+            });
+            this.recordPatternMemory({
+              sessionId,
+              result,
+              previousTurnCount: context.previousTurns.length,
+              quickMode,
+              sceneType,
+              architecture: context.architecture,
+              packageName: context.effectivePackageName,
+              options,
+            });
 
-        this.emitUpdate({
-          type: 'conclusion',
-          content: { conclusion: result.conclusion, durationMs: Date.now() - startTime, turns: rounds },
-          timestamp: Date.now(),
-        });
-        this.emitUpdate({
-          type: 'answer_token',
-          content: { done: true, totalChars: result.conclusion.length },
-          timestamp: Date.now(),
-        });
+            this.emitUpdate({
+              type: 'conclusion',
+              content: { conclusion: result.conclusion, durationMs: Date.now() - startTime, turns: rounds },
+              timestamp: Date.now(),
+            });
+            this.emitUpdate({
+              type: 'answer_token',
+              content: { done: true, totalChars: result.conclusion.length },
+              timestamp: Date.now(),
+            });
 
-        await provider.close().catch(() => undefined);
-
-        return result;
+            return result;
+          },
+        );
       } catch (error) {
         clearTimeout(timeout);
         await provider.close().catch(() => undefined);
+        analysisAbortScope.throwIfAborted();
         if (currentPreviousResponseId && isMissingOpenAIPreviousResponseError(error, currentPreviousResponseId)) {
           return await this.retryWithoutPreviousResponse({
             query,
@@ -1486,6 +1574,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         throw error;
       }
     } catch (error) {
+      analysisAbortScope.throwIfAborted();
       const message = compactProviderErrorMessage(error);
       this.emitUpdate({
         type: 'error',
@@ -1509,6 +1598,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         terminationMessage: message,
       };
     } finally {
+      unregisterAnalysisAbortHandle();
       this.activeAnalyses.delete(sessionId);
     }
   }
@@ -1561,7 +1651,9 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       handles = new Set();
       this.activeAbortHandles.set(sessionId, handles);
     }
+    const cancellationAlreadyRequested = Array.from(handles).some(active => active.aborted);
     handles.add(handle);
+    if (cancellationAlreadyRequested) handle.abort();
     return () => {
       const current = this.activeAbortHandles.get(sessionId);
       if (!current) return;
@@ -2187,6 +2279,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     options: AnalysisOptions,
     sceneType: SceneType,
     config: OpenAIAgentConfig,
+    analysisSignal?: AbortSignal,
   ): Promise<OpenAIModeClassification> {
     const explicitMode = options.analysisMode;
     const sessionContext = sessionContextManager.getOrCreate(sessionId, traceId);
@@ -2265,7 +2358,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       };
     }
 
-    const ai = await classifyQueryWithOpenAILightModel(classifierInput, config);
+    const ai = await classifyQueryWithOpenAILightModel(classifierInput, config, analysisSignal);
     console.log(`[OpenAIRuntime] auto → ${ai.complexity} (ai: ${ai.reason})`);
     const flags = deriveFlags(ai);
     return {

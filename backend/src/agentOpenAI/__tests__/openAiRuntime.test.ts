@@ -145,6 +145,10 @@ type OpenAiRuntimeTestAccess = {
   takeSnapshot: (...args: unknown[]) => OpenAiRuntimeSnapshotForTest;
   restoreFromSnapshot: (...args: unknown[]) => void;
   restoreSessionMapping: (...args: unknown[]) => void;
+  registerAbortHandle: (
+    sessionId: string,
+    handle: {readonly aborted: boolean; abort(): void},
+  ) => () => void;
   sessionPlans: Map<string, { current: AnalysisPlanV3 | null; history: AnalysisPlanV3[] }>;
   sessionSqlErrors: Set<string>;
   sessionMap: Map<string, OpenAiSessionMapEntryForTest>;
@@ -206,6 +210,94 @@ function createTraceProcessorForOpenAiPrepareTest(): TraceProcessorForOpenAiTest
     getTrace: jest.fn(() => undefined),
   } as unknown as TraceProcessorForOpenAiTest;
 }
+
+describe('OpenAIRuntime analysis cancellation scope', () => {
+  it('aborts every provider request linked to the active analysis', () => {
+    const scope = new __testing.RuntimeAnalysisAbortScope();
+    const first = scope.createLinkedController();
+    const second = scope.createLinkedController();
+
+    scope.abort();
+
+    expect(first.controller.signal.aborted).toBe(true);
+    expect(second.controller.signal.aborted).toBe(true);
+  });
+
+  it('pre-aborts provider requests created after cancellation', () => {
+    const scope = new __testing.RuntimeAnalysisAbortScope();
+    scope.abort();
+
+    const late = scope.createLinkedController();
+
+    expect(late.controller.signal.aborted).toBe(true);
+    expect(() => scope.throwIfAborted()).toThrow('Analysis aborted');
+  });
+
+  it('does not retain completed provider-request listeners', () => {
+    const scope = new __testing.RuntimeAnalysisAbortScope();
+    const completed = scope.createLinkedController();
+    completed.dispose();
+
+    scope.abort();
+
+    expect(completed.controller.signal.aborted).toBe(false);
+  });
+
+  it('inherits cancellation across a retry scope handoff', () => {
+    const runtime = createOpenAiRuntimeForTest();
+    const first = new __testing.RuntimeAnalysisAbortScope();
+    runtime.registerAbortHandle('session-a', first);
+    first.abort();
+    const retry = new __testing.RuntimeAnalysisAbortScope();
+
+    runtime.registerAbortHandle('session-a', retry);
+
+    expect(retry.aborted).toBe(true);
+    expect(() => retry.throwIfAborted()).toThrow('Analysis aborted');
+  });
+
+  it('does not commit success when cancellation arrives while the provider is closing', async () => {
+    const scope = new __testing.RuntimeAnalysisAbortScope();
+    let releaseClose: (() => void) | undefined;
+    const closePending = new Promise<void>(resolve => {
+      releaseClose = resolve;
+    });
+    let committed = false;
+
+    const result = __testing.commitAfterProviderClose(
+      () => closePending,
+      scope,
+      () => {
+        committed = true;
+        return 'committed';
+      },
+    );
+    scope.abort();
+    releaseClose?.();
+
+    await expect(result).rejects.toThrow('Analysis aborted');
+    expect(committed).toBe(false);
+  });
+
+  it('commits success only after the provider has closed', async () => {
+    const scope = new __testing.RuntimeAnalysisAbortScope();
+    const order: string[] = [];
+
+    const result = await __testing.commitAfterProviderClose(
+      async () => {
+        order.push('close');
+      },
+      scope,
+      () => {
+        order.push('commit');
+        return 'committed';
+      },
+    );
+
+    expect(result).toBe('committed');
+    expect(order).toEqual(['close', 'commit']);
+  });
+});
 
 type OpenAiSessionContextForPrepareTest = {
   getAllTurns: jest.MockedFunction<() => unknown[]>;

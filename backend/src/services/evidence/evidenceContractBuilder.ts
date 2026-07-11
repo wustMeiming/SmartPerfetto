@@ -546,36 +546,10 @@ function buildClaimSupport(
   };
 }
 
-function buildRawComparisonSupport(section: ComparisonReportSection | undefined): ClaimSupportV1[] {
-  if (!section?.evidencePack || section.source !== 'raw_trace_pair') return [];
-  const evidenceRefId = `comparison:${section.source}:${stableHash(section.evidencePack)}`;
-  return [{
-    claimId: 'raw-trace-comparison-appendix',
-    kind: 'comparison',
-    text: section.title,
-    anchors: [{
-      anchorId: `anchor:${stableHash(evidenceRefId)}`,
-      version: 'evidence_contract@1',
-      evidenceRefId,
-      context: {
-        traceId: 'comparison',
-        traceSide: 'unknown',
-        producerKind: 'manual',
-      },
-      confidence: 0.5,
-    }],
-    supportLevel: 'partial',
-    inferenceReason: 'raw trace comparison appendix is treated as partial evidence until row-level claim refs are attached',
-  }];
-}
-
 export function buildEvidenceContract(input: BuildEvidenceContractInput): EvidenceContractV1 {
   const envelopes = input.dataEnvelopes || [];
   const claims = input.conclusionContract?.claims || [];
-  const claimSupport = [
-    ...claims.map((claim, index) => buildClaimSupport(claim, index, envelopes)),
-    ...buildRawComparisonSupport(input.comparisonReportSection),
-  ];
+  const claimSupport = claims.map((claim, index) => buildClaimSupport(claim, index, envelopes));
   const anchors = claimSupport.flatMap(item => item.anchors);
   const identityRefIds = Array.from(new Set(
     anchors.map(anchor => anchor.identity?.identityRefId).filter((value): value is string => Boolean(value)),

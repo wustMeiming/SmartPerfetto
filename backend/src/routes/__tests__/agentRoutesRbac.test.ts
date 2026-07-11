@@ -716,7 +716,7 @@ describe('agent route RBAC', () => {
 
       const cancelRes = await analystHeaders(
         request(app).post(`/api/agent/v1/${analyzeRes.body.sessionId}/cancel`),
-      );
+      ).send({ runId: analyzeRes.body.runId });
       expect(cancelRes.status).toBe(200);
 
       const streamRes = await analystHeaders(
@@ -1165,7 +1165,7 @@ describe('agent route RBAC', () => {
         scopedAnalystHeaders(
           request(app).post(`/api/agent/v1/${analyzeA.body.sessionId}/cancel`),
           { userId: 'analyst-a', workspaceId: 'workspace-a' },
-        ),
+        ).send({ runId: analyzeA.body.runId }),
         scopedAnalystHeaders(
           request(app).get(`/api/agent/v1/${analyzeB.body.sessionId}/status`),
           { userId: 'analyst-b', workspaceId: 'workspace-b' },
@@ -1248,7 +1248,7 @@ describe('agent route RBAC', () => {
       const cancelB = await scopedAnalystHeaders(
         request(app).post(`/api/agent/v1/${analyzeB.body.sessionId}/cancel`),
         { userId: 'analyst-b', workspaceId: 'workspace-b' },
-      );
+      ).send({ runId: analyzeB.body.runId });
       expect(cancelB.status).toBe(200);
 
       leaseStore = getTraceProcessorLeaseStore();
@@ -1295,6 +1295,8 @@ describe('agent route RBAC', () => {
       };
 
       try {
+        const abortSpy = jest.spyOn(ClaudeRuntime.prototype, 'abortSession')
+          .mockImplementation(() => undefined);
         const traceId = `trace-same-session-${lateOutcome}`;
         const tracePath = path.join(tmpDir, `${traceId}.trace`);
         await fs.writeFile(tracePath, `${traceId} bytes`);
@@ -1350,17 +1352,38 @@ describe('agent route RBAC', () => {
 
         const cancelA = await analystHeaders(
           request(app).post(`/api/agent/v1/${analyzeA.body.sessionId}/cancel`),
-        );
+        ).send({ runId: analyzeA.body.runId });
         expect(cancelA.status).toBe(200);
         expect(cancelA.body.status).toBe('cancelled');
+        expect(abortSpy).toHaveBeenCalledTimes(1);
 
-        const analyzeB = await analystHeaders(
+        const analyzeBBeforeSettle = await analystHeaders(
           request(app).post(`/api/agent/v1/sessions/${analyzeA.body.sessionId}/runs`),
         ).send({ traceId, query: 'run B' });
-        expect(analyzeB.status).toBe(200);
-        expect(analyzeB.body.sessionId).toBe(analyzeA.body.sessionId);
-        expect(analyzeB.body.runId).not.toBe(analyzeA.body.runId);
-        expect(deferreds).toHaveLength(2);
+        expect(analyzeBBeforeSettle.status).toBe(409);
+        expect(analyzeBBeforeSettle.body).toEqual(expect.objectContaining({
+          code: 'CANCELLATION_IN_PROGRESS',
+          runId: analyzeA.body.runId,
+        }));
+        expect(deferreds).toHaveLength(1);
+
+        const repeatedCancelA = await analystHeaders(
+          request(app).post(`/api/agent/v1/${analyzeA.body.sessionId}/cancel`),
+        ).send({ runId: analyzeA.body.runId });
+        expect(repeatedCancelA.status).toBe(200);
+        expect(repeatedCancelA.body).toEqual(expect.objectContaining({
+          runId: analyzeA.body.runId,
+          outcome: 'already_cancelled',
+        }));
+        expect(abortSpy).toHaveBeenCalledTimes(1);
+
+        const statusAfterRepeatedCancelA = await analystHeaders(
+          request(app).get(`/api/agent/v1/${analyzeA.body.sessionId}/status`),
+        );
+        expect(statusAfterRepeatedCancelA.body).toEqual(expect.objectContaining({
+          status: 'cancelled',
+          observability: expect.objectContaining({ runId: analyzeA.body.runId }),
+        }));
 
         if (lateOutcome === 'reject') {
           deferreds[0].reject(new Error('late run A failure'));
@@ -1377,6 +1400,14 @@ describe('agent route RBAC', () => {
           });
         }
         await new Promise(resolve => setTimeout(resolve, 0));
+
+        const analyzeB = await analystHeaders(
+          request(app).post(`/api/agent/v1/sessions/${analyzeA.body.sessionId}/runs`),
+        ).send({ traceId, query: 'run B' });
+        expect(analyzeB.status).toBe(200);
+        expect(analyzeB.body.sessionId).toBe(analyzeA.body.sessionId);
+        expect(analyzeB.body.runId).not.toBe(analyzeA.body.runId);
+        expect(deferreds).toHaveLength(2);
 
         const statusAfterLateA = await analystHeaders(
           request(app).get(`/api/agent/v1/${analyzeA.body.sessionId}/status`),
@@ -1424,7 +1455,7 @@ describe('agent route RBAC', () => {
 
         const cancelB = await analystHeaders(
           request(app).post(`/api/agent/v1/${analyzeA.body.sessionId}/cancel`),
-        );
+        ).send({ runId: analyzeB.body.runId });
         expect(cancelB.status).toBe(200);
         deferreds[1].reject(new Error('cleanup B'));
         await new Promise(resolve => setTimeout(resolve, 0));
@@ -1512,9 +1543,21 @@ describe('agent route RBAC', () => {
 
       const cancelA = await analystHeaders(
         request(app).post(`/api/agent/v1/${analyzeA.body.sessionId}/cancel`),
-      );
+      ).send({ runId: analyzeA.body.runId });
       expect(cancelA.status).toBe(200);
       expect(cancelA.body.status).toBe('cancelled');
+
+      const analyzeBBeforeSettle = await analystHeaders(
+        request(app).post(`/api/agent/v1/sessions/${analyzeA.body.sessionId}/runs`),
+      ).send({ traceId, query: 'run B' });
+      expect(analyzeBBeforeSettle.status).toBe(409);
+      expect(analyzeBBeforeSettle.body).toEqual(expect.objectContaining({
+        code: 'CANCELLATION_IN_PROGRESS',
+        runId: analyzeA.body.runId,
+      }));
+
+      deferreds[0].reject(new Error('late run A failure'));
+      await new Promise(resolve => setTimeout(resolve, 0));
 
       const analyzeB = await analystHeaders(
         request(app).post(`/api/agent/v1/sessions/${analyzeA.body.sessionId}/runs`),
@@ -1543,7 +1586,7 @@ describe('agent route RBAC', () => {
 
       const cancelB = await analystHeaders(
         request(app).post(`/api/agent/v1/${analyzeA.body.sessionId}/cancel`),
-      );
+      ).send({ runId: analyzeB.body.runId });
       expect(cancelB.status).toBe(200);
       deferreds.forEach((deferred, index) => deferred.reject(new Error(`cleanup ${index}`)));
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -1634,15 +1677,16 @@ describe('agent route RBAC', () => {
       const respondRes = await analystHeaders(
         request(makeApp())
           .post(`/api/agent/v1/${sessionId}/respond`)
-          .send({ action: 'abort' }),
+          .send({ action: 'abort', runId: `run-${sessionId}-1` }),
       );
 
-      expect(respondRes.status).toBe(200);
-      expect(respondRes.body).toEqual({
-        success: true,
+      expect(respondRes.status).toBe(404);
+      expect(respondRes.body).toEqual(expect.objectContaining({
+        success: false,
         sessionId,
-        status: 'completed',
-      });
+        runId: `run-${sessionId}-1`,
+        code: 'RUN_NOT_FOUND',
+      }));
     } finally {
       sessionContextManager.remove('session-resume-integration');
       SessionPersistenceService.resetForTests();

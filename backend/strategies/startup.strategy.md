@@ -62,7 +62,7 @@ final_report_contract:
         - ['self_ms', 'dur_ms', '耗时', '\d+(?:\.\d+)?\s*ms']
     - id: root_cause_references
       label: 根因编号引用
-      description: '关键根因需要引用 A1-A18、B1-B12 或 SRxx 编号，便于和启动知识库交叉核对。'
+      description: '关键根因只能引用启动知识库已有的 A1-A18、B1-B12，或工具实际返回的 SR09-SR20；禁止自创 SR01-SR08 或其他编号。'
       pattern_groups:
         - ['\bA(?:1[0-8]?|[2-9])\b', '\bB(?:1[0-2]?|[2-9])\b', 'SR(?:09|1[0-9]|20)(?!\d)']
     - id: audience_recommendations
@@ -213,6 +213,7 @@ plan_template:
 3. 对 startup_detail 的关键 artifact 使用 `fetch_artifact` 读取行数据；摘要或 detail 文本不能替代 artifact 证据。
 4. 冷启动/bindApplication 命中时补 `startup_slow_reasons`；Q4/Sleeping/blocked_functions 命中时补 `blocking_chain_analysis`。
 5. 最终报告必须包含启动类型+TTID/TTFD、阶段耗时/self_ms、根因编号、App/系统分层建议和证据边界。
+   根因编号只能来自启动知识库 A1-A18/B1-B12，或本轮工具结果明确返回的 SR09-SR20。禁止为了给自定义/合成负载分类而创建 SR01-SR08 或任何新编号；若合成负载没有精确映射，应明确写“无精确知识库编号”，并同时引用本轮实际命中的有效 SRxx 作为交叉验证而不是主根因。
 
 **Detail refs**
 - `startup:overview_timing`: startup_analysis/startup_detail 参数、启动类型、artifact 表。

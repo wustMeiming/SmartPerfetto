@@ -210,7 +210,7 @@ Base path: `/api/agent/v1`
 | `POST` | `/resume` | 恢复已有 session |
 | `POST` | `/:sessionId/respond` | 继续或终止 awaiting_user 会话 |
 | `POST` | `/sessions/:sessionId/respond` | `respond` 的 session-scoped alias |
-| `POST` | `/:sessionId/cancel` | 取消分析 |
+| `POST` | `/:sessionId/cancel` | 按精确 `runId` 取消分析 |
 | `POST` | `/:sessionId/interaction` | 记录 UI 交互 |
 | `GET` | `/:sessionId/focus` | 查询 focus 状态 |
 | `GET` | `/:sessionId/report` | 获取分析报告 |
@@ -242,6 +242,18 @@ curl -X POST http://localhost:3000/api/agent/v1/analyze \
 ```bash
 curl -N http://localhost:3000/api/agent/v1/<sessionId>/stream
 ```
+
+取消必须携带 `/analyze` 回执中的精确 `runId`。缺失、未知或已经不再拥有当前
+session 的 run 不会触发 session 级 runtime abort：
+
+```bash
+curl -X POST http://localhost:3000/api/agent/v1/<sessionId>/cancel \
+  -H "Content-Type: application/json" \
+  -d '{"runId":"<runId>"}'
+```
+
+取消终态可以先返回给客户端，但同一 session 的下一轮会在被取消的 runtime 真正退出前返回
+`409 CANCELLATION_IN_PROGRESS`，避免旧 run 的清理或会话状态污染新 run。
 
 终态 `analysis_completed` 事件可能携带 `analysisReceipt`、
 `traceConfigProposal` 和 `uiActionProposals`。`uiActionProposals` 只包含从

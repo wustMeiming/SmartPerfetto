@@ -14,6 +14,8 @@
     "shellcheck": "shellcheck -x start.sh scripts/*.sh",
     "check:frontend-prebuild": "node scripts/check-frontend-prebuild.cjs",
     "test:node-env": "bash scripts/test-node-env.sh",
+    "test:e2e:dual-trace": "node scripts/run-dual-trace-browser-e2e.cjs",
+    "test:e2e:dual-trace-real": "node scripts/run-dual-trace-browser-e2e.cjs --real-provider",
     "rust:fmt": "cargo fmt --manifest-path rust/flamegraph-analyzer/Cargo.toml -- --check",
     "rust:check": "cargo check --manifest-path rust/flamegraph-analyzer/Cargo.toml",
     "rust:test": "cargo test --manifest-path rust/flamegraph-analyzer/Cargo.toml",

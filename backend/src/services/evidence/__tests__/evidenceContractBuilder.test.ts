@@ -74,4 +74,29 @@ describe('evidenceContractBuilder', () => {
     expect(contract.anchors[0].context.paneSide).toBe('right');
     expect('queryReview' in contract.anchors[0].context).toBe(false);
   });
+
+  it('does not treat the raw Trace comparison appendix as a conclusion claim', () => {
+    const contract = buildEvidenceContract({
+      conclusionContract: {
+        schemaVersion: 'conclusion_contract_v1',
+        mode: 'focused_answer',
+        conclusions: [],
+        clusters: [],
+        evidenceChain: [],
+        claims: [],
+        uncertainties: [],
+        nextSteps: [],
+      },
+      comparisonReportSection: {
+        source: 'raw_trace_pair',
+        title: 'Raw Trace comparison',
+        markdown: 'Comparison appendix',
+        html: '<p>Comparison appendix</p>',
+        evidencePack: {currentTraceId: 'trace-current', referenceTraceId: 'trace-reference'},
+      },
+    });
+
+    expect(contract.claimSupport).toEqual([]);
+    expect(contract.anchors).toEqual([]);
+  });
 });

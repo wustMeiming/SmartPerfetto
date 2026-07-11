@@ -89,6 +89,7 @@ import {
 
 // Import cleanup utilities
 import { TraceProcessorFactory, killOrphanProcessors } from './services/workingTraceProcessor';
+import { shouldCleanOrphanProcessorsOnStartup } from './services/startupCleanupPolicy';
 import { getPortPool, resetPortPool } from './services/portPool';
 import { failInterruptedAnalysisRunsOnStartup } from './services/analysisRunStore';
 import { startCaseEvolutionWorker } from './services/caseEvolution/caseEvolutionWorkerBootstrap';
@@ -307,8 +308,11 @@ recoverInterruptedEnterpriseRuns();
 const caseEvolutionWorkerHandle = startCaseEvolutionWorker();
 const patternMemorySweepHandle = startPatternMemoryAutoConfirmSweep();
 
-// Kill orphan trace_processor processes from previous runs
-killOrphanProcessors();
+if (shouldCleanOrphanProcessorsOnStartup()) {
+  killOrphanProcessors();
+} else {
+  console.log('[TraceProcessor] Skipping global orphan cleanup for isolated process ownership');
+}
 
 // Graceful shutdown handler
 function gracefulShutdown(signal: string) {

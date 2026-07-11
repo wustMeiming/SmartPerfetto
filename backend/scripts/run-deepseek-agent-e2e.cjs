@@ -106,6 +106,7 @@ const suites = {
       '--output',
       'test-output/e2e-deepseek-dual-trace-real.json',
       '--keep-session',
+      '--require-claim-verifier-ok',
       '--require-non-partial',
       '--require-tool',
       'get_comparison_context',

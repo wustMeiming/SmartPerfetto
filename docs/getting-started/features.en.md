@@ -108,23 +108,26 @@ Output:
 
 ## 6. Live Trace Comparison
 
-Live trace comparison selects a reference trace inside the current AI conversation, so the AI can query the current trace and reference trace together.
+Live trace comparison places the current page's current trace and one workspace-history reference trace in a repositionable dual view, so the AI can query both traces in one conversation.
 
 Entry points:
 
 - Click `compare_arrows` in the AI Assistant header.
-- Select a reference trace.
-- After selection, the UI stays in the default single-window view; the AI conversation already has current/reference two-trace context.
-- When you need to operate two full timelines at the same time, click `Open Dual View` in the comparison bar.
-- In dual view, the current trace is on the left or top and the reference trace is on the right or bottom. You can switch horizontal/vertical layout, drag the splitter, maximize/minimize either side, or open either side in a new tab.
-- You can `Collapse Dual View` at any time and keep the two-trace AI context, or `Exit Comparison` to clear the reference trace.
+- `Open Dual View` immediately opens a current-plus-empty-reference shell; no separate history picker is required first.
+- Both panes have a selector. Either pane can show current or history. Selecting history in the pane that holds current atomically moves current to the other pane.
+- History options lead with the trace filename. Upload time/file size are appended only when same-name records need disambiguation; internal ids are never the main label.
+- Once selected, history is the sole reference. The supported pair remains the current page's current parent plus one historical reference; arbitrary history-versus-history pairs are not supported.
+- You can switch horizontal/vertical layout, drag the splitter, maximize/minimize either side, or open either side in a new tab.
+- The dual-view toolbar keeps an explicit `AI Assistant` button visible. It collapses or restores the conversation panel without closing or reloading either trace pane.
+- Layout changes, maximize/minimize, and AI Panel hide/show do not reload dual-view iframes. Only explicit dual-view exit, current-trace unload, or workspace switch destroys them.
+- `Exit Dual View` releases the visual workspace while its two-trace AI context may remain; `Exit Comparison` clears the reference trace.
 - Ask a comparison question, for example `Compare scrolling behavior between this trace and the reference trace`, `Why is the left trace slower to start`, or `What frequency difference exists between the top and bottom traces`.
 
 Output:
 
 - The AI can access both current/reference raw traces in one analysis.
 - The AI Panel sends current/reference, left/right, top/bottom, active side, dual-view open state, split ratio, and maximized/minimized state to the backend.
-- When the user says "left", "right", "top", "bottom", "current", or "reference", the AI resolves that wording against the current dual-view layout; when dual view is collapsed, current/reference wording still works.
+- When the user says "left", "right", "top", "bottom", "current", or "reference", the AI resolves that wording against the actual pane mapping; after dual-view exit, current/reference wording still works.
 - Useful for temporary two-trace comparison.
 - This mode is live analysis, not cross-window or cross-user persistent result comparison.
 
