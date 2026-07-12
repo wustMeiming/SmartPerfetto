@@ -14,6 +14,7 @@
     "shellcheck": "shellcheck -x start.sh scripts/*.sh",
     "check:frontend-prebuild": "node scripts/check-frontend-prebuild.cjs",
     "test:node-env": "bash scripts/test-node-env.sh",
+    "test:governance": "node --test scripts/__tests__/check-perfetto-skills-impact.test.mjs",
     "test:e2e:dual-trace": "node scripts/run-dual-trace-browser-e2e.cjs",
     "test:e2e:dual-trace-real": "node scripts/run-dual-trace-browser-e2e.cjs --real-provider",
     "rust:fmt": "cargo fmt --manifest-path rust/flamegraph-analyzer/Cargo.toml -- --check",
@@ -27,11 +28,12 @@
     "version:sync": "node scripts/sync-version.cjs",
     "version:set": "node scripts/sync-version.cjs",
     "verify:public-skills": "./scripts/verify-public-skill-export.sh",
+    "check:perfetto-skills-impact": "node scripts/check-perfetto-skills-impact.mjs",
     "trace-processor:sync-prebuilts": "node scripts/sync-trace-processor-prebuilts.cjs",
     "release:portable": "./scripts/release-portable.sh",
     "release:windows-exe": "./scripts/release-windows-exe.sh",
     "quality": "npm run lint && npm run format:check && npm run deadcode && npm run shellcheck",
-    "verify:pr": "npm run quality && npm run check:frontend-prebuild && npm run rust:verify && npm --prefix backend run verify:pr"
+    "verify:pr": "npm run test:governance && npm run quality && npm run check:frontend-prebuild && npm run rust:verify && npm --prefix backend run verify:pr"
   },
   "engines": {
     "node": ">=24.0.0 <25.0.0"
