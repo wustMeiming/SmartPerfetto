@@ -12,6 +12,7 @@ import {
 export type CapturePresetId =
   | 'startup'
   | 'scrolling'
+  | 'camera'
   | 'anr'
   | 'game'
   | 'memory'
@@ -76,6 +77,11 @@ const BINDER_EVENTS = [
   'binder/binder_unlock',
 ];
 
+const CAMERA_MEMORY_EVENTS = [
+  'dmabuf_heap/dma_heap_stat',
+  'ion/ion_stat',
+];
+
 const IO_EVENTS = [
   'block/block_rq_issue',
   'block/block_rq_complete',
@@ -124,6 +130,17 @@ export const CAPTURE_PRESETS: CapturePresetDefinition[] = [
     ftraceEvents: [...COMMON_FTRACE_EVENTS, ...BINDER_EVENTS, 'power/gpu_frequency'],
     dataSources: [...COMMON_DATA_SOURCES, 'android.surfaceflinger.frametimeline', 'android.input.inputevent'],
     description: 'Scrolling and frame-jank capture with FrameTimeline, input, scheduler, and CPU/GPU frequency.',
+  },
+  {
+    id: 'camera',
+    label: 'Android Camera',
+    intent: 'camera',
+    defaultDurationSeconds: 20,
+    bufferSizeKb: 98304,
+    atraceCategories: ['camera', 'hal', 'gfx', 'view', 'binder_driver', 'freq', 'sched'],
+    ftraceEvents: [...COMMON_FTRACE_EVENTS, ...BINDER_EVENTS, ...CAMERA_MEMORY_EVENTS],
+    dataSources: [...COMMON_DATA_SOURCES, 'android.surfaceflinger.frametimeline'],
+    description: 'Camera request, binder, scheduler, preview presentation, and DMA-BUF/ION allocation evidence.',
   },
   {
     id: 'anr',
@@ -231,6 +248,7 @@ export const CAPTURE_PRESETS: CapturePresetDefinition[] = [
       ...BINDER_EVENTS,
       ...IO_EVENTS,
       ...MEMORY_EVENTS,
+      ...CAMERA_MEMORY_EVENTS,
       'irq/irq_handler_entry',
       'irq/irq_handler_exit',
       'sync/sync_timeline',

@@ -6,12 +6,43 @@ import { describe, expect, it } from '@jest/globals';
 import {
   addAtraceCategories,
   calculateCaptureBufferSizeKb,
+  getCapturePreset,
   listCapturePresets,
   renderAndroidTraceConfig,
   renderTraceConfigTemplate,
 } from '../traceCaptureConfig';
 
 describe('shared trace capture config rendering', () => {
+  it('renders the Camera preset with binder, FrameTimeline, and DMA-BUF evidence', () => {
+    const preset = getCapturePreset('camera');
+    const config = renderAndroidTraceConfig({
+      target: 'android',
+      preset: 'camera',
+      app: 'com.example.camera',
+      durationSeconds: 20,
+    });
+
+    expect(preset.intent).toBe('camera');
+    expect(config).toContain('atrace_categories: "camera"');
+    expect(config).toContain('atrace_categories: "hal"');
+    expect(config).toContain('ftrace_events: "dmabuf_heap/dma_heap_stat"');
+    expect(config).toContain('ftrace_events: "ion/ion_stat"');
+    expect(config).toContain('ftrace_events: "binder/binder_transaction"');
+    expect(config).toContain('name: "android.surfaceflinger.frametimeline"');
+  });
+
+  it('keeps Camera memory evidence in the full diagnostic preset', () => {
+    const config = renderAndroidTraceConfig({
+      target: 'android',
+      preset: 'full',
+      app: '*',
+      durationSeconds: 20,
+    });
+
+    expect(config).toContain('ftrace_events: "dmabuf_heap/dma_heap_stat"');
+    expect(config).toContain('ftrace_events: "ion/ion_stat"');
+  });
+
   it('renders every built-in Android preset through the shared service', () => {
     for (const preset of listCapturePresets()) {
       const config = renderAndroidTraceConfig({

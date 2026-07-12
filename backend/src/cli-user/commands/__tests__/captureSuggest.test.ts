@@ -46,6 +46,22 @@ describe('runCaptureSuggestCommand', () => {
     });
   });
 
+  it('selects the Camera preset for Camera-domain requests', async () => {
+    const exitCode = await runCaptureSuggestCommand({
+      request: '分析 Camera 打开到首帧预览延迟',
+      app: 'com.example.camera',
+      format: 'json',
+    });
+
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(String(consoleLogSpy.mock.calls[0]?.[0] ?? '{}'));
+    expect(payload.proposal).toMatchObject({
+      preset: 'camera',
+      intent: 'camera',
+      app: 'com.example.camera',
+    });
+  });
+
   it('keeps text output side-effect free and includes the config preview', async () => {
     const exitCode = await runCaptureSuggestCommand({
       request: 'scrolling frame drops',

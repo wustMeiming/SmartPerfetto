@@ -6,6 +6,27 @@ import { describe, expect, it } from '@jest/globals';
 import { buildTraceConfigProposal } from '../traceConfigProposal';
 
 describe('buildTraceConfigProposal', () => {
+  it('routes Camera first-frame requests ahead of generic startup', () => {
+    const proposal = buildTraceConfigProposal({
+      request: '分析 Camera 打开到首帧预览延迟',
+      app: 'com.example.camera',
+      outputLanguage: 'zh-CN',
+    });
+
+    expect(proposal.preset).toBe('camera');
+    expect(proposal.intent).toBe('camera');
+  });
+
+  it('keeps generic app first-frame requests on startup', () => {
+    expect(buildTraceConfigProposal({ request: 'debug app first frame' }).preset)
+      .toBe('startup');
+  });
+
+  it('does not treat generic preview requests as Camera-domain requests', () => {
+    expect(buildTraceConfigProposal({ request: 'debug preview first frame' }).preset)
+      .toBe('startup');
+  });
+
   it('maps startup requests to the startup preset and shared textproto renderer', () => {
     const proposal = buildTraceConfigProposal({
       request: 'debug cold start first frame jank',

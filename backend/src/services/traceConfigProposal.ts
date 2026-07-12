@@ -60,6 +60,7 @@ interface IntentRule {
   preset: CapturePresetId;
   confidence: TraceConfigProposalConfidence;
   rationale: string;
+  requiredKeywords?: string[];
   keywords: string[];
 }
 
@@ -70,6 +71,20 @@ interface RuleMatch {
 }
 
 const INTENT_RULES: IntentRule[] = [
+  {
+    preset: 'camera',
+    confidence: 'high',
+    rationale: 'Camera investigations need request activity, binder, scheduler, preview presentation, and DMA-BUF/ION allocation evidence.',
+    requiredKeywords: [
+      'camera', 'camera2', 'camerax', 'cameraserver', 'camera hal',
+      '摄像头', '相机', '取景器',
+    ],
+    keywords: [
+      'open camera', 'camera open', 'camera startup', 'first preview',
+      'preview frame', 'capture request', 'capture result', 'hal3',
+      '打开相机', '相机启动', '首帧预览', '预览首帧', '拍照延迟',
+    ],
+  },
   {
     preset: 'startup',
     confidence: 'high',
@@ -220,7 +235,14 @@ const INTENT_RULES: IntentRule[] = [
   },
 ];
 
+const DOMAIN_MATCH_BONUS = Math.max(
+  ...INTENT_RULES
+    .filter(rule => !rule.requiredKeywords)
+    .map(rule => rule.keywords.length),
+) + 1;
+
 const PRESET_RATIONALE_ZH: Partial<Record<CapturePresetId, string>> = {
+  camera: 'Camera 分析需要覆盖 request activity、binder、调度、预览呈现和 DMA-BUF/ION 分配信号。',
   startup: '启动分析需要覆盖 launch、首帧、调度、binder、IO 和 FrameTimeline 信号。',
   scrolling: '滑动和卡顿分析需要 FrameTimeline、input、调度、CPU/GPU 频率和 binder 上下文。',
   anr: 'ANR 分析需要 input、主线程调度、binder、IO 和 logcat 上下文。',
@@ -384,8 +406,14 @@ function classifyRequest(request: string): RuleMatch {
   const normalized = request.toLowerCase();
   let best: RuleMatch | undefined;
   for (const rule of INTENT_RULES) {
-    const matches = rule.keywords.filter(keyword => normalized.includes(keyword.toLowerCase()));
-    const score = matches.length;
+    const requiredMatches = (rule.requiredKeywords ?? [])
+      .filter(keyword => normalized.includes(keyword.toLowerCase()));
+    if (rule.requiredKeywords && requiredMatches.length === 0) continue;
+    const keywordMatches = rule.keywords
+      .filter(keyword => normalized.includes(keyword.toLowerCase()));
+    const matches = unique([...requiredMatches, ...keywordMatches]);
+    const score = keywordMatches.length
+      + (requiredMatches.length > 0 ? DOMAIN_MATCH_BONUS : 0);
     if (!best || score > best.score) {
       best = { rule, score, matches };
     }
