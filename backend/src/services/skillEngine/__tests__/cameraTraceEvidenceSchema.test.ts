@@ -5,7 +5,10 @@
 import fs from 'fs';
 import path from 'path';
 import {describe, expect, it} from '@jest/globals';
+import Database from 'better-sqlite3';
 import yaml from 'js-yaml';
+
+import {SkillRegistry} from '../skillLoader';
 
 const skillPath = path.join(
   process.cwd(),
@@ -41,7 +44,87 @@ function expectTypedColumns(stepId: string, expected: Record<string, string>): v
   }
 }
 
+function renderSqlForSqlite(sql: string): string {
+  return sql
+    .split('${start_ts}').join('NULL')
+    .split('${end_ts}').join('NULL')
+    .split('${max_rows|20}').join('20');
+}
+
 describe('camera_trace_evidence skill schema', () => {
+  it('routes only requests with an explicit Camera domain anchor', () => {
+    const registry = new SkillRegistry();
+    const loaded = registry.loadSingleSkill(
+      path.join(process.cwd(), 'skills'),
+      'composite/camera_trace_evidence.skill.yaml',
+    );
+
+    expect(loaded?.name).toBe('camera_trace_evidence');
+    for (const question of [
+      'debug preview first frame',
+      'analyze capture latency',
+      '分析预览首帧',
+      'generic dmabuf memory',
+    ]) {
+      expect(registry.findMatchingSkill(question)).toBeUndefined();
+    }
+    for (const question of [
+      'analyze Camera preview latency',
+      '分析相机首帧预览',
+      'inspect cameraserver DMA-BUF',
+    ]) {
+      expect(registry.findMatchingSkill(question)?.name).toBe('camera_trace_evidence');
+    }
+  });
+
+  it('summarizes legacy ION-only Camera allocation deltas', () => {
+    const database = new Database(':memory:');
+    database.function('trace_start', () => 0);
+    database.function('trace_end', () => 10_000);
+    database.exec(`
+      CREATE TABLE android_dmabuf_allocs (
+        ts INTEGER,
+        buf_size INTEGER,
+        process_name TEXT,
+        thread_name TEXT,
+        upid INTEGER,
+        pid INTEGER,
+        utid INTEGER,
+        tid INTEGER
+      );
+      CREATE TABLE counter (ts INTEGER, track_id INTEGER, value INTEGER);
+      CREATE TABLE thread_counter_track (id INTEGER, name TEXT, utid INTEGER);
+      CREATE TABLE thread (utid INTEGER, tid INTEGER, upid INTEGER, name TEXT);
+      CREATE TABLE process (upid INTEGER, pid INTEGER, name TEXT);
+
+      INSERT INTO process VALUES (1, 100, 'cameraserver');
+      INSERT INTO thread VALUES (2, 101, 1, 'CameraWorker');
+      INSERT INTO thread_counter_track VALUES (3, 'mem.ion_change', 2);
+      INSERT INTO counter VALUES (100, 3, 4096), (200, 3, -1024);
+    `);
+
+    try {
+      const sql = renderSqlForSqlite(getStep('camera_dmabuf_summary').sql);
+      const rows = database.prepare(sql).all() as Array<Record<string, unknown>>;
+
+      expect(rows).toEqual([
+        expect.objectContaining({
+          process_name: 'cameraserver',
+          upid: 1,
+          pid: 100,
+          memory_source: 'legacy_ion',
+          allocation_count: 1,
+          allocation_bytes: 4096,
+          release_bytes: 1024,
+          observed_net_delta_bytes: 3072,
+          peak_event_bytes: 4096,
+        }),
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it('declares the evidence-first Camera composite contract', () => {
     expect(skill).toMatchObject({
       name: 'camera_trace_evidence',
@@ -125,6 +208,7 @@ describe('camera_trace_evidence skill schema', () => {
       process_name: 'string',
       upid: 'number',
       pid: 'number',
+      memory_source: 'string',
       allocation_count: 'number',
       allocation_bytes: 'bytes',
       release_bytes: 'bytes',
@@ -143,6 +227,24 @@ describe('camera_trace_evidence skill schema', () => {
       source: 'string',
       limitation: 'string',
     });
+  });
+
+  it('publishes both buffer-memory evidence paths and their interpretation boundary', () => {
+    const coverageStep = getStep('evidence_coverage');
+    const memoryStep = getStep('camera_dmabuf_summary');
+
+    expect(memoryStep.name).toContain('DMA-BUF/legacy ION');
+    expect(memoryStep.display.title).toContain('DMA-BUF/legacy ION');
+    expect(memoryStep.synthesize.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({key: 'memory_source'}),
+    ]));
+    for (const step of [coverageStep, memoryStep]) {
+      expect(step.sql).toContain('android_dmabuf_allocs');
+      expect(step.sql).toContain('thread_counter_track');
+      expect(step.sql).toContain('mem.ion_change');
+      expect(step.sql).toContain('retained memory');
+      expect(step.sql).toContain('leak proof');
+    }
   });
 
   it('keeps each step self-describing for evidence and report consumers', () => {

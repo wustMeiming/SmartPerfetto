@@ -10,14 +10,14 @@ tier: B
 
 meta:
   display_name: "Camera Trace 证据"
-  description: "枚举 Camera 相关 identity、slice、Binder、系统上下文、DMA-BUF 与可选 Pixel stage 证据"
+  description: "枚举 Camera 相关 identity、slice、Binder、系统上下文、DMA-BUF/legacy ION 与可选 Pixel stage 证据"
   icon: "photo_camera"
-  tags: [camera, rendering, evidence, binder, dmabuf, pixel]
+  tags: [camera, rendering, evidence, binder, dmabuf, ion, pixel]
 
 triggers:
   keywords:
-    zh: [Camera, 相机, 打开相机, 预览, 拍照, DMA-BUF, 相机内存]
-    en: [camera, camera open, preview, capture, dmabuf, camera memory]
+    zh: [Camera, 相机, 打开相机, 相机内存]
+    en: [camera, camera open, camera memory]
   patterns:
     - ".*(camera|Camera|相机).*(open|preview|capture|打开|预览|拍照|DMA|dmabuf).*"
     - ".*(open|preview|capture|打开|预览|拍照).*(camera|Camera|相机).*"
@@ -146,10 +146,20 @@ steps:
         WHERE ts < input.end_ts
           AND ts + IIF(dur = -1, trace_end() - ts, dur) > input.start_ts
       ),
-      dmabuf_count AS (
-        SELECT COUNT(*) AS candidate_count
-        FROM android_dmabuf_allocs, input
-        WHERE ts >= input.start_ts AND ts < input.end_ts
+      buffer_memory_count AS (
+        SELECT
+          (SELECT COUNT(*)
+           FROM android_dmabuf_allocs, input
+           WHERE ts >= input.start_ts
+             AND ts < input.end_ts)
+          +
+          (SELECT COUNT(*)
+           FROM counter AS c
+           JOIN thread_counter_track AS tct ON c.track_id = tct.id
+           CROSS JOIN input
+           WHERE tct.name GLOB 'mem.ion_change*'
+             AND c.ts >= input.start_ts
+             AND c.ts < input.end_ts) AS candidate_count
       ),
       pixel_count AS (
         SELECT COUNT(*) AS candidate_count
@@ -208,9 +218,9 @@ steps:
         'dmabuf_allocations',
         CASE WHEN candidate_count > 0 THEN 'available' ELSE 'missing' END,
         candidate_count,
-        'android_dmabuf_allocs',
-        'DMA-BUF allocation deltas are memory evidence; they do not alone prove a leak.'
-      FROM dmabuf_count
+        'android_dmabuf_allocs; counter + thread_counter_track (mem.ion_change*)',
+        'DMA-BUF and legacy ION signed deltas cover only observed events; they are not retained memory or leak proof.'
+      FROM buffer_memory_count
       UNION ALL
       SELECT
         'pixel_camera_frames',
@@ -555,11 +565,11 @@ steps:
 
   - id: camera_dmabuf_summary
     type: atomic
-    name: "Camera DMA-BUF 窗口摘要"
+    name: "Camera DMA-BUF/legacy ION window evidence"
     display:
       layer: list
       level: detail
-      title: "Camera 相关 DMA-BUF 事件摘要"
+      title: "Camera DMA-BUF/legacy ION window evidence"
       columns:
         - name: process_name
           label: "进程"
@@ -570,6 +580,9 @@ steps:
         - name: pid
           label: "PID"
           type: number
+        - name: memory_source
+          label: "内存来源"
+          type: string
         - name: allocation_count
           label: "分配次数"
           type: number
@@ -606,31 +619,70 @@ steps:
           MAX(raw_start_ts, raw_end_ts) AS end_ts,
           max_rows
         FROM raw_input
+      ),
+      events AS (
+        SELECT
+          alloc.ts,
+          alloc.buf_size AS signed_bytes,
+          COALESCE(alloc.process_name, '<unnamed process>') AS process_name,
+          alloc.upid,
+          alloc.pid,
+          'dmabuf' AS memory_source
+        FROM android_dmabuf_allocs AS alloc
+        CROSS JOIN input
+        WHERE alloc.ts >= input.start_ts
+          AND alloc.ts < input.end_ts
+          AND (
+            lower(COALESCE(alloc.process_name, '')) GLOB '*camera*'
+            OR lower(COALESCE(alloc.process_name, '')) GLOB '*camx*'
+            OR lower(COALESCE(alloc.process_name, '')) GLOB '*mtkcam*'
+            OR lower(COALESCE(alloc.thread_name, '')) GLOB '*camera*'
+            OR lower(COALESCE(alloc.thread_name, '')) GLOB '*camx*'
+            OR lower(COALESCE(alloc.thread_name, '')) GLOB '*mtkcam*'
+          )
+        UNION ALL
+        SELECT
+          c.ts,
+          CAST(c.value AS INTEGER) AS signed_bytes,
+          COALESCE(p.name, '<unnamed process>') AS process_name,
+          p.upid,
+          p.pid,
+          'legacy_ion' AS memory_source
+        FROM counter AS c
+        JOIN thread_counter_track AS tct ON c.track_id = tct.id
+        JOIN thread AS th ON th.utid = tct.utid
+        LEFT JOIN process AS p ON p.upid = th.upid
+        CROSS JOIN input
+        WHERE tct.name GLOB 'mem.ion_change*'
+          AND c.ts >= input.start_ts
+          AND c.ts < input.end_ts
+          AND (
+            lower(COALESCE(p.name, '')) GLOB '*camera*'
+            OR lower(COALESCE(p.name, '')) GLOB '*camx*'
+            OR lower(COALESCE(p.name, '')) GLOB '*mtkcam*'
+            OR lower(COALESCE(th.name, '')) GLOB '*camera*'
+            OR lower(COALESCE(th.name, '')) GLOB '*camx*'
+            OR lower(COALESCE(th.name, '')) GLOB '*mtkcam*'
+          )
       )
       SELECT
-        COALESCE(process_name, '<unnamed process>') AS process_name,
+        process_name,
         upid,
         pid,
-        SUM(CASE WHEN buf_size > 0 THEN 1 ELSE 0 END) AS allocation_count,
-        SUM(CASE WHEN buf_size > 0 THEN buf_size ELSE 0 END) AS allocation_bytes,
-        -SUM(CASE WHEN buf_size < 0 THEN buf_size ELSE 0 END) AS release_bytes,
-        SUM(buf_size) AS observed_net_delta_bytes,
-        MAX(ABS(buf_size)) AS peak_event_bytes,
-        'android_dmabuf_allocs' AS source,
-        'Observed net delta covers only events inside this window; allocations may predate it and releases may occur later, so it is not retained memory or leak proof.' AS limitation
-      FROM android_dmabuf_allocs, input
-      WHERE ts >= input.start_ts
-        AND ts < input.end_ts
-        AND (
-          lower(COALESCE(process_name, '')) GLOB '*camera*'
-          OR lower(COALESCE(process_name, '')) GLOB '*camx*'
-          OR lower(COALESCE(process_name, '')) GLOB '*mtkcam*'
-          OR lower(COALESCE(thread_name, '')) GLOB '*camera*'
-          OR lower(COALESCE(thread_name, '')) GLOB '*camx*'
-          OR lower(COALESCE(thread_name, '')) GLOB '*mtkcam*'
-        )
-      GROUP BY process_name, upid, pid
-      ORDER BY ABS(SUM(buf_size)) DESC, allocation_bytes DESC
+        memory_source,
+        SUM(CASE WHEN signed_bytes > 0 THEN 1 ELSE 0 END) AS allocation_count,
+        SUM(CASE WHEN signed_bytes > 0 THEN signed_bytes ELSE 0 END) AS allocation_bytes,
+        -SUM(CASE WHEN signed_bytes < 0 THEN signed_bytes ELSE 0 END) AS release_bytes,
+        SUM(signed_bytes) AS observed_net_delta_bytes,
+        MAX(ABS(signed_bytes)) AS peak_event_bytes,
+        CASE memory_source
+          WHEN 'dmabuf' THEN 'android_dmabuf_allocs'
+          ELSE 'counter + thread_counter_track (mem.ion_change*)'
+        END AS source,
+        'DMA-BUF (android_dmabuf_allocs) and legacy ION (counter + thread_counter_track mem.ion_change*) signed deltas cover only events inside this selected window; allocations may predate it and releases may occur later, so this is not retained memory or leak proof.' AS limitation
+      FROM events
+      GROUP BY process_name, upid, pid, memory_source
+      ORDER BY ABS(SUM(signed_bytes)) DESC, allocation_bytes DESC
       LIMIT (SELECT max_rows FROM input)
     save_as: camera_dmabuf_summary
     synthesize:
@@ -638,6 +690,8 @@ steps:
       fields:
         - key: process_name
           label: 进程
+        - key: memory_source
+          label: 内存来源
         - key: allocation_bytes
           label: 窗口内分配量
         - key: release_bytes
