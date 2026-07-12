@@ -119,16 +119,27 @@ Camera2/HAL3 request 按序进入管线，但多个 request 可以同时处于 i
 
 ```mermaid
 stateDiagram-v2
+    state "per-target output / buffer tracking" as OutputTracking
     [*] --> Pending: capture()
     Pending --> InFlight: request accepted
     InFlight --> PartialResult: partial metadata (optional)
     PartialResult --> InFlight: more work / buffers
-    InFlight --> Completed: final metadata
-    InFlight --> BufferDelivered: one or more output buffers
-    BufferDelivered --> InFlight: remaining result / buffers
+    InFlight --> FinalMetadataObserved: final TotalCaptureResult
+    FinalMetadataObserved --> OutputTracking: reconcile configured targets
+    InFlight --> OutputTracking: target buffer observed
+    OutputTracking --> InFlight: final metadata or expected outputs still missing
+    OutputTracking --> RequestComplete: final metadata + every target output accounted for
+    RequestComplete --> [*]
     InFlight --> Failed: Error
-    Completed --> [*]
     Failed --> [*]
+```
+
+Request completion 必须按配置的目标 Surface 分别跟踪其 buffer 状态；final metadata 不能直接把 request 标为完成。Preview presentation 是 buffer 离开 Camera request/result 生命周期后的下游独立事件，必须用单独的 consumer/display 锚点关联，不能并入 request completion。
+
+```mermaid
+flowchart LR
+    TargetBuffer[accounted target buffer] -. same buffer / layer identity .-> Consumer[consumer acquire / latch]
+    Consumer --> Presentation[explicit preview presentation anchor]
 ```
 
 ### 6.2 Buffer 生命周期
@@ -143,15 +154,15 @@ stateDiagram-v2
 
 ### 6.3 Session Callback (性能关键)
 
-`CameraCaptureSession.CaptureCallback` 提供了精细的时间戳信息：
+`CameraCaptureSession.CaptureCallback` 提供候选锚点，但每个回调都需要同一 session/request/frame identity 下的关联证据：
 
-| 回调方法 | 触发时机 | 性能分析用途 |
+| 回调方法 | 候选锚点 | 必要关联证据与事实边界 |
 |:---|:---|:---|
-| `onCaptureStarted` | Sensor 曝光开始 | 测量 Request 下发延迟 |
-| `onCaptureProgressed` | 部分 Metadata 就绪 | 3A (AE/AF/AWB) 收敛速度分析 |
-| `onCaptureCompleted` | 全部 Metadata 就绪 | 测量 Pipeline 总耗时 |
-| `onCaptureFailed` | HAL 报错 | 掉帧根因定位 |
-| `onCaptureBufferLost` | Buffer 丢失 | BufferQueue 压力分析 |
+| `onCaptureStarted` | capture-start callback / exposure timestamp | 只有同时存在 request submission 锚点，才能计算 submission-to-capture 延迟；单独回调不能表示“Request 下发延迟” |
+| `onCaptureProgressed` | partial capture result | 必须关联同 identity，且 metadata 中实际存在 AE/AF/AWB state 字段，才能分析 3A；partial metadata 本身不证明 3A 状态或收敛 |
+| `onCaptureCompleted` | final `TotalCaptureResult` | 只证明 final metadata 返回；不等于目标 buffer 已交付、预览已呈现或 pipeline 总耗时完成，仍需关联每个目标 output/buffer、fence 与 presentation 证据 |
+| `onCaptureFailed` | capture failure callback | 必须关联同 identity 和错误信息；不能单独定位 HAL、ISP 或 consumer 根因 |
+| `onCaptureBufferLost` | 某个目标 Surface 的 buffer-lost callback | 必须关联同 identity、目标 Surface 与 buffer/fence 证据，才能判断受影响输出和压力来源 |
 
 ### 6.4 启动、首帧与 3A 证据边界
 
@@ -164,7 +175,7 @@ stateDiagram-v2
 
 1.  **Buffer Starvation 候选**: Consumer (`ImageReader`) 处理太慢、`image.close()` 不及时可能让 HAL 缺少空闲 Buffer。
     *   *Trace*: 只有看到 buffer ownership、acquire/release、队列或 fence 证据时才把它报告为受支持的 backpressure 假设；`CameraProvider::dequeueBuffer` 等 vendor 名称单独仍只是 candidate。
-2.  **Pipeline Stall**: ISP 处理某些特效（HDR、夜景）耗时过长，超过帧间隔。
-    *   *Trace*: `onCaptureCompleted` 到 `onCaptureStarted` 间隔不稳定。
+2.  **Pipeline Stall 候选**: HDR、夜景等处理可能让 Camera pipeline 延迟增长，但不能仅凭回调间隔归因 ISP。
+    *   *Trace*: 只有在同一 session/request/frame identity 下串联 request、result、各目标 buffer/fence 与 presentation 证据，并能把延迟定位到对应阶段时，才把 stall 报告为受支持的候选；`onCaptureCompleted` 与 `onCaptureStarted` 的间隔本身不足以定位 ISP。
 3.  **Binder Congestion**: CameraService 与 App 之间的 IPC 拥塞。
     *   *Trace*: `binder transaction` 耗时异常。
