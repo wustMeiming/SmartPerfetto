@@ -115,9 +115,11 @@ a reason to invent data. The analysis Skill reports absence explicitly.
 
 The deterministic proposal classifier adds a Camera rule before generic
 startup and scrolling rules. Camera-domain tokens such as `camera`, `相机`,
-`camera2`, `cameraserver`, `camera HAL`, `preview`, `预览`, and `取景器` select
-the Camera preset. Generic `first frame` or `首帧` without a Camera-domain token
-continues to select the startup preset.
+`camera2`, `cameraserver`, `camera HAL`, and `取景器` select the Camera preset.
+Ambiguous `preview` / `预览` terms increase Camera-rule relevance but do not
+establish the Camera domain by themselves. Generic `first frame`, `首帧`, or UI
+preview requests without a Camera-domain token continue to select the startup
+preset.
 
 ### 2. Runtime Knowledge Correction
 
@@ -245,6 +247,7 @@ Implementation follows red-green-refactor.
 - `backend/src/services/traceConfigProposal.ts`
 - focused tests under `backend/src/services/__tests__/` and
   `backend/src/cli-user/services/__tests__/`
+- `backend/src/cli-user/bin.ts`
 - `backend/src/services/renderingPipelineDetectionSkillGenerator.ts`
 - `backend/src/tests/renderingPipelineDetectionGenerator.test.ts`
 - `backend/skills/atomic/pipeline_4feature_scoring.skill.yaml`

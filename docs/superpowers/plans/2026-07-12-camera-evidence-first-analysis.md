@@ -27,6 +27,7 @@
 - Modify: `backend/src/services/__tests__/traceConfigProposal.test.ts`
 - Modify: `backend/src/cli-user/services/__tests__/captureConfig.test.ts`
 - Modify: `backend/src/cli-user/commands/__tests__/captureSuggest.test.ts`
+- Modify: `backend/src/cli-user/bin.ts`
 - Modify: `backend/src/services/traceConfigGenerator.ts`
 - Modify: `backend/src/services/traceCaptureConfig.ts`
 - Modify: `backend/src/services/traceConfigProposal.ts`
@@ -70,7 +71,7 @@ it('keeps generic app first-frame requests on startup', () => {
 });
 ```
 
-Mirror the existing CLI service and command style to assert that `camera` is accepted by `capture config --preset`, appears in preset listings, and is selected by `capture suggest` for a Camera-domain request.
+Mirror the existing CLI service and command style to assert that `camera` is accepted by `capture config --preset`, appears in preset listings, and is selected by `capture suggest` for a Camera-domain request. Update both hardcoded preset lists in `backend/src/cli-user/bin.ts`: the `--preset` help text and `parseCapturePreset` error text.
 
 - [ ] **Step 2: Run the focused tests and confirm RED**
 
@@ -83,9 +84,10 @@ npx jest \
   src/services/__tests__/traceConfigProposal.test.ts \
   src/cli-user/services/__tests__/captureConfig.test.ts \
   src/cli-user/commands/__tests__/captureSuggest.test.ts --runInBand
+npx tsx src/cli-user/bin.ts capture android --help | grep -q camera
 ```
 
-Expected: failures because `camera` is not a valid preset/intent and Camera requests currently collide with `startup`/`scrolling` keywords.
+Expected: Jest failures because `camera` is not a valid preset/intent and Camera requests currently collide with `startup`/`scrolling` keywords; the CLI help smoke exits non-zero because the preset help does not list `camera` yet.
 
 - [ ] **Step 3: Add the Camera intent and capture preset**
 
@@ -143,7 +145,10 @@ Extend `IntentRule` with `requiredKeywords?: string[]`, add a Camera rule before
   preset: 'camera',
   confidence: 'high',
   rationale: 'Camera investigations need request activity, binder, scheduler, preview presentation, and DMA-BUF/ION allocation evidence.',
-  requiredKeywords: ['camera', 'camera2', 'camerax', '摄像头', '相机', '预览'],
+  requiredKeywords: [
+    'camera', 'camera2', 'camerax', 'cameraserver', 'camera hal',
+    '摄像头', '相机', '取景器',
+  ],
   keywords: [
     'open camera', 'camera open', 'camera startup', 'first preview',
     'preview frame', 'capture request', 'capture result', 'hal3',
@@ -152,7 +157,7 @@ Extend `IntentRule` with `requiredKeywords?: string[]`, add a Camera rule before
 },
 ```
 
-In `classifyRequest`, exclude any rule whose `requiredKeywords` do not match; for a matched domain rule add a score larger than the maximum possible generic keyword count. This makes `Camera + 首帧` deterministic without reclassifying a generic `app first frame` request. Add the Chinese preset rationale and leave all existing fallback behavior intact.
+In `classifyRequest`, exclude any rule whose `requiredKeywords` do not match; for a matched domain rule add a score larger than the maximum possible generic keyword count. Keep ambiguous `preview` / `预览` as scoring keywords rather than domain anchors so a generic UI preview request is not stolen by Camera routing. This makes `Camera + 首帧` deterministic without reclassifying generic `app first frame` or `preview first frame` requests. Add the Chinese preset rationale and leave all existing fallback behavior intact.
 
 - [ ] **Step 5: Run the focused tests and confirm GREEN**
 
@@ -168,7 +173,8 @@ git add \
   backend/src/services/__tests__/traceCaptureConfig.test.ts \
   backend/src/services/__tests__/traceConfigProposal.test.ts \
   backend/src/cli-user/services/__tests__/captureConfig.test.ts \
-  backend/src/cli-user/commands/__tests__/captureSuggest.test.ts
+  backend/src/cli-user/commands/__tests__/captureSuggest.test.ts \
+  backend/src/cli-user/bin.ts
 git commit -m "feat: add evidence-first camera capture preset"
 ```
 
@@ -254,7 +260,7 @@ git commit -m "fix: make camera pipeline evidence conditional"
 - Create: `backend/src/services/skillEngine/__tests__/cameraTraceEvidenceSchema.test.ts`
 - Create: `backend/tests/skill-eval/camera_trace_evidence.eval.ts`
 
-- [ ] **Step 1: Write the failing schema contract test**
+- [ ] **Step 1: Write all failing Skill contract and real-trace tests**
 
 Load the YAML using the same helper/pattern as neighboring Skill schema tests and assert:
 
@@ -269,6 +275,7 @@ expect(skill.prerequisites.modules).toEqual(expect.arrayContaining([
   'android.binder',
   'android.frames.timeline',
   'android.memory.dmabuf',
+  'linux.cpu.frequency',
   'pixel.camera',
 ]));
 expect(stepIds).toEqual([
@@ -281,7 +288,9 @@ expect(stepIds).toEqual([
 ]);
 ```
 
-Also inspect every `display.columns` definition so coverage includes `source`, `status`, `row_count`, and `interpretation`, while detail steps expose typed timestamp/duration/process/thread/source fields where applicable.
+Also inspect every `display.columns` definition so coverage includes the approved stable schema `evidence_family`, `status`, `row_count`, `source`, and `limitation`, while detail steps expose typed timestamp/duration/process/thread/source fields where applicable.
+
+Before the Skill exists, also create `camera_trace_evidence.eval.ts` using `describeWithTrace('camera_trace_evidence skill', 'launch_light.pftrace', ...)`. Execute `evidence_coverage`, `camera_process_candidates`, `camera_slice_candidates`, `camera_binder_summary`, `camera_dmabuf_summary`, and `pixel_camera_stage_summary`; assert each succeeds without missing-table errors. Assert the eight required evidence families are present—Camera process/thread identity, Camera candidate slices, Binder, scheduler, CPU frequency, FrameTimeline, DMA-BUF, and optional Pixel Camera—and statuses are one of `available`, `vendor_specific`, or `missing`. Assert that Pixel rows are either a typed detail list or empty.
 
 - [ ] **Step 2: Run the schema test and confirm RED**
 
@@ -290,7 +299,13 @@ cd backend
 npx jest src/services/skillEngine/__tests__/cameraTraceEvidenceSchema.test.ts --runInBand
 ```
 
-Expected: failure because the Skill file does not exist.
+Then run the real trace evaluation as part of the same RED phase:
+
+```bash
+npx jest tests/skill-eval/camera_trace_evidence.eval.ts --runInBand
+```
+
+Expected: both suites fail because the Skill file does not exist. The schema test proves the static contract, while the real-trace test is written before production SQL so malformed or missing-table SQL cannot reach GREEN without executing successfully.
 
 - [ ] **Step 3: Implement the composite Skill**
 
@@ -304,81 +319,106 @@ prerequisites:
     - android.binder
     - android.frames.timeline
     - android.memory.dmabuf
+    - linux.cpu.frequency
     - pixel.camera
 ```
 
-Use a single-row-per-source coverage query. Because included Perfetto modules create empty tables when their trace events are absent, query their row counts directly:
+Use a single-row-per-evidence-family coverage query. Because included Perfetto modules create empty tables when their trace events are absent, query their row counts directly. The query must cover Camera process/thread identity, vendor Camera slices, Camera-related Binder transactions, scheduler rows, CPU-frequency rows, FrameTimeline, DMA-BUF allocations, and optional Pixel Camera rows. The stable row shape is:
 
 ```sql
-SELECT 'camera_process_candidates' AS source,
-       CASE WHEN COUNT(*) > 0 THEN 'available' ELSE 'missing' END AS status,
-       COUNT(*) AS row_count,
-       'Name-based process inventory; candidates are not proof of a specific Camera milestone.' AS interpretation
-FROM process
-WHERE name GLOB '*camera*' COLLATE NOCASE
+SELECT 'camera_process_thread_identity' AS evidence_family,
+       CASE WHEN candidate_count > 0 THEN 'available' ELSE 'missing' END AS status,
+       candidate_count AS row_count,
+       'process,thread' AS source,
+       'Name-based identity candidates are not proof of a specific Camera milestone.' AS limitation
+FROM (
+  SELECT
+    (SELECT COUNT(*) FROM process
+     WHERE lower(COALESCE(name, '')) GLOB '*camera*'
+        OR lower(COALESCE(name, '')) GLOB '*camx*'
+        OR lower(COALESCE(name, '')) GLOB '*mtkcam*')
+    +
+    (SELECT COUNT(*) FROM thread
+     WHERE lower(COALESCE(name, '')) GLOB '*camera*'
+        OR lower(COALESCE(name, '')) GLOB '*camx*'
+        OR lower(COALESCE(name, '')) GLOB '*mtkcam*') AS candidate_count
+)
 UNION ALL
-SELECT 'camera_slice_candidates',
+SELECT 'camera_slice_candidates' AS evidence_family,
        CASE WHEN COUNT(*) > 0 THEN 'vendor_specific' ELSE 'missing' END,
        COUNT(*),
+       'thread_slice',
        'Slice names are implementation-specific candidates and require identity/anchor verification.'
 FROM thread_slice
-WHERE name GLOB '*camera*' COLLATE NOCASE
-   OR name GLOB '*capture*' COLLATE NOCASE
-   OR name GLOB '*preview*' COLLATE NOCASE
+WHERE lower(COALESCE(name, '')) GLOB '*camera*'
+   OR lower(COALESCE(name, '')) GLOB '*capture*'
+   OR lower(COALESCE(name, '')) GLOB '*preview*'
 UNION ALL
-SELECT 'binder_transactions',
+SELECT 'binder_transactions' AS evidence_family,
        CASE WHEN COUNT(*) > 0 THEN 'available' ELSE 'missing' END,
        COUNT(*),
+       'android_binder_txns',
        'Binder rows provide cross-process correlation; interface names and endpoints must still be verified.'
 FROM android_binder_txns
+WHERE lower(COALESCE(client_process, '')) GLOB '*camera*'
+   OR lower(COALESCE(server_process, '')) GLOB '*camera*'
+   OR lower(COALESCE(client_process, '')) GLOB '*camx*'
+   OR lower(COALESCE(server_process, '')) GLOB '*camx*'
+   OR lower(COALESCE(client_process, '')) GLOB '*mtkcam*'
+   OR lower(COALESCE(server_process, '')) GLOB '*mtkcam*'
+UNION ALL
+SELECT 'scheduler_context',
+       CASE WHEN COUNT(*) > 0 THEN 'available' ELSE 'missing' END,
+       COUNT(*),
+       'sched_slice',
+       'Scheduler rows provide execution context only after Camera thread identity is established.'
+FROM sched_slice
+UNION ALL
+SELECT 'cpu_frequency_context',
+       CASE WHEN COUNT(*) > 0 THEN 'available' ELSE 'missing' END,
+       COUNT(*),
+       'cpu_frequency_counters',
+       'CPU-frequency rows provide system context and do not by themselves attribute Camera latency.'
+FROM cpu_frequency_counters
 UNION ALL
 SELECT 'frame_timeline',
        CASE WHEN COUNT(*) > 0 THEN 'available' ELSE 'missing' END,
        COUNT(*),
+       'actual_frame_timeline_slice',
        'FrameTimeline can support presentation correlation only after preview surface identity is established.'
 FROM actual_frame_timeline_slice
 UNION ALL
 SELECT 'dmabuf_allocations',
        CASE WHEN COUNT(*) > 0 THEN 'available' ELSE 'missing' END,
        COUNT(*),
+       'android_dmabuf_allocs',
        'DMA-BUF allocation deltas are memory evidence; they do not alone prove a leak.'
 FROM android_dmabuf_allocs
 UNION ALL
 SELECT 'pixel_camera_frames',
        CASE WHEN COUNT(*) > 0 THEN 'vendor_specific' ELSE 'missing' END,
        COUNT(*),
+       'pixel_camera_frames',
        'pixel.camera is an optional Pixel slice parser, not a portable Android Camera contract.'
 FROM pixel_camera_frames;
 ```
 
-For process and slice candidates, use case-insensitive Camera/vendor patterns (`camera`, `cameraserver`, `camera.provider`, `CamX`, `mtkcam`) and return identity fields. For Binder, include only transactions whose client/server process matches those candidate patterns. For DMA-BUF, aggregate signed `buf_size` by process and report allocation count, allocation bytes, release bytes, net delta, and peak event size; describe net growth as retained-at-trace-end evidence, not a leak verdict. For Pixel stages, group by `cam_id`, `node`, and `port_group`, returning frame count plus average/max duration. Clamp `max_rows` to 1–100 and normalize optional time bounds with `trace_start()`/`trace_end()`.
+For process and slice candidates, use `lower(COALESCE(name, ''))` with Camera/vendor patterns (`camera`, `cameraserver`, `camera.provider`, `camx`, `mtkcam`) and return identity fields. For Binder, include only transactions whose client/server process matches those candidate patterns. For DMA-BUF, aggregate signed `buf_size` by process and report allocation count, allocation bytes, release bytes, observed net delta within the selected window, and peak event size. Never call that windowed net delta retained-at-trace-end memory or a leak: allocations may predate the window and releases may occur after it. For Pixel stages, group by `cam_id`, `node`, and `port_group`, returning frame count plus average/max duration. Clamp `max_rows` to 1–100 and normalize optional time bounds with `trace_start()`/`trace_end()`.
 
 Every step must declare `display.layer`, `display.level`, typed columns, stable source/identity fields, `save_as`, and an evidence-oriented `synthesize` mapping. Do not add diagnostic rules with fixed thresholds.
 
-- [ ] **Step 4: Run schema validation and fix only contract errors**
+- [ ] **Step 4: Run both prewritten tests and Skill validation to confirm GREEN**
 
 ```bash
 cd backend
 npx jest src/services/skillEngine/__tests__/cameraTraceEvidenceSchema.test.ts --runInBand
+npx jest tests/skill-eval/camera_trace_evidence.eval.ts --runInBand
 npm run validate:skills
 ```
 
-Expected: both pass.
+Expected: both tests and Skill validation pass. The Skill executes on `launch_light.pftrace`; absent Camera/Pixel evidence is represented as coverage/empty data, not an exception. If the local fixture is absent, the suite must be explicitly skipped by `describeWithTrace` and the later six-trace regression remains the executable integration gate.
 
-- [ ] **Step 5: Write the real trace empty/sparse-path evaluation**
-
-Create `camera_trace_evidence.eval.ts` using `describeWithTrace('camera_trace_evidence skill', 'launch_light.pftrace', ...)`. Execute `evidence_coverage`, `camera_process_candidates`, `camera_slice_candidates`, `camera_binder_summary`, `camera_dmabuf_summary`, and `pixel_camera_stage_summary`; assert each succeeds without missing-table errors. Assert coverage statuses are one of `available`, `vendor_specific`, or `missing`, and that Pixel rows are either a typed detail list or empty.
-
-- [ ] **Step 6: Run the evaluation and confirm GREEN**
-
-```bash
-cd backend
-npx jest tests/skill-eval/camera_trace_evidence.eval.ts --runInBand
-```
-
-Expected: the Skill executes on `launch_light.pftrace`; absent Camera/Pixel evidence is represented as coverage/empty data, not an exception. If the local fixture is absent, the suite must be explicitly skipped by `describeWithTrace` and the later six-trace regression remains the executable integration gate.
-
-- [ ] **Step 7: Commit the Skill and tests**
+- [ ] **Step 5: Commit the Skill and tests**
 
 ```bash
 git add \
@@ -401,14 +441,14 @@ git commit -m "feat: add camera trace evidence skill"
 
 - [ ] **Step 1: Add the public projection policy entry**
 
-Add an exported runtime-skill entry adjacent to the other rendering-pipeline workflows:
+Add an exported runtime-skill mapping entry under `skills:` adjacent to the other rendering-pipeline workflows:
 
 ```yaml
-- source: skills/composite/camera_trace_evidence.skill.yaml
-  disposition: exported
+camera_trace_evidence:
+  source: backend/skills/composite/camera_trace_evidence.skill.yaml
   workflow: rendering-pipeline
+  disposition: exported
   destination: references/generated/skills/camera_trace_evidence.md
-  notes: Portable evidence-coverage workflow; Pixel-specific evidence is explicitly optional.
 ```
 
 - [ ] **Step 2: Document the preset and its evidence limits**
@@ -422,18 +462,7 @@ smp capture config --preset camera --app com.example.camera --duration 20
 
 State that the preset collects Camera/vendor atrace candidates, Binder, scheduler, FrameTimeline, and DMA-BUF/legacy ION events. Explicitly say that a trace may still lack portable open/result/buffer/presentation anchors, and SmartPerfetto will report that gap instead of fabricating a first-frame number.
 
-- [ ] **Step 3: Verify documentation and public policy**
-
-Run:
-
-```bash
-git diff --check
-npm run verify:public-skills
-```
-
-If the sibling public checkout is not configured, record the command's exact `NOT AVAILABLE` reason; do not hand-edit generated public files or create a substitute checkout.
-
-- [ ] **Step 4: Commit the export policy and docs**
+- [ ] **Step 3: Commit the SmartPerfetto export policy and docs**
 
 ```bash
 git add \
@@ -442,6 +471,27 @@ git add \
   docs/reference/cli.md docs/reference/cli.en.md
 git commit -m "docs: expose camera evidence workflow"
 ```
+
+- [ ] **Step 4: Regenerate and verify the sibling public projection**
+
+First inspect the sibling `Perfetto-Skills` checkout and preserve any unrelated local changes. If it is clean or its changes do not overlap generated export outputs, run its exporter without `--check`, validate the catalog, and commit only the generated projection/provenance changes:
+
+```bash
+PUBLIC_REPO=/Users/chris/Code/SmartPerfetto/Perfetto-Skills
+git -C "$PUBLIC_REPO" status --short
+python3 "$PUBLIC_REPO/tools/export_from_smartperfetto.py" \
+  --source "$PWD"
+python3 "$PUBLIC_REPO/tools/validate_catalog.py" \
+  --catalog "$PUBLIC_REPO/catalog/smartperfetto-export.json" \
+  --skill-root "$PUBLIC_REPO/skills/perfetto-performance-analysis"
+git -C "$PUBLIC_REPO" add \
+  catalog/smartperfetto-export.json \
+  skills/perfetto-performance-analysis
+git -C "$PUBLIC_REPO" commit -m "feat: export camera evidence workflow"
+PERFETTO_SKILLS_DIR="$PUBLIC_REPO" npm run verify:public-skills
+```
+
+If the sibling checkout is absent, missing tools, or has overlapping local changes, record the exact `NOT AVAILABLE` or conflict reason and do not hand-edit generated public files. Do not push either repository.
 
 ---
 
