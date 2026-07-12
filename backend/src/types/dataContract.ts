@@ -306,6 +306,11 @@ export interface DataEnvelopeMeta {
   /** Optional step ID within a skill */
   stepId?: string;
 
+  /** Query execution state retained across Agent, report, snapshot, and UI projections. */
+  executionStatus?: 'observed' | 'empty' | 'optional_error';
+  executionMessage?: string;
+  executionError?: string;
+
   /** Stable evidence reference shared by UI, reports, and snapshots */
   evidenceRefId?: string;
 
@@ -506,6 +511,9 @@ export function createDataEnvelope<T = DataPayload>(
     source: string;
     skillId?: string;
     stepId?: string;
+    executionStatus?: DataEnvelopeMeta['executionStatus'];
+    executionMessage?: string;
+    executionError?: string;
     title: string;
     layer?: DisplayLayer;
     format?: DisplayFormat;
@@ -552,6 +560,9 @@ export function createDataEnvelope<T = DataPayload>(
       timestamp: Date.now(),
       skillId: options.skillId,
       stepId: options.stepId,
+      executionStatus: options.executionStatus,
+      executionMessage: options.executionMessage,
+      executionError: options.executionError,
       evidenceRefId: options.evidenceRefId,
       traceSide: options.traceSide,
       paneSide: options.paneSide,
@@ -875,6 +886,10 @@ export interface DisplayResult {
   format: DisplayFormat;
   /** The actual data */
   data: DataPayload;
+  /** Public execution state; keeps successful-empty distinct from optional query failure. */
+  executionStatus?: DataEnvelopeMeta['executionStatus'];
+  executionMessage?: string;
+  executionError?: string;
   /** Highlight rules for conditional styling */
   highlight?: HighlightRule[];
   /** Original SQL query (for reproducibility) */
@@ -1337,6 +1352,9 @@ export function displayResultToEnvelope(
     source: `${skillId}:${result.stepId}`,
     skillId,
     stepId: result.stepId,
+    executionStatus: result.executionStatus,
+    executionMessage: result.executionMessage,
+    executionError: result.executionError,
     title: result.title,
     layer: result.layer,
     format: result.format,

@@ -23,6 +23,7 @@ import type { IdentityResolutionV1 } from '../../types/identityContract';
 export type SkillType =
   | 'atomic'
   | 'composite'
+  | 'deep'
   | 'iterator'
   | 'diagnostic'
   | 'ai_decision'
@@ -396,7 +397,7 @@ export interface ComparisonSkillConfig {
 export interface SkillDefinition {
   name: string;
   version: string;
-  type: SkillType;           // 'atomic' | 'composite' | 'iterator' | 'diagnostic' | 'comparison'
+  type: SkillType;
   category?: string;
   priority?: string;
 
@@ -411,7 +412,7 @@ export interface SkillDefinition {
   // 上下文依赖（从父 skill 继承）
   context?: string[];
 
-  // 执行步骤（composite/iterator/diagnostic 使用）
+  // 执行步骤（composite/deep/iterator/diagnostic 使用）
   steps?: SkillStep[];
 
   // 原子 skill 的 SQL（atomic 使用）
@@ -489,6 +490,8 @@ export interface StepResult {
   data?: any;
   error?: string;
   code?: string;
+  /** Authored explanation for a successful query that returned no rows. */
+  emptyMessage?: string;
   executionTimeMs: number;
   display?: DisplayConfig;
 }
@@ -561,6 +564,10 @@ export interface DisplayResult {
       }>;
     };
   };
+  /** Public execution state; keeps successful-empty distinct from optional query failure. */
+  executionStatus?: 'observed' | 'empty' | 'optional_error';
+  executionMessage?: string;
+  executionError?: string;
   highlight?: HighlightRule[];
   /** 原始 SQL 查询（用于 HTML 报告生成） */
   sql?: string;

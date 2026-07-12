@@ -23,27 +23,37 @@ describe('ArtifactStore', () => {
         rows: [[1234]],
       },
       traceProvenance,
+      executionStatus: 'optional_error',
+      executionError: 'optional query failed',
     });
 
     expect(store.generateSummary(artifactId)).toMatchObject({
       traceSide: 'reference',
       paneSide: 'right',
       traceId: 'trace-reference',
+      executionStatus: 'optional_error',
+      executionError: 'optional query failed',
     });
     expect(store.generateCompactSummary(artifactId)).toMatchObject({
       traceSide: 'reference',
       paneSide: 'right',
       traceId: 'trace-reference',
+      executionStatus: 'optional_error',
+      executionError: 'optional query failed',
     });
     expect(store.fetch(artifactId, 'rows')).toMatchObject({
       traceSide: 'reference',
       paneSide: 'right',
       traceId: 'trace-reference',
+      executionStatus: 'optional_error',
+      executionError: 'optional query failed',
     });
     expect(store.fetch(artifactId, 'full')).toMatchObject({
       traceSide: 'reference',
       paneSide: 'right',
       traceId: 'trace-reference',
+      executionStatus: 'optional_error',
+      executionError: 'optional query failed',
     });
   });
 });

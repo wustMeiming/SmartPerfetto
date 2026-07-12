@@ -1694,6 +1694,7 @@ export class SkillExecutor {
       const diagnostics: DiagnosticResult[] = [];
       const synthesizeData: SynthesizeData[] = [];
       let aiSummary: string | undefined;
+      let stepExecutionError: string | undefined;
 
 
       // 根据 skill 类型执行
@@ -1743,10 +1744,12 @@ export class SkillExecutor {
             }
             const stepExec = await this.executeStepBasedSkill(skill, skillId, context, displayResults, diagnostics, synthesizeData);
             aiSummary = stepExec.aiSummary;
+            stepExecutionError = stepExec.error;
           }
           break;
 
         case 'composite':
+        case 'deep':
         case 'iterator':
         case 'diagnostic':
         case 'ai_decision':
@@ -1767,6 +1770,7 @@ export class SkillExecutor {
             }
             const stepExec = await this.executeStepBasedSkill(skill, skillId, context, displayResults, diagnostics, synthesizeData);
             aiSummary = stepExec.aiSummary;
+            stepExecutionError = stepExec.error;
           }
           break;
 
@@ -1782,6 +1786,25 @@ export class SkillExecutor {
             executionTimeMs: Date.now() - startTime,
             error: `Skill type '${skill.type}' is metadata-only and not executable by the single-trace SkillExecutor: ${skillId}`,
           };
+      }
+
+      if (stepExecutionError) {
+        this.emit({
+          type: 'skill_error',
+          skillId,
+          data: { error: stepExecutionError },
+        });
+        return {
+          skillId,
+          skillName: skill.meta.display_name,
+          success: false,
+          displayResults,
+          diagnostics,
+          rawResults: context.results,
+          ...(identityResolution ? { identityResolution } : {}),
+          executionTimeMs: Date.now() - startTime,
+          error: stepExecutionError,
+        };
       }
 
       // If skills provide data-driven synthesize configs, generate a deterministic
@@ -1838,7 +1861,7 @@ export class SkillExecutor {
   }
 
   /**
-   * Execute a step-based skill (composite/iterator/diagnostic, and legacy atomic skills without root-level `sql`).
+   * Execute a step-based skill (composite/deep/iterator/diagnostic, and legacy atomic skills without root-level `sql`).
    * Mutates `context.results` / `context.variables` and appends into `displayResults` / `diagnostics` / `synthesizeData`.
    */
   private hasMeaningfulData(value: any): boolean {
@@ -1925,7 +1948,7 @@ export class SkillExecutor {
     displayResults: DisplayResult[],
     diagnostics: DiagnosticResult[],
     synthesizeData: SynthesizeData[]
-  ): Promise<{ aiSummary?: string }> {
+  ): Promise<{ aiSummary?: string; error?: string }> {
     let aiSummary: string | undefined;
 
     if (!skill.steps) {
@@ -2007,6 +2030,18 @@ export class SkillExecutor {
         // 收集 AI 总结
         if ((step as any).type === 'ai_summary' && stepResult.data?.summary) {
           aiSummary = stepResult.data.summary;
+        }
+      } else {
+        const isQueryFailure = stepResult.stepType === 'atomic' && stepResult.code !== 'condition_not_met';
+        if (isQueryFailure) {
+          context.results[step.id] = stepResult;
+          const optional = 'optional' in step && Boolean(step.optional);
+          if (!optional) {
+            return {
+              aiSummary,
+              error: stepResult.error || `Required step failed: ${step.id}`,
+            };
+          }
         }
       }
     }
@@ -2750,6 +2785,7 @@ export class SkillExecutor {
           success: isOptional,
           data: isOptional ? [] : undefined,
           error: isOptional ? undefined : 'Condition not met',
+          code: 'condition_not_met',
           executionTimeMs: Date.now() - startTime,
         };
       }
@@ -2871,6 +2907,8 @@ export class SkillExecutor {
             stepType: 'atomic',
             success: true,
             data: [],
+            error: result.error,
+            code: 'optional_query_error',
             executionTimeMs: Date.now() - startTime,
           };
         }
@@ -2891,6 +2929,11 @@ export class SkillExecutor {
         stepType: 'atomic',
         success: true,
         data,
+        ...(
+          data.length === 0 && step.on_empty
+            ? { emptyMessage: step.on_empty }
+            : {}
+        ),
         executionTimeMs: Date.now() - startTime,
       };
 
@@ -2902,6 +2945,8 @@ export class SkillExecutor {
           stepType: 'atomic',
           success: true,
           data: [],
+          error: error.message,
+          code: 'optional_query_error',
           executionTimeMs: Date.now() - startTime,
         };
       }
@@ -3983,6 +4028,11 @@ export class SkillExecutor {
       layer: config.layer,         // 分层展示层级
       format: config.format || 'table',
       data: displayData,
+      executionStatus: stepResult.code === 'optional_query_error'
+        ? 'optional_error'
+        : (Array.isArray(data) && data.length === 0 ? 'empty' : 'observed'),
+      executionMessage: stepResult.emptyMessage,
+      executionError: stepResult.error,
       highlight: config.highlight,
       sql,  // 保存原始 SQL
       expandable: config.expandable,           // 是否支持展开查看详细分析

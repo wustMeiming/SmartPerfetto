@@ -49,7 +49,6 @@ prerequisites:
   required_tables:
     - slice
   modules:
-    - linux.cpu.irq
 
 inputs:
   - name: package

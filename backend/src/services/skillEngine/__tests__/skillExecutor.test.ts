@@ -4120,3 +4120,100 @@ describe('SkillExecutor - Pipeline Step', () => {
     expect(bundle.activeRenderingProcesses[0]?.processName).toBe('com.demo.app');
   });
 });
+
+describe('SkillExecutor - authored deep and empty/error semantics', () => {
+  let executor: SkillExecutor;
+  let mockTraceProcessor: any;
+
+  beforeEach(() => {
+    mockTraceProcessor = createMockTraceProcessorService();
+    executor = createSkillExecutor(mockTraceProcessor);
+  });
+
+  it('executes deep Skills with the same ordered-step semantics as composite Skills', async () => {
+    const skill = {
+      name: 'deep_runtime_contract',
+      type: 'deep',
+      version: '1.0',
+      meta: createMeta('Deep runtime contract'),
+      steps: [{ id: 'query', type: 'atomic', sql: 'SELECT 1' }],
+    } as SkillDefinition;
+    executor.registerSkill(skill);
+
+    const result = await executor.execute('deep_runtime_contract', 'trace-1');
+
+    expect(result.success).toBe(true);
+    expect(result.rawResults?.query?.success).toBe(true);
+  });
+
+  it('fails a deep Skill when a required atomic step fails', async () => {
+    mockTraceProcessor.query.mockResolvedValueOnce({ error: 'required query failed' });
+    const skill = {
+      name: 'deep_required_failure_contract',
+      type: 'deep',
+      version: '1.0',
+      meta: createMeta('Deep required failure contract'),
+      steps: [{ id: 'query', type: 'atomic', sql: 'SELECT missing_column' }],
+    } as SkillDefinition;
+    executor.registerSkill(skill);
+
+    const result = await executor.execute('deep_required_failure_contract', 'trace-1');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('required query failed');
+    expect(result.rawResults?.query?.success).toBe(false);
+  });
+
+  it('preserves on_empty messages and optional query errors as distinct states', async () => {
+    mockTraceProcessor.query
+      .mockResolvedValueOnce({ columns: ['value'], rows: [] })
+      .mockResolvedValueOnce({ error: 'missing optional table' });
+    const skill: SkillDefinition = {
+      name: 'empty_error_contract',
+      type: 'composite',
+      version: '1.0',
+      meta: createMeta('Empty/error contract'),
+      steps: [
+        {
+          id: 'empty',
+          type: 'atomic',
+          sql: 'SELECT value FROM empty_table',
+          on_empty: 'nothing observed',
+          display: { show: true, level: 'summary' },
+        },
+        {
+          id: 'optional_error',
+          type: 'atomic',
+          sql: 'SELECT value FROM optional_table',
+          optional: true,
+          display: { show: true, level: 'summary' },
+        },
+      ],
+    };
+    executor.registerSkill(skill);
+
+    const result = await executor.execute('empty_error_contract', 'trace-1');
+
+    expect(result.rawResults?.empty?.emptyMessage).toBe('nothing observed');
+    expect(result.rawResults?.optional_error?.success).toBe(true);
+    expect(result.rawResults?.optional_error?.error).toBe('missing optional table');
+    expect(result.rawResults?.optional_error?.code).toBe('optional_query_error');
+    expect(result.displayResults.find(item => item.stepId === 'empty')).toMatchObject({
+      executionStatus: 'empty',
+      executionMessage: 'nothing observed',
+    });
+    expect(result.displayResults.find(item => item.stepId === 'optional_error')).toMatchObject({
+      executionStatus: 'optional_error',
+      executionError: 'missing optional table',
+    });
+    const envelopes = SkillExecutor.toDataEnvelopes(result);
+    expect(envelopes.find(item => item.meta.stepId === 'empty')?.meta).toMatchObject({
+      executionStatus: 'empty',
+      executionMessage: 'nothing observed',
+    });
+    expect(envelopes.find(item => item.meta.stepId === 'optional_error')?.meta).toMatchObject({
+      executionStatus: 'optional_error',
+      executionError: 'missing optional table',
+    });
+  });
+});

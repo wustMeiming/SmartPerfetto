@@ -87,6 +87,9 @@ jest.mock('../artifactStore', () => ({
         ...(artifact.traceProvenance?.traceSide ? { traceSide: artifact.traceProvenance.traceSide } : {}),
         ...(artifact.traceProvenance?.traceId ? { traceId: artifact.traceProvenance.traceId } : {}),
         ...(artifact.queryReview ? { queryReview: artifact.queryReview } : {}),
+        ...(artifact.executionStatus ? { executionStatus: artifact.executionStatus } : {}),
+        ...(artifact.executionMessage ? { executionMessage: artifact.executionMessage } : {}),
+        ...(artifact.executionError ? { executionError: artifact.executionError } : {}),
       };
     }),
     updateQueryReview: jest.fn(function(
@@ -119,6 +122,9 @@ jest.mock('../artifactStore', () => ({
           sourceToolCallId: artifact?.sourceToolCallId,
           identityResolution: artifact?.identityResolution,
           queryReview: artifact?.queryReview,
+          executionStatus: artifact?.executionStatus,
+          executionMessage: artifact?.executionMessage,
+          executionError: artifact?.executionError,
         };
       }
       const effectiveOffset = offset ?? 0;
@@ -146,6 +152,9 @@ jest.mock('../artifactStore', () => ({
         traceId: artifact?.traceProvenance?.traceId,
         traceProvenance: artifact?.traceProvenance,
         queryReview: artifact?.queryReview,
+        executionStatus: artifact?.executionStatus,
+        executionMessage: artifact?.executionMessage,
+        executionError: artifact?.executionError,
       };
     }),
     get: jest.fn(function(this: any, id: string) {
@@ -1570,6 +1579,8 @@ describe('createClaudeMcpServer', () => {
           layer: 'list',
           format: 'table',
           data: { rows: [], columns: ['launch_id', 'dur_ms'] },
+          executionStatus: 'empty',
+          executionMessage: 'No startup rows were recorded.',
         }],
         diagnostics: [],
         executionTimeMs: 5,
@@ -1582,6 +1593,10 @@ describe('createClaudeMcpServer', () => {
         .find((env: any) => env.display?.title === 'No launch rows');
 
       expect(result.success).toBe(true);
+      expect(result.artifacts?.[0]).toMatchObject({
+        executionStatus: 'empty',
+        executionMessage: 'No startup rows were recorded.',
+      });
       expect(envelope).toMatchObject({
         data: { rows: [], columns: ['launch_id', 'dur_ms'] },
         display: { format: 'table', title: 'No launch rows' },
@@ -1590,6 +1605,8 @@ describe('createClaudeMcpServer', () => {
           stepId: 'empty_launches',
           planPhaseId: 'p1',
           planPhaseAttribution: 'active',
+          executionStatus: 'empty',
+          executionMessage: 'No startup rows were recorded.',
         },
       });
       expect(envelope?.meta?.evidenceRefId).toContain('data:skill:startup_analysis:empty_launches');
