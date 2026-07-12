@@ -93,4 +93,4 @@ fixtures:
     android: {api: not_applicable, qpr: not_applicable, oem: not_applicable, build_type: unknown}
     capture_config: upstream_diff_test
     assertions:
-      - {query_id: callstack_analysis/sampling_overview, kind: field_positive, field: total_samples}
+      - {query_id: callstack_analysis/check_samples, kind: field_positive, field: total_samples}
