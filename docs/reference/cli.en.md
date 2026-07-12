@@ -275,7 +275,9 @@ on Android Q/API 29 and newer, and use a packaged or explicitly supplied
 smp capture presets
 smp capture suggest "debug startup jank" --app com.example.app --format json
 smp capture suggest "investigate scrolling frame drops; do not record yet" --app com.example.app
+smp capture suggest "Analyze Camera open-to-first-preview latency" --app com.example.camera
 smp capture config --preset startup --app com.example.app --duration 10 --out startup.pbtxt
+smp capture config --preset camera --app com.example.camera --duration 20
 smp capture config --preset cpu --app '*' --duration 30 --categories dalvikviktime my_custom_tag --out cpu-custom.pbtxt
 smp capture config --preset power --app com.example.app --duration 60 --out power.pbtxt
 
@@ -288,9 +290,15 @@ smp capture android --preset overview --app com.example.app --duration 10 --kill
 smp capture android --preset game --app com.example.game --duration 20 --out game.perfetto-trace --analyze --query "Find launch and frame pacing issues" --mode fast
 ```
 
-Available presets: `startup`, `scrolling`, `anr`, `game`, `memory`, `cpu`,
+Available presets: `startup`, `scrolling`, `camera`, `anr`, `game`, `memory`, `cpu`,
 `power`, `overview`, and `full`. `power` enables `android.power` battery
 counters, power rails, suspend/wakeup ftrace, and `android.network_packets`.
+`camera` collects Camera/vendor atrace candidates, Binder, scheduler,
+FrameTimeline, and DMA-BUF or legacy ION events. These tracepoints are optional
+and vary by Android release, kernel, and vendor implementation. Even with this
+preset, a trace may lack portable Camera open, request/result, buffer, or
+preview-presentation anchors. SmartPerfetto reports that evidence gap instead
+of fabricating an open-to-first-frame number.
 `smp capture suggest` is side-effect free: it maps natural language to a
 built-in preset and returns rationale, warnings, recommended commands, and a
 textproto preview rendered by the same config renderer. It does not call an LLM,

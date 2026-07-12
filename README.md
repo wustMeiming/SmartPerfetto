@@ -295,6 +295,8 @@ smp report <sessionId> --open
 
 # Record an Android trace from a connected device, then analyze it.
 smp capture presets
+smp capture suggest "Analyze Camera open-to-first-preview latency" --app com.example.camera
+smp capture config --preset camera --app com.example.camera --duration 20
 smp capture android --preset startup --app com.example.app --duration 10 --out launch.perfetto-trace
 smp capture android --preset cpu --app '*' --duration 30 --categories dalvikviktime my_custom_tag --out cpu-custom.perfetto-trace
 smp capture android --preset power --app com.example.app --duration 60 --out power.perfetto-trace
@@ -303,6 +305,13 @@ smp capture android --config ~/tools/perfetto_shell/perfetto.config --out ~/tool
 # Or run the interactive SmartPerfetto REPL.
 smp repl
 ```
+
+The `camera` preset collects device-dependent Camera/vendor atrace candidates,
+Binder and scheduler context, FrameTimeline, and DMA-BUF or legacy ION events.
+These tracepoints are optional and vary by Android release and vendor. A trace
+may still lack portable Camera open, request/result, buffer, or preview
+presentation anchors; SmartPerfetto reports that evidence gap instead of
+fabricating an open-to-first-frame number.
 
 The npm CLI package is the supported standalone terminal product. It does not start or bundle the Web UI launcher; use Docker or a GitHub portable package when you need the browser experience. The first analysis uses the bundled pinned `trace_processor_shell` binary when available, and can download the pinned binary automatically on unsupported targets. Android capture itself never downloads tools at runtime: `adb` is resolved from `ADB_PATH`, an approved bundled slot, then `PATH`; pre-Android Q or `--sideload` tracebox capture requires an approved bundled `tracebox` or `--tracebox /path/to/tracebox`. If your network cannot reach Google's artifact bucket, set `TRACE_PROCESSOR_PATH=/path/to/trace_processor_shell` to use a local binary, or set `TRACE_PROCESSOR_DOWNLOAD_BASE` / `TRACE_PROCESSOR_DOWNLOAD_URL` to a trusted mirror; downloaded binaries are still checked against the pinned SHA256. `smartperfetto` remains available as the long command name; source checkout scripts are only for maintainers debugging the CLI. See [CLI Reference](docs/reference/cli.en.md) for all commands, capture presets, REPL slash commands, storage layout, and resume behavior.
 

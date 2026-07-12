@@ -290,6 +290,8 @@ smp report <sessionId> --open
 
 # 从已连接 Android 设备抓 trace，并可直接分析。
 smp capture presets
+smp capture suggest "分析 Camera 打开到首帧预览延迟" --app com.example.camera
+smp capture config --preset camera --app com.example.camera --duration 20
 smp capture android --preset startup --app com.example.app --duration 10 --out launch.perfetto-trace
 smp capture android --preset cpu --app '*' --duration 30 --categories dalvikviktime my_custom_tag --out cpu-custom.perfetto-trace
 smp capture android --config ~/tools/perfetto_shell/perfetto.config --out ~/tools/perfetto_shell/trace/dut-game-launch.ptrace --analyze --query "分析应用启动"
@@ -297,6 +299,12 @@ smp capture android --config ~/tools/perfetto_shell/perfetto.config --out ~/tool
 # 或者直接进入 SmartPerfetto 交互 REPL。
 smp repl
 ```
+
+`camera` 预设会采集由设备决定是否提供的 Camera/vendor atrace 候选、Binder 与
+scheduler 上下文、FrameTimeline，以及 DMA-BUF 或旧版 ION 事件。这些 tracepoint
+都是可选的，会随 Android 版本和厂商实现而变化。trace 仍可能缺少可移植的 Camera
+open、request/result、buffer 或预览 presentation 锚点；遇到这种证据缺口时，
+SmartPerfetto 会明确报告缺失，而不会编造“打开到首帧”耗时。
 
 npm CLI 包是正式独立终端产品，不启动也不包含 Web UI launcher；需要浏览器体验时使用 Docker 或 GitHub 免安装包。第一次分析时，CLI 会优先使用包内固定版本 `trace_processor_shell`；当前平台没有内置 binary 时会自动下载固定版本。Android 抓 trace 本身不会现场下载工具：`adb` 按 `ADB_PATH`、已批准的包内 slot、`PATH` 顺序解析；Android Q 之前或显式 `--sideload` 的 tracebox 抓取需要已批准的包内 `tracebox`，或通过 `--tracebox /path/to/tracebox` 指定。若网络无法访问 Google artifact bucket，可以设置 `TRACE_PROCESSOR_PATH=/path/to/trace_processor_shell` 使用本机已有 binary，或设置 `TRACE_PROCESSOR_DOWNLOAD_BASE` / `TRACE_PROCESSOR_DOWNLOAD_URL` 指向可信镜像；下载内容仍会按固定 SHA256 校验。`smartperfetto` 仍保留为长命令名；源码 checkout 里的脚本只用于维护者调试 CLI。完整命令、抓取预设、REPL slash 命令、存储布局和 resume 语义见 [CLI 参考](docs/reference/cli.md)。
 

@@ -261,7 +261,9 @@ Perfetto 的 Android/Linux system tracing 路线：Android Q/API 29 及以上优
 smp capture presets
 smp capture suggest "debug startup jank" --app com.example.app --format json
 smp capture suggest "分析滑动掉帧，先不要真的抓取" --app com.example.app
+smp capture suggest "分析 Camera 打开到首帧预览延迟" --app com.example.camera
 smp capture config --preset startup --app com.example.app --duration 10 --out startup.pbtxt
+smp capture config --preset camera --app com.example.camera --duration 20
 smp capture config --preset cpu --app '*' --duration 30 --categories dalvikviktime my_custom_tag --out cpu-custom.pbtxt
 smp capture config --preset power --app com.example.app --duration 60 --out power.pbtxt
 
@@ -274,9 +276,14 @@ smp capture android --preset overview --app com.example.app --duration 10 --kill
 smp capture android --preset game --app com.example.game --duration 20 --out game.perfetto-trace --analyze --query "分析启动和帧节奏问题" --mode fast
 ```
 
-内置预设包括：`startup`、`scrolling`、`anr`、`game`、`memory`、`cpu`、
+内置预设包括：`startup`、`scrolling`、`camera`、`anr`、`game`、`memory`、`cpu`、
 `power`、`overview`、`full`。`power` 会开启 `android.power` 的 battery
 counters、power rails、suspend/wakeup 相关 ftrace 和 `android.network_packets`。
+`camera` 会采集 Camera/vendor atrace 候选、Binder、scheduler、FrameTimeline，
+以及 DMA-BUF 或旧版 ION 事件；这些 tracepoint 都是可选的，会随 Android 版本、
+内核和厂商实现而变化。即使使用该预设，trace 仍可能缺少可移植的 Camera open、
+request/result、buffer 或预览 presentation 锚点。SmartPerfetto 会把这种情况报告为
+证据缺口，而不会编造“打开到首帧”耗时。
 `smp capture suggest` 是无副作用的采集建议入口：它只根据自然语言确定内置
 preset，返回 rationale、warning、推荐命令和同一 renderer 生成的 textproto
 预览；不会调用 LLM、ADB、tracebox，也不会录制设备。真正执行仍需要用户显式运行

@@ -1090,6 +1090,11 @@ skills:
     workflow: rendering-pipeline
     disposition: exported
     destination: references/generated/skills/pipeline_angle_gles_vulkan.md
+  camera_trace_evidence:
+    source: backend/skills/composite/camera_trace_evidence.skill.yaml
+    workflow: rendering-pipeline
+    disposition: exported
+    destination: references/generated/skills/camera_trace_evidence.md
   pipeline_camera_pipeline:
     source: backend/skills/pipelines/camera_pipeline.skill.yaml
     workflow: rendering-pipeline
