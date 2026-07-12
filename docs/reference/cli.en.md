@@ -293,7 +293,7 @@ smp capture android --preset game --app com.example.game --duration 20 --out gam
 Available presets: `startup`, `scrolling`, `camera`, `anr`, `game`, `memory`, `cpu`,
 `power`, `overview`, and `full`. `power` enables `android.power` battery
 counters, power rails, suspend/wakeup ftrace, and `android.network_packets`.
-`camera` collects Camera/vendor atrace candidates, Binder, scheduler,
+`camera` collects Camera/HAL/vendor atrace candidates, Binder, scheduler,
 FrameTimeline, and DMA-BUF or legacy ION events. These tracepoints are optional
 and vary by Android release, kernel, and vendor implementation. Even with this
 preset, a trace may lack portable Camera open, request/result, buffer, or

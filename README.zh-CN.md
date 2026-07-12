@@ -300,11 +300,12 @@ smp capture android --config ~/tools/perfetto_shell/perfetto.config --out ~/tool
 smp repl
 ```
 
-`camera` 预设会采集由设备决定是否提供的 Camera/vendor atrace 候选、Binder 与
-scheduler 上下文、FrameTimeline，以及 DMA-BUF 或旧版 ION 事件。这些 tracepoint
-都是可选的，会随 Android 版本和厂商实现而变化。trace 仍可能缺少可移植的 Camera
-open、request/result、buffer 或预览 presentation 锚点；遇到这种证据缺口时，
-SmartPerfetto 会明确报告缺失，而不会编造“打开到首帧”耗时。
+`camera` 预设会采集设备可能提供的 Camera/HAL/厂商 atrace 候选、Binder 与
+scheduler 上下文、FrameTimeline，以及 DMA-BUF 或旧版 ION ftrace 事件。atrace
+候选和这些内存 ftrace 事件均为可选证据，具体是否可用取决于 Android 版本、
+设备/厂商实现与内核支持。trace 仍可能缺少可移植的 Camera open、request/result、
+buffer 或预览 presentation 锚点；遇到这种证据缺口时，SmartPerfetto 会明确报告
+缺失，而不会编造“打开到首帧”耗时。
 
 npm CLI 包是正式独立终端产品，不启动也不包含 Web UI launcher；需要浏览器体验时使用 Docker 或 GitHub 免安装包。第一次分析时，CLI 会优先使用包内固定版本 `trace_processor_shell`；当前平台没有内置 binary 时会自动下载固定版本。Android 抓 trace 本身不会现场下载工具：`adb` 按 `ADB_PATH`、已批准的包内 slot、`PATH` 顺序解析；Android Q 之前或显式 `--sideload` 的 tracebox 抓取需要已批准的包内 `tracebox`，或通过 `--tracebox /path/to/tracebox` 指定。若网络无法访问 Google artifact bucket，可以设置 `TRACE_PROCESSOR_PATH=/path/to/trace_processor_shell` 使用本机已有 binary，或设置 `TRACE_PROCESSOR_DOWNLOAD_BASE` / `TRACE_PROCESSOR_DOWNLOAD_URL` 指向可信镜像；下载内容仍会按固定 SHA256 校验。`smartperfetto` 仍保留为长命令名；源码 checkout 里的脚本只用于维护者调试 CLI。完整命令、抓取预设、REPL slash 命令、存储布局和 resume 语义见 [CLI 参考](docs/reference/cli.md)。
 

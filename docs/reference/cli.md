@@ -279,7 +279,7 @@ smp capture android --preset game --app com.example.game --duration 20 --out gam
 内置预设包括：`startup`、`scrolling`、`camera`、`anr`、`game`、`memory`、`cpu`、
 `power`、`overview`、`full`。`power` 会开启 `android.power` 的 battery
 counters、power rails、suspend/wakeup 相关 ftrace 和 `android.network_packets`。
-`camera` 会采集 Camera/vendor atrace 候选、Binder、scheduler、FrameTimeline，
+`camera` 会采集 Camera/HAL/厂商 atrace 候选、Binder、scheduler、FrameTimeline，
 以及 DMA-BUF 或旧版 ION 事件；这些 tracepoint 都是可选的，会随 Android 版本、
 内核和厂商实现而变化。即使使用该预设，trace 仍可能缺少可移植的 Camera open、
 request/result、buffer 或预览 presentation 锚点。SmartPerfetto 会把这种情况报告为

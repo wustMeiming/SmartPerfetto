@@ -306,10 +306,11 @@ smp capture android --config ~/tools/perfetto_shell/perfetto.config --out ~/tool
 smp repl
 ```
 
-The `camera` preset collects device-dependent Camera/vendor atrace candidates,
-Binder and scheduler context, FrameTimeline, and DMA-BUF or legacy ION events.
-These tracepoints are optional and vary by Android release and vendor. A trace
-may still lack portable Camera open, request/result, buffer, or preview
+The `camera` preset collects Camera/HAL/vendor atrace candidates, Binder and
+scheduler context, FrameTimeline, and DMA-BUF or legacy ION ftrace events. The
+atrace candidates and memory ftrace events are optional; availability depends
+on the Android release, device/vendor implementation, and kernel support. A
+trace may still lack portable Camera open, request/result, buffer, or preview
 presentation anchors; SmartPerfetto reports that evidence gap instead of
 fabricating an open-to-first-frame number.
 
