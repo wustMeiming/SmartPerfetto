@@ -902,7 +902,7 @@ function buildLayerSignalsSql(): string {
  * - Swappy/SwappyVk frame pacing
  * - AChoreographer (NDK Choreographer)
  * - setFrameRate / setFrameRateCategory APIs
- * - Camera HAL sensor trigger
+ * - Camera request activity candidate (slice-name match; not sensor-trigger proof)
  * - MediaCodec codec pacing
  * - Game engine main loop
  *
@@ -982,7 +982,7 @@ function buildExtraRhythmSignalsSql(): string {
           WHEN COALESCE((SELECT SUM(cnt) FROM app_slices WHERE slice_name GLOB '*Swappy*' OR slice_name GLOB '*SwappyVk_*'), 0) > 0 THEN 'swappy_pacing'
           WHEN COALESCE((SELECT SUM(cnt) FROM app_slices WHERE slice_name GLOB '*AChoreographer*'), 0) > 0 THEN 'achoreographer'
           WHEN COALESCE((SELECT SUM(cnt) FROM app_slices WHERE slice_name GLOB '*PlayerLoop*' OR slice_name GLOB '*FEngineLoop*' OR slice_name GLOB '*MainLoop*'), 0) > 0 THEN 'engine_main_loop'
-          WHEN COALESCE((SELECT SUM(cnt) FROM app_slices WHERE slice_name GLOB '*processCaptureRequest*'), 0) > 0 THEN 'camera_sensor_trigger'
+          WHEN COALESCE((SELECT SUM(cnt) FROM app_slices WHERE slice_name GLOB '*processCaptureRequest*'), 0) > 0 THEN 'camera_request_activity'
           WHEN COALESCE((SELECT SUM(cnt) FROM app_slices WHERE slice_name GLOB '*releaseOutputBuffer*'), 0) > 0 THEN 'video_codec_pacing'
           ELSE 'vsync_app_only'
         END as primary_rhythm_source

@@ -59,6 +59,11 @@ describe('rendering_pipeline_detection generator', () => {
     expect(activeStep.sql).toContain('eglSwapBuffers');
     expect(activeStep.sql).toContain('vkQueuePresentKHR');
 
+    const rhythmStep = skill.steps?.find((s) => s.id === 'extra_rhythm_signals') as any;
+    expect(rhythmStep).toBeTruthy();
+    expect(rhythmStep.sql).toContain("THEN 'camera_request_activity'");
+    expect(rhythmStep.sql).not.toContain('camera_sensor_trigger');
+
     const layerSignalsStep = skill.steps?.find((s) => s.id === 'layer_signals') as any;
     expect(layerSignalsStep).toBeTruthy();
     expect(layerSignalsStep.sql).toContain('android_frames_layers');

@@ -272,7 +272,7 @@ steps:
           WHEN (SELECT cnt FROM swappy) > 0 THEN 'swappy_pacing'
           WHEN (SELECT cnt FROM achoreographer) > 0 THEN 'achoreographer'
           WHEN (SELECT cnt FROM engine_loop) > 0 THEN 'engine_main_loop'
-          WHEN (SELECT cnt FROM camera) > 0 THEN 'camera_sensor_trigger'
+          WHEN (SELECT cnt FROM camera) > 0 THEN 'camera_request_activity'
           WHEN (SELECT cnt FROM codec) > 0 THEN 'video_codec_pacing'
           WHEN (SELECT cnt FROM set_frame_rate) > 0 THEN 'set_frame_rate_voted'
           ELSE 'vsync_app_only'

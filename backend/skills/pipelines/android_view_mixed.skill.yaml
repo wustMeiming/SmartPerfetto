@@ -28,7 +28,7 @@ meta:
     optional_producer_threads: ["GLThread", "MediaCodec*", "*Decoder*", "EGLThread"]
     expected_layer_count: 2     # 宿主 + 独立 SurfaceView layer（最少）；TextureView 路径仍是 1 层
     bufferqueue_path: "BBQ_TRANSACTION_INPROC + INDEPENDENT_LAYER"   # 多条并行
-    extra_rhythm_sources: ["video_codec_pacing", "camera_sensor_trigger"]   # 视情况
+    extra_rhythm_sources: ["video_codec_pacing", "camera_request_activity"]   # 视情况；Camera 名称仅为 request activity candidate
   deviation_anchors: "multi_path_anchor_4_5_6_8"
   # 锚点偏离：宿主走完整 ④⑤⑥；独立 Producer 也各自走 ④⑤⑥（独立节奏）；
   # ⑧ SF latch 这一轮处理多 layer——文章 §"多 Layer 场景里，SF 会对没有新 buffer 的 Layer 沿用旧内容"。

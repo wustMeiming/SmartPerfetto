@@ -29,7 +29,7 @@ meta:
     # ↑ 独立 Producer 可能在跨进程：MediaCodec/Codec2/Camera HAL 进程；trace 时不能只盯主 App 进程
     expected_layer_count: 2   # 宿主 + 独立 SurfaceView layer（Android 12+ BLAST 路径）
     bufferqueue_path: "BBQ_TRANSACTION_INPROC + INDEPENDENT_LAYER"
-    extra_rhythm_sources: ["video_codec_pacing", "camera_sensor_trigger", "game_engine_loop"]
+    extra_rhythm_sources: ["video_codec_pacing", "camera_request_activity", "game_engine_loop"]
   deviation_anchors: "independent_anchor_4_5_6_join_at_8"
   # 锚点偏离：宿主侧仍走完整 ①→⑥；独立 Producer 走自己的 ④⑤⑥；
   # ⑧ SF 在同一轮 latch 多 layer（宿主 + 独立）；⑨→⑫ 与基线一致。
