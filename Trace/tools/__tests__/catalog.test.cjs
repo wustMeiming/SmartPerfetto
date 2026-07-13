@@ -145,7 +145,14 @@ function createFixture() {
       skills: ['cpu_probe'],
       strategies: [],
       expectations: [
-        {id: 'skill-cpu-probe', type: 'skill', target: 'cpu_probe', required_steps: ['summary']},
+        {
+          id: 'skill-cpu-probe',
+          type: 'skill',
+          target: 'cpu_probe',
+          mode: 'semantic',
+          required_steps: ['summary'],
+          semantic_step: 'summary',
+        },
       ],
     },
   });
@@ -183,6 +190,7 @@ test('rejects duplicate ids, unsafe paths, hash drift, and tracked private cases
   duplicate.analysis.results = ['../real-startup/analysis/result.json'];
   duplicate.source.publication = 'private';
   writeJson(duplicateManifestPath, duplicate);
+  fs.writeFileSync(path.join(fixture.repoRoot, 'backend/legacy-path.ts'), "const trace = 'test-traces/old.pftrace';\n");
 
   const validation = validateCatalog(fixture.repoRoot);
   const codes = validation.issues.map((issue) => issue.code);
@@ -192,6 +200,7 @@ test('rejects duplicate ids, unsafe paths, hash drift, and tracked private cases
   assert.ok(codes.includes('unsafe-path'));
   assert.ok(codes.includes('hash-mismatch'));
   assert.ok(codes.includes('tracked-private-case'));
+  assert.ok(codes.includes('legacy-trace-reference'));
 });
 
 test('reports missing, stale, and expectation-free coverage targets', () => {
@@ -240,4 +249,16 @@ test('repository ignores private imports and materialized constructed traces', (
 
   assert.match(gitignore, /^\/Trace\/real\/\.private\/$/m);
   assert.match(gitignore, /^\/Trace\/\.generated\/$/m);
+});
+
+test('repository catalog explicitly covers every runtime Skill and Strategy', () => {
+  const repoRoot = path.resolve(__dirname, '../../..');
+  const validation = validateCatalog(repoRoot);
+
+  assert.deepEqual(validation.coverage.missing, {skills: [], strategies: []});
+  assert.deepEqual(validation.coverage.stale, {skills: [], strategies: []});
+  assert.equal(
+    validation.issues.filter((issue) => issue.code === 'coverage-without-expectation').length,
+    0,
+  );
 });

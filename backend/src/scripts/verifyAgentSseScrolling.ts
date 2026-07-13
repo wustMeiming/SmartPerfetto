@@ -188,14 +188,14 @@ interface SseSummary {
   skillCallCounts: Record<string, number>;
 }
 
-const DEFAULT_TRACE = '../test-traces/scroll-demo-customer-scroll.pftrace';
+const DEFAULT_TRACE = '../Trace/real/android-scroll-customer/trace.pftrace';
 const DEFAULT_QUERY = '分析滑动性能';
 
 function printUsage(): void {
   console.log('Usage: npx tsx src/scripts/verifyAgentSseScrolling.ts [options]');
   console.log('');
   console.log('Options:');
-  console.log('  --trace <path>                    Trace path (default: ../test-traces/scroll-demo-customer-scroll.pftrace)');
+  console.log('  --trace <path>                    Trace path (default: ../Trace/real/android-scroll-customer/trace.pftrace)');
   console.log('  --reference-trace <path>          Reference trace path for raw dual-trace comparison');
   console.log('  --query <text>                    Analyze query (default: 分析滑动性能)');
   console.log('  --timeout-ms <number>             SSE timeout in ms (default: 600000)');

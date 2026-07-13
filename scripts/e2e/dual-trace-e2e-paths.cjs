@@ -7,6 +7,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const {resolveCaseTrace} = require("../../Trace/tools/lib/catalog.cjs");
 
 const ROOT_DIR = path.resolve(__dirname, "../..");
 const PATHS = Object.freeze({
@@ -20,7 +21,6 @@ const PATHS = Object.freeze({
     "ui",
     "playwright.smartperfetto.config.ts",
   ),
-  fixtures: path.join(ROOT_DIR, "test-traces"),
 });
 
 function requireFile(filePath, label) {
@@ -34,14 +34,8 @@ function resolveTooling() {
     "Committed frontend server",
   );
   requireFile(PATHS.playwrightConfig, "SmartPerfetto Playwright config");
-  requireFile(
-    path.join(PATHS.fixtures, "launch_light.pftrace"),
-    "Light launch Trace fixture",
-  );
-  requireFile(
-    path.join(PATHS.fixtures, "lacunh_heavy.pftrace"),
-    "Heavy launch Trace fixture",
-  );
+  requireFile(resolveCaseTrace(ROOT_DIR, "launch_light.pftrace"), "Light launch Trace fixture");
+  requireFile(resolveCaseTrace(ROOT_DIR, "lacunh_heavy.pftrace"), "Heavy launch Trace fixture");
   return {
     playwrightCli: require.resolve("@playwright/test/cli", {
       paths: [PATHS.ui],
@@ -96,6 +90,7 @@ function prepareRunWorkspace() {
     backendLogDir: path.join(temporaryDir, "backend-logs"),
     uploadDir: path.join(temporaryDir, "uploads"),
     traceUploadDir: path.join(temporaryDir, "uploads", "traces"),
+    fixtureDir: path.join(temporaryDir, "fixtures"),
     enterpriseDataDir: path.join(temporaryDir, "enterprise"),
     sceneReportDir: path.join(temporaryDir, "scene-reports"),
     sceneJobArtifactDir: path.join(temporaryDir, "scene-job-artifacts"),
@@ -109,12 +104,16 @@ function prepareRunWorkspace() {
     workspace.backendDataDir,
     workspace.backendLogDir,
     workspace.traceUploadDir,
+    workspace.fixtureDir,
     workspace.enterpriseDataDir,
     workspace.sceneReportDir,
     workspace.sceneJobArtifactDir,
   ]) {
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     fs.chmodSync(directory, 0o700);
+  }
+  for (const selector of ["launch_light.pftrace", "lacunh_heavy.pftrace"]) {
+    fs.copyFileSync(resolveCaseTrace(ROOT_DIR, selector), path.join(workspace.fixtureDir, selector));
   }
   return workspace;
 }

@@ -15,6 +15,7 @@ const {
   probeTrace,
 } = require('../lib/generator.cjs');
 const {resolveCaseTrace} = require('../lib/catalog.cjs');
+const {buildCatalogCases} = require('../lib/builder.cjs');
 
 const repoRoot = path.resolve(__dirname, '../../..');
 const traceProcessor = path.join(
@@ -106,6 +107,154 @@ test('materializes a parseable trace with slice, counter, and sched evidence', (
   assert.match(output, /1,1,[1-9][0-9]*/);
 });
 
+test('materializes memory, battery, power, GPU, CPU frequency, IRQ, and async evidence', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-generator-signals-'));
+  const outputPath = path.join(tempDir, 'combined.pftrace');
+  const scenario = fixtureScenario();
+  scenario.signals.push(
+    {
+      type: 'process-stats',
+      at_ns: '10000000',
+      process: 'app',
+      vm_rss_kb: 102400,
+      rss_anon_kb: 81920,
+      rss_file_kb: 20480,
+      vm_swap_kb: 1024,
+      vm_hwm_kb: 122880,
+      oom_score_adj: 200,
+    },
+    {
+      type: 'process-stats',
+      at_ns: '20000000',
+      process: 'app',
+      vm_rss_kb: 133120,
+      rss_anon_kb: 102400,
+      rss_file_kb: 30720,
+      vm_swap_kb: 2048,
+      vm_hwm_kb: 143360,
+      oom_score_adj: 900,
+    },
+    {
+      type: 'battery-counters',
+      at_ns: '30000000',
+      capacity_percent: 80,
+      charge_counter_uah: '4000000',
+      current_ua: '-500000',
+      voltage_uv: '4000000',
+    },
+    {
+      type: 'battery-counters',
+      at_ns: '40000000',
+      capacity_percent: 79,
+      charge_counter_uah: '3999000',
+      current_ua: '-550000',
+      voltage_uv: '3980000',
+    },
+    {
+      type: 'power-rail',
+      at_ns: '50000000',
+      duration_ns: '10000000',
+      name: 'SYNTHETIC_CPU',
+      subsystem: 'CPU',
+      start_energy_uws: '1000000',
+      end_energy_uws: '1100000',
+    },
+    {
+      type: 'gpu-work-period',
+      at_ns: '70000000',
+      duration_ns: '10000000',
+      gpu_id: 0,
+      uid: 10999,
+      active_duration_ns: '8000000',
+      cpu: 0,
+    },
+    {type: 'gpu-frequency', at_ns: '90000000', gpu_id: 0, value: 700000, cpu: 0},
+    {type: 'cpu-frequency', at_ns: '100000000', cpu_id: 0, value: 1800000, cpu: 0},
+    {
+      type: 'irq-span',
+      at_ns: '110000000',
+      duration_ns: '2000000',
+      irq: 42,
+      name: 'synthetic_irq',
+      cpu: 0,
+    },
+    {
+      type: 'frame-timeline',
+      at_ns: '115000000',
+      duration_ns: '20000000',
+      process: 'app',
+      cookie: 100,
+      token: 200,
+      display_frame_token: 300,
+      layer_name: 'SyntheticLayer',
+      jank_type: 64,
+    },
+    {type: 'gpu-power-state', at_ns: '116000000', old_state: 0, new_state: 2, cpu: 0},
+    {type: 'cpu-idle', at_ns: '117000000', cpu_id: 0, state: 1, cpu: 0},
+    {
+      type: 'atrace-async-slice',
+      at_ns: '120000000',
+      duration_ns: '5000000',
+      process: 'app',
+      thread: 'main',
+      name: 'SyntheticAsync',
+      cookie: 7,
+    },
+    {
+      type: 'atrace-async-track-slice',
+      at_ns: '130000000',
+      duration_ns: '5000000',
+      process: 'app',
+      thread: 'main',
+      track_name: 'SyntheticTrack',
+      name: 'SyntheticTrackEvent',
+      cookie: 8,
+    },
+    {
+      type: 'lmk-kill',
+      at_ns: '140000000',
+      duration_ns: '1000000',
+      process: 'app',
+      thread: 'main',
+      kill_reason: 3,
+      oom_score_adj: 900,
+    },
+  );
+  const overlay = encodeScenarioOverlay(repoRoot, scenario, {
+    anchorNs: '1000000000',
+    usedPids: new Set(),
+    sequenceId: 434343,
+  });
+  materializeTrace(Buffer.alloc(0), overlay.buffer, outputPath);
+
+  const output = queryTrace(outputPath, `
+    INCLUDE PERFETTO MODULE android.battery;
+    INCLUDE PERFETTO MODULE android.gpu.work_period;
+    INCLUDE PERFETTO MODULE android.oom_adjuster;
+    INCLUDE PERFETTO MODULE linux.memory.process;
+    INCLUDE PERFETTO MODULE linux.irqs;
+    INCLUDE PERFETTO MODULE android.gpu.mali_power_state;
+    INCLUDE PERFETTO MODULE linux.cpu.idle;
+    INCLUDE PERFETTO MODULE android.memory.lmk;
+    SELECT
+      (SELECT COUNT(*) FROM memory_rss_and_swap_per_process) AS rss,
+      (SELECT COUNT(*) FROM android_battery_charge) AS battery,
+      (SELECT COUNT(*) FROM track WHERE type = 'power_rails') AS rails,
+      (SELECT COUNT(*) FROM android_gpu_work_period_track t JOIN slice s ON s.track_id = t.id) AS gpu_work,
+      (SELECT COUNT(*) FROM gpu_counter_track WHERE name GLOB '*freq*') AS gpu_freq,
+      (SELECT COUNT(*) FROM cpu_counter_track WHERE name = 'cpufreq') AS cpu_freq,
+      (SELECT COUNT(*) FROM linux_hard_irqs WHERE name GLOB '*synthetic_irq*') AS irq,
+      (SELECT COUNT(*) FROM actual_frame_timeline_slice WHERE layer_name = 'SyntheticLayer') AS frame,
+      (SELECT COUNT(*) FROM android_mali_gpu_power_state) AS gpu_power,
+      (SELECT COUNT(*) FROM cpu_idle_counters WHERE idle = 1) AS cpu_idle,
+      (SELECT COUNT(*) FROM slice WHERE name = 'SyntheticAsync') AS async_slice,
+      (SELECT COUNT(*) FROM slice s JOIN process_track pt ON pt.id = s.track_id WHERE s.name = 'SyntheticAsync') AS async_process_slice,
+      (SELECT COUNT(*) FROM slice s JOIN process_track pt ON pt.id = s.track_id WHERE pt.name = 'SyntheticTrack' AND s.name = 'SyntheticTrackEvent') AS named_async,
+      (SELECT COUNT(*) FROM android_lmk_events WHERE process_name = 'com.smartperfetto.fixture') AS lmk,
+      (SELECT COUNT(*) FROM android_oom_adj_intervals) AS oom_adj`);
+  assert.match(output, /\n(?:[1-9][0-9]*,){14}[1-9][0-9]*\s*$/);
+});
+
 test('rejects unsafe or imprecise scenario values', () => {
   const invalid = fixtureScenario();
   invalid.signals[0].at_ns = 1;
@@ -157,7 +306,23 @@ test('probes a real base and builds a combined trace inside its bounds', () => {
 
   const output = queryTrace(
     outputPath,
-    "SELECT COUNT(*) FROM slice WHERE name = 'SmartPerfetto::CPU_CONTENTION'",
+    `SELECT
+       (SELECT COUNT(*) FROM slice WHERE name = 'SmartPerfetto::CPU_CONTENTION') AS markers,
+       COALESCE((SELECT value FROM stats WHERE name = 'mismatched_sched_switch_tids'), 0) AS sched_mismatches`,
   );
-  assert.match(output, /\n1\s*$/);
+  assert.match(output, /\n1,0\s*$/);
+  assert.ok(Object.values(build.provenance.cpu_map).every((cpu) => Number(cpu) > 0));
+});
+
+test('rebuilds a repository constructed case with matching source hash and provenance', () => {
+  const result = buildCatalogCases(repoRoot, {caseIds: ['startup-lifecycle'], check: true});
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].case_id, 'startup-lifecycle');
+  assert.equal(result[0].overlay_hash_matches, true);
+  assert.ok(fs.existsSync(path.join(repoRoot, result[0].output)));
+  assert.ok(fs.existsSync(path.join(repoRoot, result[0].provenance_file)));
+  const provenance = JSON.parse(fs.readFileSync(path.join(repoRoot, result[0].provenance_file), 'utf8'));
+  assert.equal(provenance.trace_processor.sha256.length, 64);
+  assert.match(provenance.trace_processor.version, /^Perfetto /);
 });

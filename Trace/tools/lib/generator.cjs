@@ -22,6 +22,27 @@ function decimalString(value, field) {
   return value;
 }
 
+function signedDecimalString(value, field) {
+  if (typeof value !== 'string' || !/^-?[0-9]+$/.test(value)) {
+    throw new Error(`${field} must be a signed decimal string`);
+  }
+  return value;
+}
+
+function finiteNumber(value, field) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${field} must be a finite number`);
+  }
+  return value;
+}
+
+function nonNegativeInteger(value, field) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${field} must be a non-negative integer`);
+  }
+  return value;
+}
+
 function nonEmptyString(value, field) {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new Error(`${field} must be a non-empty string`);
@@ -72,7 +93,11 @@ function buildIdentities(scenario, usedPids) {
     if (threadDefinitions.has(id)) throw new Error(`duplicate thread actor: ${id}`);
     const process = processDefinitions.get(actor.process);
     if (!process) throw new Error(`thread ${id} references unknown process ${actor.process}`);
-    const tid = allocatePid(usedPids);
+    const existingMain = [...threadDefinitions.values()].some(
+      (thread) => thread.tgid === process.pid && thread.tid === process.pid,
+    );
+    if (actor.is_main && existingMain) throw new Error(`process ${actor.process} has multiple main threads`);
+    const tid = actor.is_main ? process.pid : allocatePid(usedPids);
     threads[id] = tid;
     threadDefinitions.set(id, {...actor, tid, tgid: process.pid});
   }
@@ -124,6 +149,7 @@ function encodeScenarioOverlay(repoRoot, scenario, options) {
   const usedPids = new Set(options.usedPids ?? []);
   const identities = buildIdentities(scenario, usedPids);
   const ftraceByCpu = new Map();
+  const dataPackets = [];
 
   function eventsForCpu(cpu) {
     if (!Number.isInteger(cpu) || cpu < 0) throw new Error(`invalid cpu: ${cpu}`);
@@ -147,6 +173,23 @@ function encodeScenarioOverlay(repoRoot, scenario, options) {
       eventsForCpu(signal.cpu ?? 0).push(
         printEvent(timestamp, thread.tid, `C|${process.pid}|${nonEmptyString(signal.name, 'signal.name')}|${signal.value}`),
       );
+    } else if (signal.type === 'atrace-async-slice') {
+      const {process, thread} = actorForSignal(signal, identities);
+      const cookie = nonNegativeInteger(signal.cookie, 'atrace-async-slice cookie');
+      const name = nonEmptyString(signal.name, 'signal.name');
+      const end = absoluteTimestamp(timestamp, signal.duration_ns, `scenario.signals[${index}].duration_ns`);
+      const events = eventsForCpu(signal.cpu ?? 0);
+      events.push(printEvent(timestamp, thread.tid, `S|${process.pid}|${name}|${cookie}`));
+      events.push(printEvent(end, thread.tid, `F|${process.pid}|${name}|${cookie}`));
+    } else if (signal.type === 'atrace-async-track-slice') {
+      const {process, thread} = actorForSignal(signal, identities);
+      const cookie = nonNegativeInteger(signal.cookie, 'atrace-async-track-slice cookie');
+      const trackName = nonEmptyString(signal.track_name, 'signal.track_name');
+      const name = nonEmptyString(signal.name, 'signal.name');
+      const end = absoluteTimestamp(timestamp, signal.duration_ns, `scenario.signals[${index}].duration_ns`);
+      const events = eventsForCpu(signal.cpu ?? 0);
+      events.push(printEvent(timestamp, thread.tid, `G|${process.pid}|${trackName}|${name}|${cookie}`));
+      events.push(printEvent(end, thread.tid, `H|${process.pid}|${trackName}|${name}|${cookie}`));
     } else if (signal.type === 'sched-running') {
       const thread = identities.threadDefinitions.get(signal.thread);
       if (!thread) throw new Error(`signal references unknown thread ${signal.thread}`);
@@ -158,6 +201,146 @@ function encodeScenarioOverlay(repoRoot, scenario, options) {
       const events = eventsForCpu(signal.cpu);
       events.push(schedSwitchEvent(timestamp, idle, task, '0'));
       events.push(schedSwitchEvent(end, task, idle, endState));
+    } else if (signal.type === 'process-stats') {
+      const process = identities.processDefinitions.get(signal.process);
+      if (!process) throw new Error(`signal references unknown process ${signal.process}`);
+      const stats = {pid: process.pid};
+      for (const [field, protoField] of [
+        ['vm_rss_kb', 'vmRssKb'],
+        ['rss_anon_kb', 'rssAnonKb'],
+        ['rss_file_kb', 'rssFileKb'],
+        ['rss_shmem_kb', 'rssShmemKb'],
+        ['vm_swap_kb', 'vmSwapKb'],
+        ['vm_hwm_kb', 'vmHwmKb'],
+      ]) {
+        if (signal[field] !== undefined) stats[protoField] = nonNegativeInteger(signal[field], `process-stats ${field}`);
+      }
+      if (signal.oom_score_adj !== undefined) {
+        if (!Number.isInteger(signal.oom_score_adj)) throw new Error('process-stats oom_score_adj must be an integer');
+        stats.oomScoreAdj = signal.oom_score_adj;
+      }
+      dataPackets.push({timestamp, processStats: {processes: [stats], collectionEndTimestamp: timestamp}});
+    } else if (signal.type === 'battery-counters') {
+      const battery = {};
+      if (signal.capacity_percent !== undefined) battery.capacityPercent = finiteNumber(signal.capacity_percent, 'battery capacity_percent');
+      for (const [field, protoField] of [
+        ['charge_counter_uah', 'chargeCounterUah'],
+        ['current_ua', 'currentUa'],
+        ['current_avg_ua', 'currentAvgUa'],
+        ['energy_counter_uwh', 'energyCounterUwh'],
+        ['voltage_uv', 'voltageUv'],
+      ]) {
+        if (signal[field] !== undefined) battery[protoField] = signedDecimalString(signal[field], `battery ${field}`);
+      }
+      dataPackets.push({timestamp, battery});
+    } else if (signal.type === 'power-rail') {
+      const duration = decimalString(signal.duration_ns, `scenario.signals[${index}].duration_ns`);
+      const end = absoluteTimestamp(timestamp, duration, `scenario.signals[${index}].duration_ns`);
+      const railIndex = index + 1;
+      dataPackets.push({
+        timestamp,
+        powerRails: {
+          sessionUuid: String(options.sequenceId),
+          railDescriptor: [{
+            index: railIndex,
+            railName: nonEmptyString(signal.name, 'power-rail name'),
+            subsysName: nonEmptyString(signal.subsystem, 'power-rail subsystem'),
+            samplingRate: 1000,
+          }],
+          energyData: [
+            {index: railIndex, timestampMs: (BigInt(timestamp) / 1000000n).toString(), energy: decimalString(signal.start_energy_uws, 'power-rail start_energy_uws')},
+            {index: railIndex, timestampMs: (BigInt(end) / 1000000n).toString(), energy: decimalString(signal.end_energy_uws, 'power-rail end_energy_uws')},
+          ],
+        },
+      });
+    } else if (signal.type === 'gpu-work-period') {
+      const end = absoluteTimestamp(timestamp, signal.duration_ns, `scenario.signals[${index}].duration_ns`);
+      eventsForCpu(signal.cpu ?? 0).push({
+        timestamp,
+        pid: 0,
+        gpuWorkPeriod: {
+          gpuId: nonNegativeInteger(signal.gpu_id, 'gpu-work-period gpu_id'),
+          uid: nonNegativeInteger(signal.uid, 'gpu-work-period uid'),
+          startTimeNs: timestamp,
+          endTimeNs: end,
+          totalActiveDurationNs: decimalString(signal.active_duration_ns, 'gpu-work-period active_duration_ns'),
+        },
+      });
+    } else if (signal.type === 'gpu-frequency') {
+      eventsForCpu(signal.cpu ?? 0).push({
+        timestamp,
+        pid: 0,
+        gpuFrequency: {
+          gpuId: nonNegativeInteger(signal.gpu_id, 'gpu-frequency gpu_id'),
+          state: nonNegativeInteger(signal.value, 'gpu-frequency value'),
+        },
+      });
+    } else if (signal.type === 'cpu-frequency') {
+      eventsForCpu(signal.cpu ?? signal.cpu_id).push({
+        timestamp,
+        pid: 0,
+        cpuFrequency: {
+          cpuId: nonNegativeInteger(signal.cpu_id, 'cpu-frequency cpu_id'),
+          state: nonNegativeInteger(signal.value, 'cpu-frequency value'),
+        },
+      });
+    } else if (signal.type === 'irq-span') {
+      const end = absoluteTimestamp(timestamp, signal.duration_ns, `scenario.signals[${index}].duration_ns`);
+      const irq = nonNegativeInteger(signal.irq, 'irq-span irq');
+      const events = eventsForCpu(signal.cpu ?? 0);
+      events.push({timestamp, pid: 0, irqHandlerEntry: {irq, name: nonEmptyString(signal.name, 'irq-span name')}});
+      events.push({timestamp: end, pid: 0, irqHandlerExit: {irq, ret: 1}});
+    } else if (signal.type === 'frame-timeline') {
+      const process = identities.processDefinitions.get(signal.process);
+      if (!process) throw new Error(`signal references unknown process ${signal.process}`);
+      const end = absoluteTimestamp(timestamp, signal.duration_ns, `scenario.signals[${index}].duration_ns`);
+      const cookie = nonNegativeInteger(signal.cookie, 'frame-timeline cookie');
+      dataPackets.push({
+        timestamp,
+        frameTimelineEvent: {
+          actualSurfaceFrameStart: {
+            cookie,
+            token: nonNegativeInteger(signal.token, 'frame-timeline token'),
+            displayFrameToken: nonNegativeInteger(signal.display_frame_token, 'frame-timeline display_frame_token'),
+            pid: process.pid,
+            layerName: nonEmptyString(signal.layer_name, 'frame-timeline layer_name'),
+            presentType: signal.jank_type ? 2 : 1,
+            onTimeFinish: !signal.jank_type,
+            gpuComposition: false,
+            jankType: nonNegativeInteger(signal.jank_type ?? 1, 'frame-timeline jank_type'),
+            predictionType: 1,
+            jankSeverityType: signal.jank_type ? 3 : 1,
+          },
+        },
+      });
+      dataPackets.push({timestamp: end, frameTimelineEvent: {frameEnd: {cookie}}});
+    } else if (signal.type === 'gpu-power-state') {
+      eventsForCpu(signal.cpu ?? 0).push({
+        timestamp,
+        pid: 0,
+        maliGpuPowerState: {
+          changeNs: timestamp,
+          fromState: nonNegativeInteger(signal.old_state, 'gpu-power-state old_state'),
+          toState: nonNegativeInteger(signal.new_state, 'gpu-power-state new_state'),
+        },
+      });
+    } else if (signal.type === 'cpu-idle') {
+      eventsForCpu(signal.cpu ?? signal.cpu_id).push({
+        timestamp,
+        pid: 0,
+        cpuIdle: {
+          cpuId: nonNegativeInteger(signal.cpu_id, 'cpu-idle cpu_id'),
+          state: nonNegativeInteger(signal.state, 'cpu-idle state'),
+        },
+      });
+    } else if (signal.type === 'lmk-kill') {
+      const {process, thread} = actorForSignal(signal, identities);
+      const end = absoluteTimestamp(timestamp, signal.duration_ns, `scenario.signals[${index}].duration_ns`);
+      const killReason = nonNegativeInteger(signal.kill_reason, 'lmk-kill kill_reason');
+      if (!Number.isInteger(signal.oom_score_adj)) throw new Error('lmk-kill oom_score_adj must be an integer');
+      const events = eventsForCpu(signal.cpu ?? 0);
+      events.push(printEvent(timestamp, thread.tid, `B|${process.pid}|lmk,${process.pid},${killReason},${signal.oom_score_adj}`));
+      events.push(printEvent(end, thread.tid, `E|${process.pid}`));
     } else {
       throw new Error(`unsupported signal type: ${signal.type}`);
     }
@@ -179,11 +362,26 @@ function encodeScenarioOverlay(repoRoot, scenario, options) {
   };
   const packets = [
     {
+      trustedPacketSequenceId: options.sequenceId,
+      clockSnapshot: {
+        clocks: [
+          {clockId: 5, timestamp: anchorNs},
+          {clockId: 6, timestamp: anchorNs},
+          {clockId: 11, timestamp: anchorNs},
+        ],
+        primaryTraceClock: 6,
+      },
+    },
+    {
       timestamp: anchorNs,
       trustedPacketSequenceId: options.sequenceId,
       incrementalStateCleared: true,
       processTree,
     },
+    ...dataPackets.map((packet) => ({
+      ...packet,
+      trustedPacketSequenceId: options.sequenceId,
+    })),
     ...[...ftraceByCpu.entries()]
       .sort(([left], [right]) => left - right)
       .map(([cpu, event]) => ({
@@ -248,6 +446,8 @@ function probeTrace(repoRoot, tracePath) {
            printf('%d', trace_end()) AS value_2
     UNION ALL
     SELECT 'pid', CAST(pid AS TEXT), '' FROM process WHERE pid IS NOT NULL
+    UNION ALL
+    SELECT 'cpu', CAST(cpu AS TEXT), '' FROM (SELECT DISTINCT cpu FROM sched)
     ORDER BY kind, value_1
   `;
   const result = spawnSync(resolveTraceProcessor(repoRoot), ['-Q', sql, tracePath], {
@@ -271,6 +471,12 @@ function probeTrace(repoRoot, tracePath) {
       rows
         .filter(([kind]) => kind === 'pid')
         .map(([, pid]) => Number.parseInt(pid, 10))
+        .filter(Number.isInteger),
+    ),
+    used_cpus: new Set(
+      rows
+        .filter(([kind]) => kind === 'cpu')
+        .map(([, cpu]) => Number.parseInt(cpu, 10))
         .filter(Number.isInteger),
     ),
   };
@@ -299,6 +505,32 @@ function allocateSequenceId(caseId, usedSequenceIds) {
   return candidate;
 }
 
+function isolateScenarioCpus(scenario, usedCpus) {
+  const requested = [...new Set(
+    scenario.signals
+      .map((signal) => signal.cpu)
+      .filter((cpu) => Number.isInteger(cpu)),
+  )].sort((left, right) => left - right);
+  let nextCpu = usedCpus.size > 0 ? Math.max(...usedCpus) + 1 : 0;
+  const cpuMap = {};
+  for (const cpu of requested) {
+    while (usedCpus.has(nextCpu)) nextCpu += 1;
+    cpuMap[cpu] = nextCpu;
+    usedCpus.add(nextCpu);
+    nextCpu += 1;
+  }
+  return {
+    cpuMap,
+    scenario: {
+      ...scenario,
+      signals: scenario.signals.map((signal) => ({
+        ...signal,
+        ...(Number.isInteger(signal.cpu) ? {cpu: cpuMap[signal.cpu]} : {}),
+      })),
+    },
+  };
+}
+
 function buildConstructedTrace(repoRoot, options) {
   const base = fs.readFileSync(options.basePath);
   const scenario = JSON.parse(fs.readFileSync(options.scenarioPath, 'utf8'));
@@ -307,7 +539,8 @@ function buildConstructedTrace(repoRoot, options) {
   const anchorNs = chooseAnchor(probe, scenario.clock);
   const usedSequenceIds = collectPacketSequenceIds(repoRoot, base);
   const sequenceId = allocateSequenceId(options.caseId, usedSequenceIds);
-  const overlay = encodeScenarioOverlay(repoRoot, scenario, {
+  const isolated = isolateScenarioCpus(scenario, new Set(probe.used_cpus));
+  const overlay = encodeScenarioOverlay(repoRoot, isolated.scenario, {
     anchorNs,
     usedPids: probe.used_pids,
     sequenceId,
@@ -327,6 +560,7 @@ function buildConstructedTrace(repoRoot, options) {
       case_id: options.caseId,
       anchor_ns: anchorNs,
       sequence_id: sequenceId,
+      cpu_map: isolated.cpuMap,
       base_sha256: materialization.base_sha256,
       overlay_sha256: materialization.overlay_sha256,
       output_sha256: materialization.output_sha256,

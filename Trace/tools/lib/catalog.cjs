@@ -181,6 +181,33 @@ function validatePublication(entry, issues) {
   }
 }
 
+function validateNoLegacyTraceReferences(repoRoot, issues) {
+  const ignoredSegments = new Set(['.git', '.omo', '.worktrees', 'dist', 'node_modules', 'perfetto', 'Trace']);
+  const ignoredPrefixes = [
+    path.join(repoRoot, 'docs', 'archive'),
+    path.join(repoRoot, 'docs', 'superpowers'),
+  ];
+  const textExtensions = new Set([
+    '.cjs', '.js', '.json', '.md', '.mjs', '.sh', '.ts', '.tsx', '.yaml', '.yml',
+  ]);
+  const files = listFilesRecursive(repoRoot, (filePath) => {
+    const relativeSegments = path.relative(repoRoot, filePath).split(path.sep);
+    if (relativeSegments.some((segment) => ignoredSegments.has(segment))) return false;
+    if (ignoredPrefixes.some((prefix) => filePath.startsWith(`${prefix}${path.sep}`))) return false;
+    return textExtensions.has(path.extname(filePath));
+  });
+  for (const filePath of files) {
+    const source = fs.readFileSync(filePath, 'utf8');
+    if (/test-traces(?:\/|["'])/.test(source)) {
+      issues.push(issue(
+        'legacy-trace-reference',
+        filePath,
+        `maintained source must resolve Trace/catalog.json instead of test-traces: ${path.relative(repoRoot, filePath)}`,
+      ));
+    }
+  }
+}
+
 function validateCatalog(repoRoot) {
   const catalog = loadCatalog(repoRoot);
   const targets = discoverCoverageTargets(repoRoot);
@@ -188,6 +215,7 @@ function validateCatalog(repoRoot) {
   const ids = new Map();
   const baseIds = new Set(catalog.cases.filter((entry) => entry.kind === 'real').map((entry) => entry.id));
   const covered = {skills: new Set(), strategies: new Set()};
+  const quality = {semantic: new Set(), graceful_empty: new Set(), unavailable: new Set(), definition: new Set()};
 
   for (const entry of catalog.cases) {
     validateRequiredShape(entry, issues);
@@ -203,6 +231,28 @@ function validateCatalog(repoRoot) {
     }
 
     const expectationTargets = new Set((entry.coverage?.expectations ?? []).map((item) => `${item.type}:${item.target}`));
+    for (const expectation of entry.coverage?.expectations ?? []) {
+      if (expectation.type !== 'skill') continue;
+      const mode = expectation.mode;
+      if (!Object.hasOwn(quality, mode)) {
+        issues.push(issue('invalid-expectation-mode', entry.manifest_path, `Skill ${expectation.target} has invalid mode ${mode}`));
+        continue;
+      }
+      quality[mode].add(expectation.target);
+      if (mode !== 'definition') {
+        if (!Array.isArray(expectation.required_steps) || expectation.required_steps.length === 0 || !expectation.semantic_step) {
+          issues.push(issue('incomplete-execution-expectation', entry.manifest_path, `Skill ${expectation.target} requires steps and semantic_step`));
+        }
+      }
+      if (mode === 'graceful_empty' || mode === 'unavailable') {
+        if (typeof expectation.limitation_reason !== 'string' || expectation.limitation_reason.trim() === '') {
+          issues.push(issue('missing-limitation-reason', entry.manifest_path, `Skill ${expectation.target} requires limitation_reason`));
+        }
+      }
+      if (mode === 'unavailable' && (typeof expectation.expected_error !== 'string' || expectation.expected_error.trim() === '')) {
+        issues.push(issue('missing-expected-error', entry.manifest_path, `Skill ${expectation.target} requires expected_error`));
+      }
+    }
     for (const skill of entry.coverage?.skills ?? []) {
       covered.skills.add(skill);
       if (!expectationTargets.has(`skill:${skill}`)) {
@@ -216,6 +266,7 @@ function validateCatalog(repoRoot) {
       }
     }
   }
+  validateNoLegacyTraceReferences(repoRoot, issues);
 
   const coverage = {
     missing: {
@@ -230,6 +281,9 @@ function validateCatalog(repoRoot) {
       skills: [...covered.skills].filter((id) => targets.skills.includes(id)).sort(),
       strategies: [...covered.strategies].filter((id) => targets.strategies.includes(id)).sort(),
     },
+    quality: Object.fromEntries(
+      Object.entries(quality).map(([mode, ids]) => [mode, [...ids].filter((id) => targets.skills.includes(id)).sort()]),
+    ),
   };
   for (const category of ['skills', 'strategies']) {
     for (const id of coverage.missing[category]) {

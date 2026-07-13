@@ -6,6 +6,8 @@ const path = require('node:path');
 
 const {probeTrace: defaultProbeTrace} = require('./generator.cjs');
 const {sha256File} = require('./hash.cjs');
+const {validateCatalog: defaultValidateCatalog} = require('./catalog.cjs');
+const {writeIndexes: defaultWriteIndexes} = require('./indexer.cjs');
 
 const CASE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -101,4 +103,60 @@ function importRealCase(repoRoot, options) {
   }
 }
 
-module.exports = {importRealCase};
+function promoteRealCase(repoRoot, options) {
+  if (!CASE_ID_PATTERN.test(String(options.id ?? ''))) {
+    throw new Error('case id must be lowercase kebab-case');
+  }
+  for (const field of ['license', 'consent']) {
+    if (typeof options[field] !== 'string' || options[field].trim() === '') {
+      throw new Error(`${field} must be a non-empty string`);
+    }
+  }
+  for (const [field, value] of [
+    ['privacyReview', options.privacyReview],
+    ['sanitizationReview', options.sanitizationReview],
+  ]) {
+    if (!['approved', 'not-applicable'].includes(value)) {
+      throw new Error(`${field} must be approved or not-applicable`);
+    }
+  }
+
+  const privateDir = path.join(repoRoot, 'Trace', 'real', '.private', options.id);
+  const publicDir = path.join(repoRoot, 'Trace', 'real', options.id);
+  const manifestPath = path.join(privateDir, 'case.json');
+  requireFile(manifestPath, 'private case manifest');
+  if (fs.existsSync(publicDir)) throw new Error(`public case already exists: ${options.id}`);
+
+  const originalManifestText = fs.readFileSync(manifestPath, 'utf8');
+  const manifest = JSON.parse(originalManifestText);
+  if (manifest.id !== options.id || manifest.kind !== 'real' || manifest.source?.publication !== 'private') {
+    throw new Error(`case ${options.id} is not a private real-case draft`);
+  }
+  manifest.source = {
+    ...manifest.source,
+    license: options.license,
+    consent: options.consent,
+    privacy_review: options.privacyReview,
+    sanitization_review: options.sanitizationReview,
+    publication: 'public',
+  };
+
+  const validateCatalog = options.validateCatalog ?? defaultValidateCatalog;
+  const writeIndexes = options.writeIndexes ?? defaultWriteIndexes;
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  fs.renameSync(privateDir, publicDir);
+  try {
+    const validation = validateCatalog(repoRoot);
+    if (!validation.ok) {
+      throw new Error(validation.issues.map((item) => item.message).join('; ') || 'catalog validation failed');
+    }
+    writeIndexes(repoRoot);
+    return {caseDir: publicDir, manifest};
+  } catch (error) {
+    fs.renameSync(publicDir, privateDir);
+    fs.writeFileSync(path.join(privateDir, 'case.json'), originalManifestText);
+    throw error;
+  }
+}
+
+module.exports = {importRealCase, promoteRealCase};

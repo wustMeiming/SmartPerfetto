@@ -79,6 +79,16 @@
         "logs": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
       }
     },
+    "trace_probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_ns", "end_ns", "process_count_hint"],
+      "properties": {
+        "start_ns": {"type": "string", "pattern": "^[0-9]+$"},
+        "end_ns": {"type": "string", "pattern": "^[0-9]+$"},
+        "process_count_hint": {"type": "integer", "minimum": 0}
+      }
+    },
     "construction": {
       "type": "object",
       "required": ["base_case_id", "scenario_file", "generator_version", "seed", "output"],
@@ -104,7 +114,11 @@
             "properties": {
               "id": {"type": "string", "minLength": 1},
               "type": {"enum": ["skill", "strategy", "sql"]},
-              "target": {"type": "string", "minLength": 1}
+              "target": {"type": "string", "minLength": 1},
+              "mode": {"enum": ["semantic", "graceful_empty", "unavailable", "definition"]},
+              "semantic_step": {"type": ["string", "null"]},
+              "limitation_reason": {"type": "string", "minLength": 1},
+              "expected_error": {"type": "string", "minLength": 1}
             }
           }
         }

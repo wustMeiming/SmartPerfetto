@@ -22,12 +22,13 @@ import { buildQuickTraceFactDirectAnswer } from '../quickTraceFactDirectAnswer';
 import type { DataEnvelope } from '../../types/dataContract';
 import { runClaimVerification } from '../../services/verifier/claimVerificationRunner';
 import { getTraceProcessorPath } from '../../services/workingTraceProcessor';
+import { resolveTraceCase } from '../../utils/traceCorpus';
 
 type QueryTrace = QuickTraceFactEvidenceInput['traceProcessor']['query'];
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(__dirname, '../../../..');
-const launchLightTracePath = path.join(repoRoot, 'test-traces', 'launch_light.pftrace');
+const launchLightTracePath = resolveTraceCase('launch_light.pftrace', repoRoot);
 const traceProcessorPath = getTraceProcessorPath();
 const itWithLaunchLightTraceProcessor = fs.existsSync(traceProcessorPath) && fs.existsSync(launchLightTracePath)
   ? it

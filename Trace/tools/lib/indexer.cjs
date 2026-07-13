@@ -45,6 +45,13 @@ function markdownTable(cases, kind, directoryPrefix = '') {
 function renderRootReadme(catalog) {
   const real = catalog.cases.filter((entry) => entry.kind === 'real');
   const constructed = catalog.cases.filter((entry) => entry.kind === 'constructed');
+  const modes = constructed
+    .flatMap((entry) => entry.coverage?.expectations ?? [])
+    .filter((expectation) => expectation.type === 'skill')
+    .reduce((counts, expectation) => {
+      counts[expectation.mode] = (counts[expectation.mode] ?? 0) + 1;
+      return counts;
+    }, {});
   return `${GENERATED_BANNER}
 # SmartPerfetto Trace Corpus
 
@@ -54,6 +61,30 @@ This directory is the source-controlled trace test and reference corpus.
 - [Constructed trace cases](./constructed/README.md): ${constructed.length}
 - [Machine-readable catalog](./catalog.json)
 - [Skill and Strategy coverage](./coverage.json)
+
+Skill execution quality: ${modes.semantic ?? 0} semantic, ${modes.graceful_empty ?? 0} explicit graceful-empty, ${modes.unavailable ?? 0} explicit unavailable prerequisite, ${modes.definition ?? 0} definition-only.
+
+## Commands
+
+\`npm run trace:validate\` checks manifests, hashes, generated indexes, publication gates, legacy path coupling, and exact current Skill/Strategy inventory coverage.
+
+\`npm run trace:build\` deterministically materializes every base-plus-overlay case under ignored \`Trace/.generated/\` and reparses it with the pinned trace processor.
+
+\`npm run trace:regression\` validates, builds, and executes the complete deterministic corpus. Per-case evidence is written below \`Trace/.generated/constructed/<case-id>/\`.
+
+## Add a real case
+
+Stage a capture privately first; repeat \`--result\`, \`--log\`, and \`--tag\` as needed:
+
+\`node Trace/tools/trace-corpus.cjs import-real --id typical-startup --title "Typical startup" --description "Representative cold start" --scene startup --trace /path/to/trace.pftrace --origin "maintainer capture" --result /path/to/result.json --log /path/to/session.log --android-release 16 --api-level 36 --device "Pixel"\`
+
+The command copies evidence atomically into ignored \`Trace/real/.private/<id>/\`. Review the trace and manifest before publication. Promotion requires explicit approvals and rolls back if catalog validation fails:
+
+\`node Trace/tools/trace-corpus.cjs promote-real typical-startup --license CC-BY-4.0 --consent owner-approved --privacy-review approved --sanitization-review approved\`
+
+## Extend constructed cases
+
+Constructed cases keep source scenarios and overlay protobufs in Git; combined traces are generated. Copy [the scenario template](./constructed/_templates/scenario.example.json), declare Android compatibility in \`case.json\`, assign each target explicitly, then run \`npm run trace:regression\`. Adding a Skill or Strategy without a current expectation fails validation. Use separate case ids with non-overlapping API ranges when Android behavior differs.
 
 ## Real cases
 
