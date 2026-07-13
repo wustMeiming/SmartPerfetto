@@ -36,8 +36,8 @@ fixtures:
     kernel: 6.6.56-android15-8-g1b3a8e682e47-ab101-4k
     capture_config: embedded_in_trace
     assertions:
-      - {query_id: rendering_pipeline_detection/thread_signals, kind: field_positive, field: flutter_ui_count, params: {package: com.example.friendscircle.v27.textureview}}
-      - {query_id: rendering_pipeline_detection/slice_signals, kind: field_positive, field: texture_view_count, params: {package: com.example.friendscircle.v27.textureview}}
+      - {query_id: rendering_pipeline_detection/active_rendering_processes, kind: field_positive, field: frame_count, params: {package: com.example.friendscircle.v27.textureview}}
+      - {query_id: rendering_pipeline_detection/bufferqueue_path_signals, kind: field_positive, field: update_tex_image_count, params: {package: com.example.friendscircle.v27.textureview}}
   - id: smart-flutter-surface-api35
     source: test-traces/Scroll-Flutter-SurfaceView-Wechat-Wenyiwen.pftrace
     sha256: e876c56b5d7290acda596e73929c1a127df4255e9ca6951605dad40833e67a53

@@ -23,6 +23,11 @@ const DEFAULT_CATALOG = join(REPO_ROOT, 'backend/skills/pipelines/index.yaml');
 const DEFAULT_DOCS = join(REPO_ROOT, 'docs/rendering_pipelines');
 const DEFAULT_PIPELINES = join(REPO_ROOT, 'backend/skills/pipelines');
 const DEFAULT_PUBLIC_EXPORT = join(REPO_ROOT, 'backend/skills/public-export.yaml');
+const DEFAULT_PUBLIC_FIXTURES = join(REPO_ROOT, 'backend/skills/public-fixtures.yaml');
+const DEFAULT_DETECTOR = join(
+  REPO_ROOT,
+  'backend/skills/atomic/rendering_pipeline_detection.skill.yaml',
+);
 const ARCHITECTURE_TYPES = new Set([
   'STANDARD',
   'FLUTTER',
@@ -103,6 +108,24 @@ export function validatePublicExport(publicExport, catalog) {
   }
 }
 
+export function validateRenderingFixtureQueries(publicFixtures, detector) {
+  const detectorName = detector?.name;
+  const stepIds = new Set((detector?.steps || []).map((step) => step?.id).filter(Boolean));
+  if (detectorName !== 'rendering_pipeline_detection' || stepIds.size === 0) {
+    throw new Error('Rendering detector must define named steps');
+  }
+  for (const fixture of publicFixtures?.fixtures || []) {
+    for (const assertion of fixture?.assertions || []) {
+      const queryId = assertion?.query_id;
+      if (typeof queryId !== 'string' || !queryId.startsWith(`${detectorName}/`)) continue;
+      const stepId = queryId.slice(detectorName.length + 1);
+      if (!stepIds.has(stepId)) {
+        throw new Error(`${queryId}: unknown detector step`);
+      }
+    }
+  }
+}
+
 const SUPERSEDED_TEXT = [
   { pattern: /\bPhase E\b/, label: 'Phase E roadmap claim' },
   { pattern: /(?:24|17)\s*(?:个|种)\s*类型/, label: 'superseded rendering-type count' },
@@ -161,6 +184,10 @@ function activeReferenceFiles() {
 function validateRepositoryReferences(catalog) {
   const publicExport = yaml.load(readFileSync(DEFAULT_PUBLIC_EXPORT, 'utf8'));
   validatePublicExport(publicExport, catalog);
+  validateRenderingFixtureQueries(
+    yaml.load(readFileSync(DEFAULT_PUBLIC_FIXTURES, 'utf8')),
+    yaml.load(readFileSync(DEFAULT_DETECTOR, 'utf8')),
+  );
   const failures = findStaleRenderingReferences({
     catalog,
     files: activeReferenceFiles(),

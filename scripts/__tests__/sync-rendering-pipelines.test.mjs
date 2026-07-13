@@ -18,6 +18,7 @@ import {
   checkSynchronizedState,
   findStaleRenderingReferences,
   validatePublicExport,
+  validateRenderingFixtureQueries,
   validateSource,
 } from '../sync-rendering-pipelines.mjs';
 
@@ -221,4 +222,29 @@ test('public export must contain exactly the pinned catalog documents', () => {
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
+});
+
+test('public rendering fixture assertions reference detector steps that still exist', () => {
+  const detector = {
+    name: 'rendering_pipeline_detection',
+    steps: [
+      { id: 'active_rendering_processes' },
+      { id: 'bufferqueue_path_signals' },
+    ],
+  };
+  const fixtures = {
+    fixtures: [{
+      assertions: [{
+        query_id: 'rendering_pipeline_detection/active_rendering_processes',
+      }],
+    }],
+  };
+
+  assert.doesNotThrow(() => validateRenderingFixtureQueries(fixtures, detector));
+  fixtures.fixtures[0].assertions[0].query_id =
+    'rendering_pipeline_detection/thread_signals';
+  assert.throws(
+    () => validateRenderingFixtureQueries(fixtures, detector),
+    /thread_signals.*unknown detector step/,
+  );
 });
