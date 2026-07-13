@@ -33,6 +33,10 @@ test('Docker and portable packages consume the built backend runtime tree', () =
   const portableScript = readFileSync(join(root, 'scripts/package-portable.sh'), 'utf8');
   assert.match(
     dockerfile,
+    /COPY docs\/rendering_pipelines \/app\/docs\/rendering_pipelines/,
+  );
+  assert.match(
+    dockerfile,
     /COPY --from=backend-builder \/app\/backend\/dist \.\/backend\/dist/,
   );
   assert.match(
