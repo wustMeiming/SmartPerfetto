@@ -16,6 +16,10 @@ import { validateSkillInputs } from '../../src/services/skillEngine/skillValidat
 import yaml from 'js-yaml';
 import fs from 'fs';
 
+const traceCaseCatalog = require('../../../Trace/tools/lib/catalog.cjs') as {
+  resolveCaseTrace(repoRoot: string, selector: string): string;
+};
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -77,7 +81,7 @@ export class SkillEvaluator {
 
   /**
    * 加载 trace 文件
-   * @param tracePath 相对于项目根目录的路径，如 'test-traces/scrolling.pftrace'
+ * @param tracePath Trace catalog 解析出的绝对路径，或相对于项目根目录的路径
    */
   async loadTrace(tracePath: string): Promise<void> {
     const absolutePath = path.resolve(process.cwd(), '..', tracePath);
@@ -671,7 +675,7 @@ export function createSkillEvaluator(skillId: string): SkillEvaluator {
  * 获取测试 trace 文件路径
  */
 export function getTestTracePath(traceName: string): string {
-  return path.join('test-traces', traceName);
+  return traceCaseCatalog.resolveCaseTrace(path.resolve(process.cwd(), '..'), traceName);
 }
 
 /**
@@ -682,7 +686,7 @@ export function getTestTracePath(traceName: string): string {
  * while still exercising the suite when fixtures are available.
  *
  * Mirrors `loadTrace`'s path semantics: jest runs from backend/, traces live in
- * <repo-root>/test-traces, so we resolve relative to cwd then '..'.
+ * Trace catalog paths are absolute; path.resolve keeps them unchanged.
  */
 export function describeWithTrace(
   suiteName: string,

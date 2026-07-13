@@ -31,6 +31,7 @@ function createFixture() {
 
   fs.mkdirSync(path.join(repoRoot, 'backend/skills/atomic'), {recursive: true});
   fs.mkdirSync(path.join(repoRoot, 'backend/skills/_template'), {recursive: true});
+  fs.mkdirSync(path.join(repoRoot, 'backend/skills/pipelines'), {recursive: true});
   fs.mkdirSync(path.join(repoRoot, 'backend/strategies'), {recursive: true});
   fs.writeFileSync(
     path.join(repoRoot, 'backend/skills/atomic/cpu_probe.skill.yaml'),
@@ -39,6 +40,10 @@ function createFixture() {
   fs.writeFileSync(
     path.join(repoRoot, 'backend/skills/_template/ignored.skill.yaml'),
     'name: "{{SKILL_ID}}"\n',
+  );
+  fs.writeFileSync(
+    path.join(repoRoot, 'backend/skills/pipelines/_base.skill.yaml'),
+    'name: "${PIPELINE_ID}"\n',
   );
   fs.writeFileSync(
     path.join(repoRoot, 'backend/strategies/startup.strategy.md'),
@@ -203,4 +208,36 @@ test('reports missing, stale, and expectation-free coverage targets', () => {
   assert.deepEqual(validation.coverage.missing.skills, ['cpu_probe']);
   assert.deepEqual(validation.coverage.stale.skills, ['removed_skill']);
   assert.ok(validation.issues.some((issue) => issue.code === 'coverage-without-expectation'));
+});
+
+test('repository catalog preserves all six legacy trace fixtures and FPS reports', () => {
+  const repoRoot = path.resolve(__dirname, '../../..');
+  const expected = new Map([
+    ['launch_light.pftrace', 'android-startup-light'],
+    ['lacunh_heavy.pftrace', 'android-startup-heavy'],
+    ['scroll_Standard-AOSP-App-Without-PreAnimation.pftrace', 'android-scroll-standard'],
+    ['scroll-demo-customer-scroll.pftrace', 'android-scroll-customer'],
+    ['Scroll-Flutter-327-TextureView.pftrace', 'flutter-scroll-texture-view'],
+    ['Scroll-Flutter-SurfaceView-Wechat-Wenyiwen.pftrace', 'flutter-scroll-surface-view'],
+  ]);
+  const catalog = loadCatalog(repoRoot);
+
+  assert.equal(catalog.cases.filter((entry) => entry.kind === 'real').length, 6);
+  for (const [legacyName, caseId] of expected) {
+    const entry = catalog.cases.find((candidate) => candidate.id === caseId);
+    assert.ok(entry, `missing real case ${caseId}`);
+    assert.ok(entry.aliases.includes(legacyName));
+    assert.equal(resolveCaseTrace(repoRoot, legacyName), path.join(entry.case_dir, 'trace.pftrace'));
+    assert.equal(entry.analysis.results.length, 1);
+    assert.match(entry.analysis.results[0], /fps_report\.txt$/);
+    assert.deepEqual(entry.analysis.logs, []);
+  }
+});
+
+test('repository ignores private imports and materialized constructed traces', () => {
+  const repoRoot = path.resolve(__dirname, '../../..');
+  const gitignore = fs.readFileSync(path.join(repoRoot, '.gitignore'), 'utf8');
+
+  assert.match(gitignore, /^\/Trace\/real\/\.private\/$/m);
+  assert.match(gitignore, /^\/Trace\/\.generated\/$/m);
 });

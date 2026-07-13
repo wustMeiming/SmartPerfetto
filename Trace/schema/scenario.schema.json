@@ -4,7 +4,7 @@
   "title": "SmartPerfetto Constructed Trace Scenario",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "clock", "signals"],
+  "required": ["schema_version", "clock", "actors", "signals"],
   "properties": {
     "schema_version": {"const": 1},
     "clock": {
@@ -16,6 +16,39 @@
         "duration_ns": {"type": "string", "pattern": "^[1-9][0-9]*$"}
       }
     },
+    "actors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["processes", "threads"],
+      "properties": {
+        "processes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "name": {"type": "string", "minLength": 1},
+              "uid": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        "threads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "process", "name"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "process": {"type": "string", "minLength": 1},
+              "name": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
     "signals": {
       "type": "array",
       "items": {
@@ -24,7 +57,13 @@
         "properties": {
           "type": {"type": "string", "minLength": 1},
           "at_ns": {"type": "string", "pattern": "^[0-9]+$"},
-          "duration_ns": {"type": "string", "pattern": "^[0-9]+$"}
+          "duration_ns": {"type": "string", "pattern": "^[0-9]+$"},
+          "process": {"type": "string"},
+          "thread": {"type": "string"},
+          "name": {"type": "string"},
+          "value": {"type": "number"},
+          "cpu": {"type": "integer", "minimum": 0},
+          "end_state": {"enum": ["R", "S", "D"]}
         }
       }
     }

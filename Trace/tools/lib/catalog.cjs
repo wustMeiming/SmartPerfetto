@@ -37,10 +37,13 @@ function discoverCoverageTargets(repoRoot) {
   const strategiesRoot = path.join(repoRoot, 'backend', 'strategies');
   const skills = listFilesRecursive(
     skillsRoot,
-    (filePath) => filePath.endsWith('.skill.yaml') && !filePath.split(path.sep).includes('_template'),
+    (filePath) =>
+      filePath.endsWith('.skill.yaml') &&
+      !filePath.split(path.sep).includes('_template') &&
+      !path.basename(filePath).startsWith('_'),
   ).map((filePath) => {
     const name = parseScalarField(fs.readFileSync(filePath, 'utf8'), 'name');
-    if (!name || name.includes('{{')) {
+    if (!name || name.includes('{{') || name.includes('${')) {
       throw new Error(`Skill has no concrete name: ${path.relative(repoRoot, filePath)}`);
     }
     return name;
@@ -64,7 +67,12 @@ function discoverCoverageTargets(repoRoot) {
 function caseManifestPaths(repoRoot) {
   const traceRoot = path.join(repoRoot, 'Trace');
   return ['real', 'constructed'].flatMap((kind) =>
-    listFilesRecursive(path.join(traceRoot, kind), (filePath) => path.basename(filePath) === 'case.json'),
+    listFilesRecursive(
+      path.join(traceRoot, kind),
+      (filePath) =>
+        path.basename(filePath) === 'case.json' &&
+        !path.relative(traceRoot, filePath).split(path.sep).includes('.private'),
+    ),
   );
 }
 

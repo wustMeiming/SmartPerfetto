@@ -14,6 +14,7 @@ const {
   materializeTrace,
   probeTrace,
 } = require('../lib/generator.cjs');
+const {resolveCaseTrace} = require('../lib/catalog.cjs');
 
 const repoRoot = path.resolve(__dirname, '../../..');
 const traceProcessor = path.join(
@@ -131,7 +132,7 @@ test('materialization is exact protobuf concatenation', () => {
 
 test('probes a real base and builds a combined trace inside its bounds', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-real-base-'));
-  const basePath = path.join(repoRoot, 'test-traces/launch_light.pftrace');
+  const basePath = resolveCaseTrace(repoRoot, 'android-startup-light');
   const scenarioPath = path.join(tempDir, 'scenario.json');
   const overlayPath = path.join(tempDir, 'trace.overlay.pftrace');
   const outputPath = path.join(tempDir, 'trace.pftrace');
