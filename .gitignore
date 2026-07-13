@@ -178,3 +178,4 @@ providers.json
 
 # Local E2E evidence (may contain Trace-derived data and machine paths)
 /output/
+.gstack/
