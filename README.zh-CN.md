@@ -20,6 +20,20 @@ Provider Base URL 注意事项：预置的 Claude/Anthropic-compatible 和 OpenA
 
 项目已经开源，当前处于活跃开发阶段。UI、后端运行时和 Skill 系统已经可用，但公开 API 和内部合约仍可能继续调整。
 
+## 如何选择 Perfetto 项目
+
+这三个项目互为补充。按自己的使用方式选择最小合适入口；它们彼此都不是安装或
+运行前置依赖。
+
+| 项目 | 形态 | 最适合 | 主要边界 | 适合选择它的情况 |
+|---|---|---|---|---|
+| [SmartPerfetto](https://github.com/Gracker/SmartPerfetto) | 完整 Web UI、CLI 和后端 | 端到端、交互式 Android 性能排查 | 托管 Skill 运行时、报告、会话、对比和 Provider 集成 | 希望直接使用完整分析产品 |
+| [Perfetto Skills](https://github.com/Gracker/Perfetto-Skills) | 可移植的标准 Agent Skill | 具备本地文件和终端能力的 Agent | 确定性本地 runner、证据契约和广泛分析工作流 | 希望在 Codex、Claude Code 或 OpenCode 中直接分析 Trace |
+| [Google 官方 Perfetto Skill](https://github.com/google/perfetto/tree/main/ai/skills/perfetto) | 官方上游 Agent Skill bundle | 上游优先的 Trace 录制与分析 | 官方录制、内存、GPU 和通用 PerfettoSQL 指引 | 希望使用最轻量、由上游直接维护的入口 |
+
+官方 Skill 的安装和发布方式见 Google 的
+[Perfetto AI 使用文档](https://perfetto.dev/docs/getting-started/using-ai)。
+
 ## 先配置 AI Provider
 
 SmartPerfetto 运行时只会使用一个 active 的模型 provider 来源。第一次配置时先选一种路径，不要混着配：

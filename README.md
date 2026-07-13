@@ -20,6 +20,20 @@ Provider Base URL notice: the prefilled Claude/Anthropic-compatible and OpenAI-c
 
 The project is open source and in active development. The UI, backend runtime, and skill system are usable today, but public APIs and internal contracts may still change.
 
+## Choose the right Perfetto project
+
+These projects are complementary. Pick the smallest surface that matches how
+you want to work; none is a prerequisite for another.
+
+| Project | Form | Best for | Main boundary | Choose it when |
+|---|---|---|---|---|
+| [SmartPerfetto](https://github.com/Gracker/SmartPerfetto) | Full Web UI, CLI, and backend | End-to-end interactive Android investigations | Managed Skill runtime, reports, sessions, comparisons, and provider integration | You want a complete analysis product |
+| [Perfetto Skills](https://github.com/Gracker/Perfetto-Skills) | Portable standard Agent Skill | Local agents with filesystem and terminal access | Deterministic local runner, evidence contracts, and broad analysis workflows | You want trace analysis inside Codex, Claude Code, or OpenCode |
+| [Google official Perfetto Skill](https://github.com/google/perfetto/tree/main/ai/skills/perfetto) | Official upstream Agent Skill bundle | Upstream-first trace recording and analysis | Official recording, memory, GPU, and ad-hoc PerfettoSQL guidance | You want the smallest upstream-maintained starting point |
+
+See Google's [official Perfetto AI usage guide](https://perfetto.dev/docs/getting-started/using-ai)
+for the upstream Skill installation and release model.
+
 ## Configure Your AI Provider First
 
 SmartPerfetto uses exactly one active model-provider source at runtime. Pick one path and avoid mixing them during first setup:
