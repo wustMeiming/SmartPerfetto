@@ -186,3 +186,18 @@ test('repository rules expose the impact gate and decision states', () => {
     assert.match(agents, new RegExp(token));
   }
 });
+
+test('public Skill verification checks the pinned imported snapshot', () => {
+  const script = readFileSync(
+    new URL('../verify-public-skill-export.sh', import.meta.url),
+    'utf8',
+  );
+  assert.match(script, /tools\/sync_smartperfetto\.py/);
+  assert.match(script, /tools\/validate_catalog\.py/);
+  assert.match(script, /--check/);
+  assert.doesNotMatch(script, /tools\/export_from_smartperfetto\.py/);
+  assert.ok(
+    script.indexOf('python3 "$SYNC_CHECKER"') <
+      script.indexOf('python3 "$VALIDATOR"'),
+  );
+});
