@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smartperfetto.dev/schemas/trace-scenario-v1.json",
+  "title": "SmartPerfetto Constructed Trace Scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "clock", "signals"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anchor", "duration_ns"],
+      "properties": {
+        "anchor": {"enum": ["trace-start", "trace-middle", "trace-end"]},
+        "duration_ns": {"type": "string", "pattern": "^[1-9][0-9]*$"}
+      }
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "at_ns"],
+        "properties": {
+          "type": {"type": "string", "minLength": 1},
+          "at_ns": {"type": "string", "pattern": "^[0-9]+$"},
+          "duration_ns": {"type": "string", "pattern": "^[0-9]+$"}
+        }
+      }
+    }
+  }
+}
