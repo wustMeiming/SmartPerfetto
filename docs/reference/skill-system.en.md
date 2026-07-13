@@ -22,7 +22,7 @@ Directory roles:
 | Composite | `backend/skills/composite/` | Multi-step orchestration |
 | Comparison | `backend/skills/comparison/` | Multi-trace or multi-result comparison Skills |
 | Deep | `backend/skills/deep/` | Deep analysis such as CPU profiling |
-| Pipeline | `backend/skills/pipelines/` | Rendering pipeline detection and teaching content |
+| Pipeline | `backend/skills/pipelines/` | Rendering subpath detection, supporting feature evidence, and teaching-source references |
 | Module | `backend/skills/modules/` | Modular app/framework/hardware/kernel analysis |
 | Template | `backend/skills/_template/` | Authoring templates, not necessarily runtime analysis capability |
 
@@ -80,6 +80,22 @@ steps:
 | `conditional` | Branch by expression |
 | `diagnostic` | Emit rule-based findings |
 | `pipeline` | Detect or describe rendering pipeline behavior |
+
+## Rendering Pipeline Catalog
+
+`docs/rendering_pipelines/S01-S14*.md` is synchronized from a pinned
+`Gracker/rendering_pipelines` commit and is the Android 17 teaching source of
+truth. `backend/skills/pipelines/index.yaml` maps 13 concrete rendering types to
+31 detector entries. A `variant` may become the primary type; a `feature` only
+adds evidence such as ANGLE, PIP, HWC overlay, or SurfaceControl usage.
+
+Pipeline definitions retain trace signals, auto-pin guidance, and analysis
+recommendations, but their `teaching` block contains only a `source` reference
+to one of the synchronized documents. Builds copy all catalog documents into
+`backend/dist/rendering_pipelines/` for Docker, portable, and npm CLI runtime
+paths. Use `npm run sync:rendering-pipelines -- --source <checkout> --apply` to
+update the import and `npm run check:rendering-pipelines` to verify the pin,
+hashes, and references.
 
 ## Parameter Substitution
 

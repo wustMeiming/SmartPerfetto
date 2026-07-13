@@ -1462,99 +1462,45 @@ strategies:
     disposition: exported
     destination: references/generated/strategies/verifier-misdiagnosis.strategy.md
 pipeline_docs:
-  docs/rendering_pipelines/android_pip_freeform.md:
+  docs/rendering_pipelines/S01_rendering_types_overview.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/android_pip_freeform.md
-  docs/rendering_pipelines/android_view_mixed.md:
+    destination: references/generated/pipelines/docs/S01_rendering_types_overview.md
+  docs/rendering_pipelines/S02_aosp_standard_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/android_view_mixed.md
-  docs/rendering_pipelines/android_view_multi_window.md:
+    destination: references/generated/pipelines/docs/S02_aosp_standard_type.md
+  docs/rendering_pipelines/S03_surfaceview_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/android_view_multi_window.md
-  docs/rendering_pipelines/android_view_software.md:
+    destination: references/generated/pipelines/docs/S03_surfaceview_type.md
+  docs/rendering_pipelines/S04_textureview_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/android_view_software.md
-  docs/rendering_pipelines/android_view_standard.md:
+    destination: references/generated/pipelines/docs/S04_textureview_type.md
+  docs/rendering_pipelines/S05_mixed_rendering_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/android_view_standard.md
-  docs/rendering_pipelines/angle_gles_vulkan.md:
+    destination: references/generated/pipelines/docs/S05_mixed_rendering_type.md
+  docs/rendering_pipelines/S06_multi_window_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/angle_gles_vulkan.md
-  docs/rendering_pipelines/camera_pipeline.md:
+    destination: references/generated/pipelines/docs/S06_multi_window_type.md
+  docs/rendering_pipelines/S07_software_offscreen_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/camera_pipeline.md
-  docs/rendering_pipelines/chrome_browser_viz.md:
+    destination: references/generated/pipelines/docs/S07_software_offscreen_type.md
+  docs/rendering_pipelines/S08_native_graphics_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/chrome_browser_viz.md
-  docs/rendering_pipelines/compose_standard.md:
+    destination: references/generated/pipelines/docs/S08_native_graphics_type.md
+  docs/rendering_pipelines/S09_webview_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/compose_standard.md
-  docs/rendering_pipelines/flutter_architecture.md:
+    destination: references/generated/pipelines/docs/S09_webview_type.md
+  docs/rendering_pipelines/S10_flutter_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/flutter_architecture.md
-  docs/rendering_pipelines/flutter_surfaceview.md:
+    destination: references/generated/pipelines/docs/S10_flutter_type.md
+  docs/rendering_pipelines/S11_camera_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/flutter_surfaceview.md
-  docs/rendering_pipelines/flutter_textureview.md:
+    destination: references/generated/pipelines/docs/S11_camera_type.md
+  docs/rendering_pipelines/S12_video_overlay_hwc_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/flutter_textureview.md
-  docs/rendering_pipelines/game_engine.md:
+    destination: references/generated/pipelines/docs/S12_video_overlay_hwc_type.md
+  docs/rendering_pipelines/S13_game_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/game_engine.md
-  docs/rendering_pipelines/hardware_buffer_renderer.md:
+    destination: references/generated/pipelines/docs/S13_game_type.md
+  docs/rendering_pipelines/S14_react_native_type.md:
     disposition: exported
-    destination: references/generated/pipelines/docs/hardware_buffer_renderer.md
-  docs/rendering_pipelines/imagereader_pipeline.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/imagereader_pipeline.md
-  docs/rendering_pipelines/index.en.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/index.en.md
-  docs/rendering_pipelines/index.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/index.md
-  docs/rendering_pipelines/opengl_es.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/opengl_es.md
-  docs/rendering_pipelines/rn_new_arch.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/rn_new_arch.md
-  docs/rendering_pipelines/rn_old_arch.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/rn_old_arch.md
-  docs/rendering_pipelines/rn_skia.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/rn_skia.md
-  docs/rendering_pipelines/software_compositing.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/software_compositing.md
-  docs/rendering_pipelines/surface_control_api.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/surface_control_api.md
-  docs/rendering_pipelines/surfaceview.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/surfaceview.md
-  docs/rendering_pipelines/textureview.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/textureview.md
-  docs/rendering_pipelines/variable_refresh_rate.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/variable_refresh_rate.md
-  docs/rendering_pipelines/video_overlay_hwc.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/video_overlay_hwc.md
-  docs/rendering_pipelines/vulkan_native.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/vulkan_native.md
-  docs/rendering_pipelines/webview_gl_functor.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/webview_gl_functor.md
-  docs/rendering_pipelines/webview_surface_control.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/webview_surface_control.md
-  docs/rendering_pipelines/webview_surfaceview_wrapper.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/webview_surfaceview_wrapper.md
-  docs/rendering_pipelines/webview_textureview_custom.md:
-    disposition: exported
-    destination: references/generated/pipelines/docs/webview_textureview_custom.md
+    destination: references/generated/pipelines/docs/S14_react_native_type.md

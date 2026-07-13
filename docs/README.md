@@ -57,13 +57,15 @@ docs/
 
 - `backend/skills/pipelines/*.skill.yaml`
 - `backend/skills/atomic/rendering_pipeline_detection.skill.yaml`
-- `backend/src/services/pipelineDocService.ts`
-- `backend/src/config/teaching.config.ts`
+- `backend/skills/pipelines/index.yaml`
+
+这里的 S01-S14 是从固定 commit 同步的 Android 17 权威内容，禁止手工修改。
+更新时运行 `npm run sync:rendering-pipelines -- --source <checkout> --apply`；构建会把
+目录复制到 `backend/dist/rendering_pipelines/`，供所有发布形态读取。
 
 改动后至少运行：
 
 ```bash
-cd backend
-npm run validate:skills
-npm run test:scene-trace-regression
+npm run check:rendering-pipelines
+cd backend && npm run validate:skills
 ```

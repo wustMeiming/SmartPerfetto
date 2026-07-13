@@ -144,9 +144,15 @@ SmartPerfetto 有两类“内容”：
 |---|---|---|
 | Strategy / Prompt template | `backend/strategies/*.strategy.md`, `*.template.md` | 进入系统 Prompt，约束 agent 思考方式 |
 | YAML Skill | `backend/skills/**/*.skill.yaml` | 被 MCP `invoke_skill` 调用，确定性执行 SQL 分析 |
-| Rendering pipeline docs | `docs/rendering_pipelines/*.md` | 教学模式和管线结果的知识来源 |
+| Rendering pipeline catalog | `backend/skills/pipelines/index.yaml` | 固定上游 commit、14 篇文档哈希，并把 31 个检测条目区分为主类型 variant 或附加 feature |
+| Rendering pipeline docs | `docs/rendering_pipelines/S01-S14*.md` | 从 `Gracker/rendering_pipelines` 同步的 Android 17 权威教学来源；构建时复制到 `backend/dist/rendering_pipelines/` |
 | 普通 docs | `docs/` 其他目录 | 面向用户和贡献者 |
 
 不要在 TypeScript 中硬编码 Prompt 内容。TypeScript 只负责加载、变量替换和结构性编排。
 不要在文档或代码中写死 MCP 工具总数、Skill 总数或 scene 总数；这些分别由
 tool registry、`backend/skills/` 文件树和 strategy frontmatter 决定。
+
+渲染管线输出需要同时保留两层身份：S02-S14 的 `rendering type` 是教学主类型，
+31 个 pipeline 条目是 trace 检测子路径或 feature。只有 catalog 中
+`classification_role: variant` 且 `primary_eligible: true` 的条目能成为主判定；
+同步、哈希和引用完整性由 `npm run check:rendering-pipelines` 校验。

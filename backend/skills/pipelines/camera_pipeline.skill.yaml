@@ -20,7 +20,7 @@ meta:
   description: "Camera2/HAL3 多流相机渲染"
   icon: "camera"
   family: specialized
-  doc_path: "rendering_pipelines/camera_pipeline.md"
+  doc_path: rendering_pipelines/S11_camera_type.md
   # ----- Article-grounded signature (S11) -----
   s_article_ref: "S11"
   four_features:
@@ -40,7 +40,7 @@ meta:
     - CAMERA_PREVIEW_TEXTUREVIEW（预览回宿主 TV，宿主采样路径）
     - CAMERA_IMAGEANALYSIS_READER（分析路径 ImageReader）
     - CAMERA_VIDEORECORD_SURFACE（录像 Surface）
-    Phase E 拆分独立 ID。当前 ID 一并覆盖。
+    当前 variant 对应 S11；预览、分析与录像作为同一类型下的检测子路径一并输出。
   multi_output_back_pressure: |
     Camera 多路输出（preview/analysis/record）可能共享硬件与 buffer 资源。
     只有存在 buffer ownership、acquire/release 或 fence 等证据时，才能把某一路消费慢报告为
@@ -62,71 +62,7 @@ detection:
       weight: 30
 
 teaching:
-  title: "相机渲染管线"
-  summary: |
-    Camera2 API 和 HAL3 相机架构，支持多流同时处理（预览、拍照、录像）。
-    Request 按序提交，但可有多个 request 同时 in-flight；每个 request 可产生 partial metadata
-    和一个或多个输出 buffer。`onOpened` 只证明设备打开完成，不证明首个 result、buffer 或预览呈现。
-    首帧需要稳定的 session/camera identity，以及明确的 request/result/buffer/presentation 锚点；
-    vendor slice-name inventory 只能作为 candidate，不能单独证明首帧。首帧到达时 3A 仍可能搜索，
-    有 trace 证据时应单独报告 3A 状态。`prepare()` 是 buffer 预分配取舍，可能推迟首次输出并增加内存，
-    不是通用首帧修复。ZSL 行为和 buffer topology 取决于 capability、实现与 App 配置。
-    ImageReader backpressure 只有在 buffer ownership/acquire-release 证据存在时才是受支持的假设；
-    PSS/RSS 增长本身不足以判定泄漏。Pixel `pixel.camera` 解析只是可选 vendor fast path，
-    不是可移植的 Android Camera contract。Camera trace 可见性强依赖设备、OEM 和启用的数据源。
-
-  mermaid: |
-    sequenceDiagram
-      participant App as App
-      participant Cam as CameraService
-      participant HAL as Camera HAL
-      participant ISP as ISP/GPU
-      participant BQ as BufferQueue
-      participant VS as VSync-sf
-      participant SF as SurfaceFlinger
-
-      Note over App,SF: 📍 Camera2/HAL3 渲染链路
-      App->>Cam: createCaptureSession
-      App->>Cam: setRepeatingRequest
-
-      activate HAL
-      HAL->>ISP: 配置图像处理流水线
-      loop 每帧
-        HAL->>HAL: 捕获 Bayer 数据
-        HAL->>ISP: 3A + ISP 处理
-        ISP->>BQ: 输出到 Surface
-      end
-      deactivate HAL
-
-      VS->>SF: 🔔 VSync-sf
-      activate SF
-      SF->>SF: latchBuffer
-      SF->>SF: HWC Composite
-      deactivate SF
-
-      Note over App,SF: 📷 支持预览/录制/拍照多路输出
-  thread_roles:
-    - thread: Camera
-      role: "相机服务"
-      description: "Camera2 API 和相机服务（线程名 / slice 名依设备而异）"
-    - thread: CaptureSession
-      role: "采集会话"
-      description: "相机采集会话管理"
-
-  key_slices:
-    - name: "Camera"
-      thread: any
-      description: "相机相关操作候选（vendor 名称不能单独证明 request/result/buffer 阶段）"
-    - name: "CaptureSession"
-      thread: any
-      description: "采集会话活动候选（名称与可见性依版本 / OEM 变化）"
-    - name: "createCaptureSession"
-      thread: any
-      description: "创建采集会话候选（常见于启动/切换摄像头/重配流）"
-    - name: "setRepeatingRequest"
-      thread: any
-      description: "预览/录制重复 request activity candidate（不能据此推断 sensor trigger）"
-
+  source: "rendering_pipelines/S11_camera_type.md"
 auto_pin:
   instructions:
     # Time-ordered pinning (production -> transfer -> consume -> display)

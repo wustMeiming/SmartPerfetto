@@ -4044,17 +4044,23 @@ describe('SkillExecutor - Pipeline Step', () => {
       .mockResolvedValueOnce({
         columns: [
           'primary_pipeline_id',
+          'primary_rendering_type_id',
           'primary_confidence',
           'candidates_list',
+          'rendering_type_candidates_list',
+          'related_rendering_type_candidates_list',
           'features_list',
           'doc_path',
         ],
         rows: [[
           'ANDROID_VIEW_STANDARD_BLAST',
+          'S02_AOSP_STANDARD',
           0.91,
           'ANDROID_VIEW_STANDARD_BLAST:0.91,ANDROID_VIEW_STANDARD_LEGACY:0.42',
+          'S02_AOSP_STANDARD:0.91',
+          'S06_MULTI_WINDOW:0.8',
           'SURFACE_CONTROL_API:0.8',
-          'rendering_pipelines/android_view_standard.md',
+          'rendering_pipelines/S02_aosp_standard_type.md',
         ]],
       })
       .mockResolvedValueOnce({
@@ -4110,6 +4116,12 @@ describe('SkillExecutor - Pipeline Step', () => {
     const bundle = result.rawResults?.pipeline_bundle?.data as any;
     expect(bundle).toBeDefined();
     expect(bundle.detection.primaryPipelineId).toBe('ANDROID_VIEW_STANDARD_BLAST');
+    expect(bundle.detection.primaryRenderingTypeId).toBe('S02_AOSP_STANDARD');
+    expect(bundle.detection.relatedRenderingTypes).toEqual([{
+      id: 'S06_MULTI_WINDOW',
+      confidence: 0.8,
+      docPath: 'rendering_pipelines/S06_multi_window_type.md',
+    }]);
     expect(bundle.detection.primaryConfidence).toBeGreaterThan(0.8);
     expect(bundle.detection.traceRequirementsMissing).toEqual(
       expect.arrayContaining(['gfx missing'])

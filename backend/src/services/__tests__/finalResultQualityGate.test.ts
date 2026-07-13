@@ -949,7 +949,7 @@ describe('final result quality gate', () => {
       '',
       '- queueBuffer 不等于上屏；它只证明 producer submission。',
       '- dequeueBuffer 等待更接近 release fence/backpressure。',
-      '- acquire fence 影响 SF latch，present fence 影响可见上屏，release fence 影响 producer 复用。',
+      '- acquire fence 影响 SF latch，present fence 只锚定显示栈提交边界、不证明用户实际看到，release fence 影响 producer 复用。',
       '- BLAST Transaction 到达和 SurfaceFlinger latch 是独立阶段，不能混用。',
       '',
       '## 图形内存/刷新策略边界',

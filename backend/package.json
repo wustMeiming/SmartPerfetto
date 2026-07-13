@@ -103,7 +103,8 @@
     "verify:e2e:openai-startup": "npm run verify:e2e:deepseek-startup",
     "generate:frontend-types": "tsx scripts/generateFrontendTypes.ts",
     "check:types": "tsx scripts/checkTypesSync.ts",
-    "types": "npm run generate:frontend-types"
+    "types": "npm run generate:frontend-types",
+    "generate:pipeline-detection": "tsx src/scripts/materializeRenderingPipelineDetectionSkill.ts"
   },
   "keywords": [
     "perfetto",

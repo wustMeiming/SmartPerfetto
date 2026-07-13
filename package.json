@@ -15,6 +15,9 @@
     "check:frontend-prebuild": "node scripts/check-frontend-prebuild.cjs",
     "test:node-env": "bash scripts/test-node-env.sh",
     "test:governance": "node --test scripts/__tests__/check-perfetto-skills-impact.test.mjs",
+    "sync:rendering-pipelines": "node scripts/sync-rendering-pipelines.mjs",
+    "check:rendering-pipelines": "node scripts/sync-rendering-pipelines.mjs --check",
+    "verify:rendering-pipelines": "npm run check:rendering-pipelines && node --test scripts/__tests__/sync-rendering-pipelines.test.mjs scripts/__tests__/rendering-pipeline-runtime-assets.test.mjs && npm --prefix backend run generate:pipeline-detection -- --check",
     "test:e2e:dual-trace": "node scripts/run-dual-trace-browser-e2e.cjs",
     "test:e2e:dual-trace-real": "node scripts/run-dual-trace-browser-e2e.cjs --real-provider",
     "rust:fmt": "cargo fmt --manifest-path rust/flamegraph-analyzer/Cargo.toml -- --check",
@@ -33,7 +36,7 @@
     "release:portable": "./scripts/release-portable.sh",
     "release:windows-exe": "./scripts/release-windows-exe.sh",
     "quality": "npm run lint && npm run format:check && npm run deadcode && npm run shellcheck",
-    "verify:pr": "npm run test:governance && npm run quality && npm run check:frontend-prebuild && npm run rust:verify && npm --prefix backend run verify:pr"
+    "verify:pr": "npm run test:governance && npm run verify:rendering-pipelines && npm run quality && npm run check:frontend-prebuild && npm run rust:verify && npm --prefix backend run verify:pr"
   },
   "engines": {
     "node": ">=24.0.0 <25.0.0"
@@ -43,6 +46,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",
+    "js-yaml": "^4.3.0",
     "knip": "^6.23.0"
   }
 }

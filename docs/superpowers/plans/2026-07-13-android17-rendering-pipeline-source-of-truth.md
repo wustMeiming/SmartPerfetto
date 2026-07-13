@@ -15,6 +15,7 @@
 - Android 17 / API 37 uses `android-17.0.0_r1`; kernel references use `android17-6.18-2026-06_r6`.
 - Preserve all 31 fine-grained pipeline IDs and backward-compatible teaching API fields.
 - Only catalog entries with `classification_role: variant` may participate in primary type ranking; feature entries keep their teaching relationship without becoming a type.
+- Materialize detected feature relationships separately as `relatedRenderingTypes` with catalog-backed article paths; do not merge them into the mutually exclusive primary-type ranking.
 - Keep `pipeline_4feature_scoring` as a compatibility ID, but describe its four outputs as supporting evidence axes rather than a normative S01 taxonomy or sufficient type proof.
 - Do not hardcode pipeline inventories, primary exclusions, feature lists, document maps, or architecture maps in TypeScript.
 - Preserve unrelated worktree and public-repository branch history.
@@ -235,7 +236,7 @@ Assert the rendered Markdown includes both `出图类型` and `检测子路径` 
 
 - [ ] **Step 2: Run the focused Perfetto UI test and confirm RED.**
 
-Run: `npm --prefix perfetto/ui test -- --test-filter ai_panel_navigation_unittest`
+Run: `npm --prefix perfetto/ui test -- --test-filter "AIPanel teaching pipeline compatibility view"`
 
 Expected: FAIL because the teaching Markdown still labels the fine-grained pipeline as the only type.
 

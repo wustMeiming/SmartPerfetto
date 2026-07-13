@@ -423,7 +423,7 @@ Do not hardcode prompt content in TypeScript. Put scene logic in `backend/strate
 - [MCP Tools Reference](docs/reference/mcp-tools.en.md)
 - [Skill System Guide](docs/reference/skill-system.en.md)
 - [Data Contract](backend/docs/DATA_CONTRACT_DESIGN.en.md)
-- [Rendering Pipeline References](docs/rendering_pipelines/index.en.md)
+- [Android 17 Rendering Type References](docs/rendering_pipelines/S01_rendering_types_overview.md)
 - [Security Policy](SECURITY.md)
 
 ## Contributing

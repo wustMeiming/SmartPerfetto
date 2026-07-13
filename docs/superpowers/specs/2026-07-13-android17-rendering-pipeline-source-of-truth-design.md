@@ -86,6 +86,11 @@ only for `variant` entries. A feature can instead declare zero or more
 system composition evidence from being promoted into an app's primary output
 type.
 
+Detected feature relationships are materialized separately as
+`relatedRenderingTypes`, including confidence and the catalog-backed article
+path. Feature-only types such as S06 and S12 therefore remain teachable without
+being promoted into primary ranking.
+
 The reviewed mapping is:
 
 | Pipeline ID | Role | Primary rendering type or related teaching type |

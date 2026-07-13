@@ -50,7 +50,6 @@ import {
   parseCandidates,
   parseFeatures,
   transformPinInstruction,
-  transformTeachingContent,
   validateActiveProcesses,
   validateConfidence,
   type PinInstructionResponse,
@@ -3608,6 +3607,7 @@ export class SkillExecutor {
 
     try {
       await ensurePipelineSkillsInitialized();
+      const defaultSelection = pipelineSkillLoader.getDefaultSelection();
 
       const pipelineSource = step.pipeline_source || 'pipeline_result';
       const activeProcessesSource = step.active_processes_source || 'active_rendering_processes';
@@ -3624,19 +3624,36 @@ export class SkillExecutor {
       const primaryPipelineId = (
         explicitPipelineId ||
         String(pipelineRow?.primary_pipeline_id ?? '').trim() ||
-        TEACHING_DEFAULTS.pipelineId
+        defaultSelection.pipelineId
       );
       const primaryConfidence = validateConfidence(
         pipelineRow?.primary_confidence,
         TEACHING_DEFAULTS.confidence
       );
       const candidatesList = pipelineRow?.candidates_list || '';
+      const primaryRenderingTypeId = String(
+        pipelineRow?.primary_rendering_type_id ||
+        pipelineSkillLoader.getPipelineCatalogEntry(primaryPipelineId)?.rendering_type_id ||
+        defaultSelection.renderingTypeId
+      );
+      const renderingTypeCandidatesList = pipelineRow?.rendering_type_candidates_list || '';
+      const relatedRenderingTypeCandidatesList =
+        pipelineRow?.related_rendering_type_candidates_list || '';
       const featuresList = pipelineRow?.features_list || '';
-      const docPath = String(pipelineRow?.doc_path || TEACHING_DEFAULTS.docPath);
+      const docPath = String(pipelineRow?.doc_path || defaultSelection.docPath);
 
       const candidates = candidatesList
         ? parseCandidates(candidatesList, TEACHING_LIMITS.maxCandidates)
         : [{ id: primaryPipelineId, confidence: primaryConfidence }];
+      const renderingTypeCandidates = renderingTypeCandidatesList
+        ? parseCandidates(renderingTypeCandidatesList, TEACHING_LIMITS.maxCandidates)
+        : [{ id: primaryRenderingTypeId, confidence: primaryConfidence }];
+      const relatedRenderingTypes = pipelineSkillLoader.resolveRelatedRenderingTypes(
+        parseCandidates(
+          relatedRenderingTypeCandidatesList,
+          TEACHING_LIMITS.maxCandidates,
+        ),
+      );
       const features = parseFeatures(featuresList);
 
       const traceRequirementsMissing = this.extractTraceRequirementHints(
@@ -3647,23 +3664,17 @@ export class SkillExecutor {
         this.resolveStepResultFromSource(activeProcessesSource, context)
       );
 
-      const yamlTeaching = pipelineSkillLoader.getTeachingContent(primaryPipelineId);
       const mdTeaching = getPipelineDocService().getTeachingContent(primaryPipelineId);
-      const teachingContent: TeachingContentResponse | null = yamlTeaching
-        ? transformTeachingContent(
-            yamlTeaching,
-            pipelineSkillLoader.getPipelineMeta(primaryPipelineId)?.doc_path || docPath
-          )
-        : mdTeaching
-          ? {
-              title: mdTeaching.title,
-              summary: mdTeaching.summary,
-              mermaidBlocks: mdTeaching.mermaidBlocks,
-              threadRoles: mdTeaching.threadRoles,
-              keySlices: mdTeaching.keySlices,
-              docPath: mdTeaching.docPath,
-            }
-          : null;
+      const teachingContent: TeachingContentResponse | null = mdTeaching
+        ? {
+            title: mdTeaching.title,
+            summary: mdTeaching.summary,
+            mermaidBlocks: mdTeaching.mermaidBlocks,
+            threadRoles: mdTeaching.threadRoles,
+            keySlices: mdTeaching.keySlices,
+            docPath: mdTeaching.docPath,
+          }
+        : null;
 
       const basePinInstructions = pipelineSkillLoader
         .getAutoPinInstructions(primaryPipelineId)
@@ -3699,8 +3710,11 @@ export class SkillExecutor {
           detection: {
             detected: !!pipelineRow || !!explicitPipelineId,
             primaryPipelineId,
+            primaryRenderingTypeId,
             primaryConfidence,
             candidates,
+            renderingTypeCandidates,
+            relatedRenderingTypes,
             features,
             traceRequirementsMissing,
           },

@@ -50,7 +50,7 @@ docs/
 - Skill DSL and layered outputs: [Skill System Guide](reference/skill-system.en.md).
 - DataEnvelope and frontend/backend contracts: [Data Contract](../backend/docs/DATA_CONTRACT_DESIGN.en.md).
 - Final report, evidence/claim verification, identity resolution, and chat-vs-report boundaries: [Architecture Overview](architecture/overview.en.md) and [Agent Runtime](architecture/agent-runtime.en.md).
-- Rendering pipeline summary: [Rendering Pipeline Overview](rendering_pipelines/index.en.md).
+- Rendering pipeline summary: [Android 17 Rendering Type Overview](rendering_pipelines/S01_rendering_types_overview.md).
 - Development-task docs, feature plans, reviews, spikes, and scratch records live under [Archive](archive/README.md) and are not current implementation guidance.
 
 ## Runtime-Read Documentation
@@ -59,13 +59,16 @@ docs/
 
 - `backend/skills/pipelines/*.skill.yaml`
 - `backend/skills/atomic/rendering_pipeline_detection.skill.yaml`
-- `backend/src/services/pipelineDocService.ts`
-- `backend/src/config/teaching.config.ts`
+- `backend/skills/pipelines/index.yaml`
+
+S01-S14 are authoritative Android 17 content synchronized from a pinned
+upstream commit and must not be edited manually. Update them with
+`npm run sync:rendering-pipelines -- --source <checkout> --apply`. Builds copy
+the directory to `backend/dist/rendering_pipelines/` for every release form.
 
 After such a change, run at least:
 
 ```bash
-cd backend
-npm run validate:skills
-npm run test:scene-trace-regression
+npm run check:rendering-pipelines
+cd backend && npm run validate:skills
 ```
