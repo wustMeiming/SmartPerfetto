@@ -25,6 +25,7 @@ export interface NormalizedAnalyzeOptions {
   preset?: AnalyzePreset;
   codeAwareMode?: CodeAwareMode;
   codebaseIds?: string[];
+  knowledgeSourceIds?: string[];
   generateTracks?: boolean;
   forceRefresh?: boolean;
   selectionContext?: SelectionContext;
@@ -108,6 +109,9 @@ export function normalizeAnalyzeOptions(
 
   const codebaseIds = normalizeStringArray(raw.codebaseIds);
   if (codebaseIds.length > 0) normalized.codebaseIds = codebaseIds;
+
+  const knowledgeSourceIds = normalizeStringArray(raw.knowledgeSourceIds);
+  if (knowledgeSourceIds.length > 0) normalized.knowledgeSourceIds = knowledgeSourceIds;
 
   const blockedStrategyIds = normalizeStringArray(raw.blockedStrategyIds);
   if (blockedStrategyIds.length > 0) normalized.blockedStrategyIds = blockedStrategyIds;

@@ -191,9 +191,20 @@ test('rejects duplicate ids, unsafe paths, hash drift, and tracked private cases
   duplicate.source.publication = 'private';
   writeJson(duplicateManifestPath, duplicate);
   fs.writeFileSync(path.join(fixture.repoRoot, 'backend/legacy-path.ts'), "const trace = 'test-traces/old.pftrace';\n");
+  fs.mkdirSync(path.join(fixture.repoRoot, 'backend/test-output'), {recursive: true});
+  fs.writeFileSync(
+    path.join(fixture.repoRoot, 'backend/test-output/ignored-runtime-result.json'),
+    '{"trace":"test-traces/runtime-only.pftrace"}\n',
+  );
+  fs.mkdirSync(path.join(fixture.repoRoot, '.claude'), {recursive: true});
+  fs.writeFileSync(
+    path.join(fixture.repoRoot, '.claude/settings.local.json'),
+    '{"allow":["Read(test-traces/**)"]}\n',
+  );
 
   const validation = validateCatalog(fixture.repoRoot);
   const codes = validation.issues.map((issue) => issue.code);
+  const legacyIssues = validation.issues.filter((issue) => issue.code === 'legacy-trace-reference');
 
   assert.equal(validation.ok, false);
   assert.ok(codes.includes('duplicate-case-id'));
@@ -201,6 +212,8 @@ test('rejects duplicate ids, unsafe paths, hash drift, and tracked private cases
   assert.ok(codes.includes('hash-mismatch'));
   assert.ok(codes.includes('tracked-private-case'));
   assert.ok(codes.includes('legacy-trace-reference'));
+  assert.equal(legacyIssues.length, 1);
+  assert.equal(legacyIssues[0].file, path.join(fixture.repoRoot, 'backend/legacy-path.ts'));
 });
 
 test('reports missing, stale, and expectation-free coverage targets', () => {

@@ -70,7 +70,7 @@ import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from './output
 import { buildSqlQueryReview } from '../services/queryReview/queryReviewBuilder';
 import { buildSkillQueryReview } from '../services/queryReview/skillQueryReviewBuilder';
 import { compactQueryReviewForToolResponse, type QueryReviewV1 } from '../types/queryReviewContract';
-import { RagStore } from '../services/ragStore';
+import { RagStore, getDefaultRagStore } from '../services/ragStore';
 import {
   BaselineStore,
   deriveBaselineId,
@@ -111,6 +111,10 @@ import {CodeLookupLedger} from '../services/codebase/codeLookupLedger';
 import {PatchProposer} from '../services/codebase/patchProposer';
 import {normalizeCodeAwareMode, type CodeAwareMode} from '../services/codebase/codeAwareFeature';
 import {filterRagLookup} from '../services/rag/lookupResponseFilter';
+import {
+  ExternalKnowledgeSourceRegistry,
+  getDefaultExternalKnowledgeSourceRegistry,
+} from '../services/externalKnowledgeSourceRegistry';
 import {SymbolResolver} from '../services/symbol/symbolResolver';
 import type { RuntimeToolExtra } from '../agentRuntime/runtimeToolSpec';
 import {
@@ -126,12 +130,10 @@ import {
  * Storage path lives next to the existing analysis_*.json files so
  * operators can find every long-lived agent state in one directory.
  */
-const RAG_STORE_PATH = backendLogPath('rag_store.json');
-let cachedRagStore: RagStore | null = null;
 function getRagStore(): RagStore {
-  if (!cachedRagStore) cachedRagStore = new RagStore(RAG_STORE_PATH);
-  return cachedRagStore;
+  return getDefaultRagStore();
 }
+
 
 function getRuntimeToolSignal(extra: unknown): AbortSignal | undefined {
   const runtimeExtra = extra && typeof extra === 'object' ? extra as RuntimeToolExtra : undefined;
@@ -1048,6 +1050,10 @@ export interface ClaudeMcpServerOptions {
   codeAwareMode?: CodeAwareMode;
   /** Codebase ids whitelisted for this analysis session. */
   codebaseIds?: string[];
+  /** Private external-knowledge source ids whitelisted for this analysis session. */
+  knowledgeSourceIds?: string[];
+  /** Test hook / alternate private external-knowledge registry. */
+  externalKnowledgeRegistry?: ExternalKnowledgeSourceRegistry;
   /** Test hook / alternate registry. */
   codebaseRegistry?: CodebaseRegistry;
   /** Test hook / alternate code lookup ledger. */
@@ -1074,6 +1080,12 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
   const knowledgeScope = options.knowledgeScope;
   const codeAwareMode = normalizeCodeAwareMode(options.codeAwareMode);
   const codebaseIds = Array.from(new Set(options.codebaseIds ?? [])).filter(Boolean);
+  const knowledgeSourceIds = Array.from(new Set(options.knowledgeSourceIds ?? [])).filter(Boolean);
+  const knowledgeSourceCapabilityHint = knowledgeSourceIds.length > 0
+    ? ` Request-authorized knowledge source ids: ${knowledgeSourceIds.join(', ')}.`
+    : ' No private knowledge source is authorized for this request.';
+  const externalKnowledgeRegistry = options.externalKnowledgeRegistry ??
+    getDefaultExternalKnowledgeSourceRegistry();
   const codebaseRegistry = options.codebaseRegistry ?? getDefaultCodebaseRegistry();
   const codeLookupLedger = options.codeLookupLedger ?? (
     options.sessionId ? CodeLookupLedger.restore(options.sessionId, 12_000, 2) : undefined
@@ -3577,24 +3589,85 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     { annotations: { readOnlyHint: true } },
   );
 
-  // lookup_blog_knowledge (Plan 55): retrieve indexed chunks from
-  // androidperformance.com (and, once Plan 44 lands, world memory).
+  // lookup_blog_knowledge (Plan 55): retrieve indexed public blog chunks or,
+  // only with an explicit request-scoped source capability, private Android
+  // Internals Wiki chunks.
   // Read-only — calls ragStore.search() which never writes. The index
   // is populated by the M2 admin route + ingester; until then the
   // search returns `unsupportedReason='index empty'` so the agent
   // never invents content.
   const lookupBlogKnowledge = tool(
     'lookup_blog_knowledge',
-    'Retrieve indexed knowledge chunks from androidperformance.com to ground analysis claims in published material. ' +
-    'Returns ranked snippets matching the query plus provenance (chunkId, uri, title, author) so the agent can cite. ' +
-    'When the result carries an `unsupportedReason` (e.g. "index empty", "all chunks blocked by unsupportedReason"), ' +
-    'the agent must say the source is unavailable and must NOT summarize, paraphrase, or invent content from this source.',
+    'Retrieve Android performance blog knowledge or request-authorized private Wiki background. ' +
+    `Wiki is explanatory, not trace evidence.${knowledgeSourceCapabilityHint} ` +
+    'If unsupportedReason is present, report unavailable and never invent or paraphrase unavailable content.',
     {
       query: z.string().describe('Search query — natural language is fine; tokens are lowercased and matched against snippet + title.'),
       top_k: z.number().int().min(1).max(20).optional().describe('Maximum hits returned (1-20, default 5).'),
+      source: z.enum(['androidperformance.com', 'android_internals_wiki']).optional()
+        .describe('Knowledge source. Defaults to androidperformance.com for compatibility.'),
+      knowledge_source_id: z.string().optional()
+        .describe(`Request-whitelisted source id for Android Internals Wiki.${knowledgeSourceCapabilityHint}`),
     },
-    async ({ query, top_k }) => {
-      const store = getRagStore();
+    async ({ query, top_k, source, knowledge_source_id }) => {
+      const store = options.ragStore ?? getRagStore();
+      if (source === 'android_internals_wiki') {
+        const sourceId = normalizeOptionalToolString(knowledge_source_id) ??
+          (knowledgeSourceIds.length === 1 ? knowledgeSourceIds[0] : undefined);
+        if (!sourceId || !knowledgeSourceIds.includes(sourceId) || !knowledgeScope) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                success: false,
+                unsupportedReason: 'private_knowledge_source_not_whitelisted',
+                authorizedKnowledgeSourceIds: knowledgeSourceIds,
+              }),
+            }],
+          };
+        }
+        const access = externalKnowledgeRegistry.evaluateAccess(
+          sourceId,
+          knowledgeScope,
+          knowledgeSourceIds,
+        );
+        if (!access.allowed || !access.source.activeGeneration) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                success: false,
+                unsupportedReason: access.allowed
+                  ? 'private_knowledge_index_not_active'
+                  : access.reason,
+              }),
+            }],
+          };
+        }
+        const raw = store.search(query, {
+          topK: top_k ?? 5,
+          kinds: ['android_internals_wiki'],
+          knowledgeSourceIds: [sourceId],
+          activeSourceGenerations: {[sourceId]: access.source.activeGeneration},
+          scope: knowledgeScope,
+        });
+        const filtered = await filterRagLookup(raw, {
+          toolName: 'lookup_blog_knowledge',
+          turn: 0,
+          ledger: codeLookupLedger,
+          sessionId: options.sessionId,
+          externalKnowledgeRegistry,
+          knowledgeSourceIds,
+          knowledgeScope,
+        });
+        await codeLookupLedger?.flush();
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({success: true, result: filtered}),
+          }],
+        };
+      }
       const result = store.search(query, {
         topK: top_k ?? 5,
         kinds: ['androidperformance.com'],

@@ -358,6 +358,14 @@ TRACE_PROCESSOR_DOWNLOAD_URL=https://your-mirror/trace_processor_shell ./start.s
 
 Mirror downloads are still checked against the SHA256 pinned in `scripts/trace-processor-pin.env`.
 
+## Optional Android Internals Knowledge
+
+External Wiki paths are denied by default. `SMARTPERFETTO_KNOWLEDGE_ROOTS`
+only establishes the path allowlist; an operator must still acknowledge usage
+rights, grant provider-send consent, build the index through the API, and select
+the source in each analysis `knowledgeSourceIds` list. See
+[Android Internals External Knowledge](android-internals-knowledge.en.md).
+
 ## Rate Limiting
 
 ```bash

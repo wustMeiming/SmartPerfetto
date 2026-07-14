@@ -15,6 +15,7 @@ import { ensureSkillRegistryInitialized, skillRegistry } from '../../../services
 import type { TraceProcessorService } from '../../../services/traceProcessorService';
 import { getExtendedKnowledgeBase } from '../../../services/sqlKnowledgeBase';
 import { sanitizeCodeAwareText } from '../../../services/security/codeAwareOutputRegistry';
+import {projectPrivateKnowledgeToolResult} from '../../../services/rag/toolResultProjectionFilter';
 import {
   createPiAgentCoreSnapshotEngineState,
   getPiAgentCoreSnapshotEngineState,
@@ -614,18 +615,27 @@ export function projectPiAgentCoreEventToStreamingUpdate(
         },
         timestamp,
       };
-    case 'tool_execution_update':
+    case 'tool_execution_update': {
+      const toolName = typeof event.toolName === 'string' ? event.toolName : 'unknown';
+      const rawUpdate = event.partialResult ?? event.update;
+      const update = toolName === 'lookup_blog_knowledge'
+        ? projectPrivateKnowledgeToolResult(toolName, rawUpdate) ?? 'knowledge_lookup_in_progress'
+        : rawUpdate;
       return {
         type: 'progress',
         content: {
           module: 'pi-agent-core',
           tool: event.toolName,
           toolCallId: event.toolCallId,
-          update: event.partialResult ?? event.update,
+          update,
         },
         timestamp,
       };
-    case 'tool_execution_end':
+    }
+    case 'tool_execution_end': {
+      const toolName = typeof event.toolName === 'string' ? event.toolName : 'unknown';
+      const projected = projectPrivateKnowledgeToolResult(toolName, event.result);
+      const result = summarizePiToolResult(projected ?? event.result);
       return event.isError
         ? {
             type: 'error',
@@ -633,7 +643,7 @@ export function projectPiAgentCoreEventToStreamingUpdate(
               module: 'pi-agent-core',
               tool: event.toolName,
               toolCallId: event.toolCallId,
-              result: summarizePiToolResult(event.result),
+              result,
             },
             timestamp,
           }
@@ -641,10 +651,11 @@ export function projectPiAgentCoreEventToStreamingUpdate(
             type: 'agent_response',
             content: {
               taskId: event.toolCallId || 'unknown',
-              result: summarizePiToolResult(event.result),
+              result,
             },
             timestamp,
           };
+    }
     case 'agent_end':
       return { type: 'progress', content: 'Pi agent-core run ended', timestamp };
     default:
@@ -751,10 +762,11 @@ export function createPiAgentCoreToolFromSharedSpec(
         signal,
         ...(options.extra && typeof options.extra === 'object' ? options.extra : {}),
       });
+      const projected = projectPrivateKnowledgeToolResult(spec.name, result);
       recordPlanOrPrePlanToolCall(options.analysisPlan, {
         toolName: spec.name,
         input: toolArgs,
-        resultText: summarizePiToolResult(result),
+        resultText: summarizePiToolResult(projected ?? result),
       });
       onUpdate?.({ type: 'smartperfetto_tool_finished', toolCallId, toolName: spec.name });
       return {
@@ -1744,6 +1756,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       knowledgeScope,
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
+      knowledgeSourceIds: options.knowledgeSourceIds,
       referenceTraceId: options.referenceTraceId,
       ...(comparisonContext ? { comparisonContext } : {}),
     });

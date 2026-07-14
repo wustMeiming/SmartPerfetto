@@ -420,6 +420,42 @@ describe('experimental OpenCode runtime contract', () => {
     ]);
   });
 
+  it('projects private wiki results before emitting OpenCode responses', async () => {
+    const updates: any[] = [];
+    await dispatchOpenCodeBridgeRequest([{
+      name: 'lookup_blog_knowledge',
+      exposure: 'internal',
+      tool: {},
+      shared: {
+        name: 'lookup_blog_knowledge',
+        description: 'Lookup knowledge',
+        exposure: 'internal',
+        inputSchema: {},
+        handler: jest.fn(async () => ({content: [{type: 'text', text: JSON.stringify({result: {
+          query: 'Handler',
+          probed: ['android_internals_wiki'],
+          retrievedAt: 1,
+          legacyPath: false,
+          hits: [{
+            chunkId: 'wiki-1',
+            score: 1,
+            metadata: {kind: 'android_internals_wiki', knowledgeSourceId: 'source-a'},
+            snippet: 'OPENCODE_PRIVATE_WIKI_CANARY',
+          }],
+        }})}]})),
+      },
+    } as any], {
+      jsonrpc: '2.0',
+      id: 'wiki-call',
+      method: 'tools/call',
+      params: {name: 'lookup_blog_knowledge', arguments: {}},
+    }, update => updates.push(update));
+
+    const serialized = JSON.stringify(updates.filter(update => update.type === 'agent_response'));
+    expect(serialized).not.toContain('OPENCODE_PRIVATE_WIKI_CANARY');
+    expect(serialized).toContain('snippetHash');
+  });
+
   it('records OpenCode MCP bridge tool executions into the shared analysis plan evidence log', async () => {
     const plan = {
       phases: [

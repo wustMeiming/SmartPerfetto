@@ -91,6 +91,7 @@ import {
 import { probeTraceCompleteness } from '../../../agentv3/traceCompletenessProber';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from '../../../agentv3/outputLanguage';
 import {sanitizeCodeAwareText} from '../../../services/security/codeAwareOutputRegistry';
+import {projectPrivateKnowledgeToolResult} from '../../../services/rag/toolResultProjectionFilter';
 import { formatToolCallNarration } from '../../../agentv3/toolNarration';
 import { loadOpenAIConfig, type OpenAIAgentConfig } from './openAiConfig';
 import {
@@ -2079,6 +2080,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         knowledgeScope,
         codeAwareMode: options.codeAwareMode,
         codebaseIds: options.codebaseIds,
+        knowledgeSourceIds: options.knowledgeSourceIds,
       });
       allowedTools = mcp.allowedTools;
       tools = createOpenAIToolsFromMcpDefinitions(mcp.toolDefinitions);
@@ -2985,11 +2987,14 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       const cached = taskIds
         .map(taskId => streamContext.toolInputsByTaskId.get(taskId))
         .find(Boolean);
+      const toolName = cached?.toolName || rawItem?.name || 'unknown';
+      const projected = projectPrivateKnowledgeToolResult(toolName, rawItem?.output);
+      const resultText = summarizeToolOutput(projected ?? rawItem?.output);
       if (cached) {
         recordPlanOrPrePlanToolCall(this.sessionPlans.get(streamContext.sessionId), {
           toolName: cached.toolName,
           input: cached.args,
-          resultText: summarizeToolOutput(rawItem?.output),
+          resultText,
         });
         for (const taskId of taskIds) {
           streamContext.toolInputsByTaskId.delete(taskId);
@@ -2999,7 +3004,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         type: 'agent_response',
         content: {
           taskId: rawItem?.callId || rawItem?.id || 'unknown',
-          result: summarizeToolOutput(rawItem?.output),
+          result: resultText,
         },
         timestamp: now,
       });

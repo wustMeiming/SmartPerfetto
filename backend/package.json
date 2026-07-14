@@ -78,6 +78,7 @@
     "benchmark:trace-rss": "tsx src/scripts/benchmarkTraceProcessorRss.ts",
     "benchmark:trace-rss:audit": "tsx src/scripts/auditTraceProcessorRssMatrix.ts",
     "benchmark:enterprise-load": "tsx src/scripts/enterpriseAcceptanceLoadTest.ts",
+    "knowledge:android-internals:audit": "tsx src/scripts/auditAndroidInternalsWiki.ts",
     "enterprise:readiness-audit": "tsx src/scripts/enterpriseReadinessAudit.ts",
     "verify:pr": "npm run validate:skills && npm run validate:strategies && npm run validate:cases && npm run trace:validate && npm run typecheck && npm run build && node scripts/check-cli-pack.cjs && npm run test:core && npm run trace-processor:ensure && npm run test:scene-trace-regression",
     "enterprise:migration": "tsx src/scripts/enterpriseMigrationSnapshot.ts",

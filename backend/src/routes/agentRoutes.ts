@@ -836,6 +836,7 @@ interface AnalysisSession {
   continuityBreaks?: import('../agentv3/sessionStateSnapshot').ProviderContinuityBreak[];
   codeAwareMode?: import('../services/codebase/codeAwareFeature').CodeAwareMode;
   codebaseIds?: string[];
+  knowledgeSourceIds?: string[];
   /** Reference trace ID for comparison mode (dual-trace analysis) */
   referenceTraceId?: string;
   comparisonSource?: 'raw_trace_pair' | 'analysis_result_snapshots';
@@ -2023,6 +2024,9 @@ async function handleAnalyzeRequest(
     }
     sessionForRun.codeAwareMode = options.codeAwareMode;
     sessionForRun.codebaseIds = Array.isArray(options.codebaseIds) ? options.codebaseIds : undefined;
+    sessionForRun.knowledgeSourceIds = Array.isArray(options.knowledgeSourceIds)
+      ? options.knowledgeSourceIds
+      : undefined;
 
     if (sendRunStartConflictIfNeeded(res, sessionForRun)) return;
     const runContext = startSessionRun(sessionForRun, query, requestId);
@@ -2049,6 +2053,7 @@ async function handleAnalyzeRequest(
         blockedStrategyIds,
         owner: ownerFieldsFromContext(requestContext),
         knowledgeScope: knowledgeScopeFromRequestContext(requestContext),
+        knowledgeSourceIds: options.knowledgeSourceIds,
       }).catch((error) => {
         const session = assistantAppService.getSession(sessionId);
         if (session) {
@@ -3260,6 +3265,7 @@ async function runSmartAnalysis(
     blockedStrategyIds?: string[];
     owner: ResourceOwnerFields;
     knowledgeScope?: KnowledgeScope;
+    knowledgeSourceIds?: string[];
   },
 ): Promise<void> {
   const session = assistantAppService.getSession(sessionId);
@@ -3397,6 +3403,7 @@ async function runSmartAnalysis(
       analysisMode: resolveSmartDeepDiveAnalysisMode(options.analysisMode),
       generateTracks: false,
       knowledgeScope: options.knowledgeScope,
+      knowledgeSourceIds: options.knowledgeSourceIds,
     });
   } catch (error: any) {
     if (isSessionRunCancelled(session, runId) || isStaleRun(session, runId)) {
@@ -4477,6 +4484,9 @@ async function runAgentDrivenAnalysis(sessionId: string, query: string, traceId:
             providerId: options.providerId,
             codeAwareMode: options.codeAwareMode,
             codebaseIds: Array.isArray(options.codebaseIds) ? options.codebaseIds : undefined,
+            knowledgeSourceIds: Array.isArray(options.knowledgeSourceIds)
+              ? options.knowledgeSourceIds
+              : undefined,
             tenantId: session.tenantId,
             workspaceId: session.workspaceId,
             userId: session.userId,

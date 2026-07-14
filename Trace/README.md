@@ -8,7 +8,7 @@ This directory is the source-controlled trace test and reference corpus.
 - [Machine-readable catalog](./catalog.json)
 - [Skill and Strategy coverage](./coverage.json)
 
-Skill execution quality: 131 semantic, 10 explicit graceful-empty, 3 explicit unavailable prerequisite, 87 definition-only.
+Skill execution quality: 132 semantic, 10 explicit graceful-empty, 3 explicit unavailable prerequisite, 87 definition-only.
 
 ## Commands
 
@@ -51,7 +51,7 @@ Constructed cases keep source scenarios and overlay protobufs in Git; combined t
 | [Framework rendering pipeline signatures](./constructed/framework-pipelines/) | pipeline | Android 16 / API 36 (tested API 35-36) | android-startup-heavy | 33 target(s) |
 | [General analysis and runtime contracts](./constructed/general-runtime-contracts/) | general | Android 16 / API 36 (tested API 35-36) | android-scroll-customer | 14 target(s) |
 | [GPU workload and frequency](./constructed/gpu-workload/) | gpu | Android 16 / API 36 (tested API 35-36) | android-scroll-customer | 10 target(s) |
-| [Input and interaction latency](./constructed/input-interaction-latency/) | interaction | Android 16 / API 36 (tested API 35-36) | android-scroll-customer | 13 target(s) |
+| [Input and interaction latency](./constructed/input-interaction-latency/) | interaction | Android 16 / API 36 (tested API 35-36) | android-scroll-customer | 14 target(s) |
 | [Linux and Android system state](./constructed/linux-system-state/) | linux | Android 16 / API 36 (tested API 35-36) | android-startup-light | 5 target(s) |
 | [Media, network, and camera pipeline](./constructed/media-network-camera/) | media | Android 16 / API 36 (tested API 35-36) | android-scroll-customer | 8 target(s) |
 | [Memory and GC pressure](./constructed/memory-gc-pressure/) | memory | Android 16 / API 36 (tested API 35-36) | android-startup-light | 19 target(s) |

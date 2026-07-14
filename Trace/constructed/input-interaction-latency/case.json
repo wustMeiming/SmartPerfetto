@@ -14,7 +14,7 @@
   "trace": {
     "file": "trace.overlay.pftrace",
     "format": "perfetto-protobuf",
-    "sha256": "7195386093ce0d29a5110861a928aa96d6af9fb15580bba9bc41248c29a39ab2",
+    "sha256": "cf03df9f70c45b9e855da8915233c26d985bdb1e8d508d6fb5e1d7c6807968c9",
     "materialization": "base-plus-overlay"
   },
   "android": {
@@ -59,6 +59,7 @@
       "device_state_timeline",
       "input_events_in_range",
       "input_module",
+      "main_thread_handler_callback_slices",
       "navigation_analysis",
       "scene_reconstruction",
       "state_timeline",
@@ -163,6 +164,25 @@
           "click_response_overview"
         ],
         "semantic_step": "click_response_overview",
+        "required_marker": "SmartPerfetto::CASE::input-interaction-latency"
+      },
+      {
+        "id": "execute-main_thread_handler_callback_slices",
+        "type": "skill",
+        "target": "main_thread_handler_callback_slices",
+        "mode": "semantic",
+        "source_file": "backend/skills/atomic/main_thread_handler_callback_slices.skill.yaml",
+        "parameters": {
+          "package": "",
+          "start_ts": "${trace_start}",
+          "end_ts": "${trace_end}",
+          "min_dur_ns": 100000,
+          "top_k": 20
+        },
+        "required_steps": [
+          "callback_slices"
+        ],
+        "semantic_step": "callback_slices",
         "required_marker": "SmartPerfetto::CASE::input-interaction-latency"
       },
       {

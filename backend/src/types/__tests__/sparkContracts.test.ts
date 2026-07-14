@@ -980,8 +980,9 @@ describe('First-tier shared base types', () => {
       'case_library',
       'app_source',
       'kernel_source',
+      'android_internals_wiki',
     ];
-    expect(sources).toHaveLength(8);
+    expect(sources).toHaveLength(9);
     // Compile-time check: each value is assignable to RagSourceKind.
     sources.forEach(s => expect(typeof s).toBe('string'));
   });
@@ -1167,6 +1168,7 @@ describe('Plan 55 — AndroidperformanceAospRagContract', () => {
         case_library: {chunkCount: 12},
         app_source: {chunkCount: 0},
         kernel_source: {chunkCount: 0},
+        android_internals_wiki: {chunkCount: 0},
       },
       coverage: [
         {sparkId: 181, planId: '55', status: 'scaffolded'},

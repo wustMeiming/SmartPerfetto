@@ -410,6 +410,11 @@ skills:
     workflow: io-network-media
     disposition: exported
     destination: references/generated/skills/main_thread_file_io_in_range.md
+  main_thread_handler_callback_slices:
+    source: backend/skills/atomic/main_thread_handler_callback_slices.skill.yaml
+    workflow: interaction
+    disposition: exported
+    destination: references/generated/skills/main_thread_handler_callback_slices.md
   main_thread_sched_latency_in_range:
     source: backend/skills/atomic/main_thread_sched_latency_in_range.skill.yaml
     workflow: cpu-scheduling

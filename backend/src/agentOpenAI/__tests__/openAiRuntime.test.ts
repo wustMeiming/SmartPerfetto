@@ -1406,6 +1406,43 @@ describe('OpenAIRuntime plan completion guard', () => {
     }));
   });
 
+  it('projects private wiki tool output before emitting it', () => {
+    const { runtime, updates } = createRuntimeWithUpdates();
+    const context = streamContext('s-private-wiki', false);
+    runtime.handleStreamEvent({
+      type: 'run_item_stream_event',
+      name: 'tool_called',
+      item: {rawItem: {
+        callId: 'wiki-call',
+        name: 'lookup_blog_knowledge',
+        arguments: JSON.stringify({source: 'android_internals_wiki'}),
+      }},
+    }, 'zh-CN', context);
+    runtime.handleStreamEvent({
+      type: 'run_item_stream_event',
+      name: 'tool_output',
+      item: {rawItem: {
+        callId: 'wiki-call',
+        output: JSON.stringify({result: {
+          query: 'Handler',
+          probed: ['android_internals_wiki'],
+          retrievedAt: 1,
+          legacyPath: false,
+          hits: [{
+            chunkId: 'wiki-1',
+            score: 1,
+            metadata: {kind: 'android_internals_wiki', knowledgeSourceId: 'source-a'},
+            snippet: 'OPENAI_PRIVATE_WIKI_CANARY',
+          }],
+        }}),
+      }},
+    }, 'zh-CN', context);
+
+    const serialized = JSON.stringify(updates.filter(update => update.type === 'agent_response'));
+    expect(serialized).not.toContain('OPENAI_PRIVATE_WIKI_CANARY');
+    expect(serialized).toContain('snippetHash');
+  });
+
   it('strips OpenAI-compatible reasoning markers from visible text', () => {
     expect(__testing.stripOpenAiReasoningArtifacts(
       '<think>内部推理不应展示</think>\n\n## 综合结论\n\n用户可见结论。</think>',

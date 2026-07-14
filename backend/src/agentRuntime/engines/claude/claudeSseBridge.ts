@@ -10,6 +10,7 @@ import {
 } from '../../../agentv3/analysisTermination';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from '../../../agentv3/outputLanguage';
 import { formatToolCallNarration, type ToolNarrationOptions } from '../../../agentv3/toolNarration';
+import {projectPrivateKnowledgeToolResult} from '../../../services/rag/toolResultProjectionFilter';
 
 export type UpdateEmitter = (update: StreamingUpdate) => void;
 
@@ -60,6 +61,7 @@ export function createSseBridge(
   narrationOptions: ToolNarrationOptions = {},
 ): SseBridge {
   let lastToolUseId: string | undefined;
+  const toolUseIdToName = new Map<string, string>();
   /**
    * Track whether the current assistant turn uses tools.
    * When true, stream_event text deltas are intermediate reasoning (emit as thought).
@@ -239,6 +241,9 @@ export function createSseBridge(
       for (const block of content) {
         if (block.type === 'tool_use') {
           lastToolUseId = block.id;
+          if (typeof block.id === 'string' && typeof block.name === 'string') {
+            toolUseIdToName.set(block.id, block.name);
+          }
           const friendlyMsg = formatToolCallNarration(block.name, block.input, language, narrationOptions);
           emit({
             type: 'agent_task_dispatched',
@@ -273,24 +278,32 @@ export function createSseBridge(
       const resultBlocks = extractSdkToolResultBlocks(msg);
       if (resultBlocks.length > 0) {
         for (const block of resultBlocks) {
+          const taskId = block.toolUseId || lastToolUseId || 'unknown';
+          const toolName = toolUseIdToName.get(taskId);
+          const projected = projectPrivateKnowledgeToolResult(toolName ?? 'unknown', block.result);
           emit({
             type: 'agent_response',
             content: {
-              taskId: block.toolUseId || lastToolUseId || 'unknown',
-              result: stringifySdkToolResult(block.result),
+              taskId,
+              result: stringifySdkToolResult(projected ?? block.result),
             },
             timestamp: now,
           });
+          toolUseIdToName.delete(taskId);
         }
       } else {
+        const taskId = lastToolUseId || 'unknown';
+        const toolName = toolUseIdToName.get(taskId);
+        const projected = projectPrivateKnowledgeToolResult(toolName ?? 'unknown', msg.tool_use_result);
         emit({
           type: 'agent_response',
           content: {
-            taskId: lastToolUseId || 'unknown',
-            result: stringifySdkToolResult(msg.tool_use_result),
+            taskId,
+            result: stringifySdkToolResult(projected ?? msg.tool_use_result),
           },
           timestamp: now,
         });
+        toolUseIdToName.delete(taskId);
       }
       return;
     }

@@ -8,7 +8,7 @@ import { backendLogPath } from '../runtimePaths';
 import { openEnterpriseDb } from '../services/enterpriseDb';
 import { createAnalysisResultSnapshotRepository } from '../services/analysisResultSnapshotStore';
 import { CaseLibrary } from '../services/caseLibrary';
-import { RagStore } from '../services/ragStore';
+import { getDefaultRagStore } from '../services/ragStore';
 import {
   canShareAnalysisResultResource,
   hasRbacPermission,
@@ -170,7 +170,7 @@ router.post('/:snapshotId/similarity', (req, res) => {
       ...(includeCases
         ? {
           caseLibrary: new CaseLibrary(backendLogPath('case_library.json')),
-          ragStore: new RagStore(backendLogPath('rag_store.json')),
+          ragStore: getDefaultRagStore(),
         }
         : {}),
     });

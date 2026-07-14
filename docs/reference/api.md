@@ -396,6 +396,13 @@ Base path: `/api/rag`
 | `GET` | `/chunks/:chunkId` | 读取 chunk |
 | `DELETE` | `/chunks/:chunkId` | 删除 chunk |
 | `POST` | `/search` | 搜索代码/知识 chunk |
+| `POST` | `/android-internals/preview` | 预览允许路径内的 Wiki 文章清单，不返回正文 |
+| `GET` | `/android-internals/sources` | 列出当前 scope 的外部 Wiki 注册项 |
+| `POST` | `/android-internals/sources` | 以独立权利确认和 provider 同意注册 Wiki |
+| `POST` | `/android-internals/sources/:id/reindex` | 分阶段重建并原子激活索引 generation |
+| `GET` | `/android-internals/sources/:id/audit` | 返回每篇文章的 metadata-only Skill disposition |
+| `PATCH` | `/android-internals/sources/:id/consent` | 显式授予或撤销 provider-send 同意 |
+| `DELETE` | `/android-internals/sources/:id/index` | 停用 generation 并清除该 source 的全部 chunk |
 | `GET` | `/codebases` | 列出已注册 codebase |
 | `POST` | `/codebases/preview` | 预览 path security gate 接受的文件 |
 | `POST` | `/codebases/register` | 注册本机代码库 |
@@ -404,6 +411,12 @@ Base path: `/api/rag`
 | `GET` | `/codebases/:id/excerpt` | 读取已索引片段 |
 | `POST` | `/codebases/:id/reindex` | 重新索引 |
 | `GET` | `/codebases/:id/audit` | 索引审计 |
+
+Android Internals 接口的路径 allowlist、CC 权利确认、可撤销同意、请求级
+`options.knowledgeSourceIds` 和 Docker mount 流程见
+[Android Internals 外部知识库](../getting-started/android-internals-knowledge.md)。这类私有
+chunk 对普通 `/chunks/:id` 和 `/search` 完全不可见；仅专用 source/audit 管理接口返回
+当前 scope 内的无正文审计元数据。
 
 ## Analysis Result Comparison API
 

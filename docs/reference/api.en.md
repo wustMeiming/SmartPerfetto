@@ -394,6 +394,13 @@ Base path: `/api/rag`
 | `GET` | `/chunks/:chunkId` | Read one chunk |
 | `DELETE` | `/chunks/:chunkId` | Delete one chunk |
 | `POST` | `/search` | Search code or knowledge chunks |
+| `POST` | `/android-internals/preview` | Preview the allowed Wiki article inventory without prose |
+| `GET` | `/android-internals/sources` | List external Wiki registrations in the current scope |
+| `POST` | `/android-internals/sources` | Register a Wiki with separate rights and provider consent |
+| `POST` | `/android-internals/sources/:id/reindex` | Stage and atomically activate an index generation |
+| `GET` | `/android-internals/sources/:id/audit` | Return one metadata-only Skill disposition per article |
+| `PATCH` | `/android-internals/sources/:id/consent` | Explicitly grant or revoke provider-send consent |
+| `DELETE` | `/android-internals/sources/:id/index` | Deactivate and clear every chunk for the source |
 | `GET` | `/codebases` | List registered codebases |
 | `POST` | `/codebases/preview` | Preview files accepted by the path security gate |
 | `POST` | `/codebases/register` | Register a local codebase |
@@ -402,6 +409,13 @@ Base path: `/api/rag`
 | `GET` | `/codebases/:id/excerpt` | Read an indexed excerpt |
 | `POST` | `/codebases/:id/reindex` | Reindex |
 | `GET` | `/codebases/:id/audit` | Index audit |
+
+See [Android Internals External Knowledge](../getting-started/android-internals-knowledge.en.md)
+for path allowlisting, the CC rights acknowledgement, revocable consent,
+request-scoped `options.knowledgeSourceIds`, and Docker mounts. Private Wiki
+chunks are completely absent from ordinary `/chunks/:id` and `/search` reads;
+only the dedicated source/audit management endpoints return prose-free metadata
+inside the current scope.
 
 ## Analysis Result Comparison API
 

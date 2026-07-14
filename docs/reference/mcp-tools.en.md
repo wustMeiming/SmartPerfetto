@@ -60,7 +60,7 @@ Agent wants a tool call
 | Tool | Purpose |
 |---|---|
 | `lookup_knowledge` | Load local performance knowledge, templates, or pipeline docs |
-| `lookup_blog_knowledge` | Query blog or external knowledge indexes |
+| `lookup_blog_knowledge` | Query blog/external indexes; `source=android_internals_wiki` also requires a request-whitelisted `knowledge_source_id` |
 | `lookup_aosp_source` | Query AOSP-related source knowledge |
 | `lookup_oem_sdk` | Query OEM SDK or vendor knowledge |
 | `lookup_baseline` | Fetch historical baselines |
@@ -71,6 +71,11 @@ Agent wants a tool call
 | `recall_patterns` | Retrieve patterns or anti-patterns, usually as internal analysis support |
 
 Knowledge and memory support the investigation; they must not override current trace evidence.
+The Android Internals branch rechecks scope, rights, provider consent, and the
+active generation on every call. The model can read budgeted hits, while
+Claude, OpenAI, Pi, and OpenCode SSE/log events retain only hash, length,
+license, attribution, and trust sidecars. See
+[Android Internals External Knowledge](../getting-started/android-internals-knowledge.en.md).
 
 ## Planning, Hypothesis, And Artifact Tools
 

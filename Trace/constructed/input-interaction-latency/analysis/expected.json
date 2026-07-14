@@ -100,6 +100,25 @@
       "required_marker": "SmartPerfetto::CASE::input-interaction-latency"
     },
     {
+      "id": "execute-main_thread_handler_callback_slices",
+      "type": "skill",
+      "target": "main_thread_handler_callback_slices",
+      "mode": "semantic",
+      "source_file": "backend/skills/atomic/main_thread_handler_callback_slices.skill.yaml",
+      "parameters": {
+        "package": "",
+        "start_ts": "${trace_start}",
+        "end_ts": "${trace_end}",
+        "min_dur_ns": 100000,
+        "top_k": 20
+      },
+      "required_steps": [
+        "callback_slices"
+      ],
+      "semantic_step": "callback_slices",
+      "required_marker": "SmartPerfetto::CASE::input-interaction-latency"
+    },
+    {
       "id": "execute-navigation_analysis",
       "type": "skill",
       "target": "navigation_analysis",

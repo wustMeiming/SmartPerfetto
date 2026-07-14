@@ -335,6 +335,8 @@ export interface AnalysisOptions {
   codeAwareMode?: CodeAwareMode;
   /** Explicit codebase allowlist for this analysis session. */
   codebaseIds?: string[];
+  /** Explicit external knowledge-source allowlist for this analysis session. */
+  knowledgeSourceIds?: string[];
 
   /**
    * Enterprise persistence scope supplied by the route layer.

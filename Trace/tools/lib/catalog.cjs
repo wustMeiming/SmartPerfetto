@@ -183,14 +183,23 @@ function validatePublication(entry, issues) {
 
 function validateNoLegacyTraceReferences(repoRoot, issues) {
   const ignoredSegments = new Set(['.git', '.omo', '.worktrees', 'dist', 'node_modules', 'perfetto', 'Trace']);
+  const ignoredFiles = new Set([
+    path.join(repoRoot, '.claude', 'settings.local.json'),
+  ]);
   const ignoredPrefixes = [
     path.join(repoRoot, 'docs', 'archive'),
     path.join(repoRoot, 'docs', 'superpowers'),
+    path.join(repoRoot, 'backend', 'logs'),
+    path.join(repoRoot, 'backend', 'test-output'),
+    path.join(repoRoot, 'logs'),
+    path.join(repoRoot, 'output'),
+    path.join(repoRoot, 'test-output'),
   ];
   const textExtensions = new Set([
     '.cjs', '.js', '.json', '.md', '.mjs', '.sh', '.ts', '.tsx', '.yaml', '.yml',
   ]);
   const files = listFilesRecursive(repoRoot, (filePath) => {
+    if (ignoredFiles.has(filePath)) return false;
     const relativeSegments = path.relative(repoRoot, filePath).split(path.sep);
     if (relativeSegments.some((segment) => ignoredSegments.has(segment))) return false;
     if (ignoredPrefixes.some((prefix) => filePath.startsWith(`${prefix}${path.sep}`))) return false;

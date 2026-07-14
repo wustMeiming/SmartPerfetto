@@ -20,6 +20,9 @@
  */
 
 import { jest, describe, it, expect } from '@jest/globals';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import type { AnalysisPlanV3, AnalysisNote, Hypothesis, TracePairContext, UncertaintyFlag } from '../types';
 import type { OutputLanguage } from '../outputLanguage';
 
@@ -240,6 +243,8 @@ import {
   type AnalysisResultSnapshot,
 } from '../../types/multiTraceComparison';
 import type { TraceSimilaritySnapshotRepository } from '../../services/similarity/similarityService';
+import {RagStore} from '../../services/ragStore';
+import {ExternalKnowledgeSourceRegistry} from '../../services/externalKnowledgeSourceRegistry';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -255,6 +260,8 @@ function createTestServer(options: {
   codebaseIds?: string[];
   caseLibrary?: any;
   ragStore?: any;
+  externalKnowledgeRegistry?: any;
+  knowledgeSourceIds?: string[];
   analysisResultSnapshotRepository?: TraceSimilaritySnapshotRepository;
   knowledgeScope?: { tenantId: string; workspaceId: string; userId?: string };
   tracePairContext?: TracePairContext;
@@ -320,6 +327,8 @@ function createTestServer(options: {
     codebaseIds: options.codebaseIds,
     caseLibrary: options.caseLibrary,
     ragStore: options.ragStore,
+    externalKnowledgeRegistry: options.externalKnowledgeRegistry,
+    knowledgeSourceIds: options.knowledgeSourceIds,
     analysisResultSnapshotRepository: options.analysisResultSnapshotRepository,
     knowledgeScope: options.knowledgeScope,
     outputLanguage: options.outputLanguage,
@@ -333,7 +342,7 @@ function createTestServer(options: {
         commonCapabilities: ['slice'],
       },
     } : {}),
-  });
+  } as any);
 
   // Extract tool handlers from the mock SDK server
   const tools: Map<string, ToolDef> = new Map();
@@ -4085,6 +4094,85 @@ describe('createClaudeMcpServer', () => {
       expect(detected.nonWaivableMissingAspectIds).toEqual(['architecture_specific_jank']);
       const blockedSql = await callTool(tools, 'execute_sql', { sql: 'SELECT 1 AS ok' });
       expect(blockedSql.action_required).toBe('revise_plan');
+    });
+  });
+
+  describe('private external knowledge', () => {
+    it('defaults the only request-whitelisted source id and returns the sanitized wiki result', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-private-knowledge-'));
+      try {
+        const scope = {tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'user-a'};
+        const root = path.join(tmpDir, 'wiki');
+        fs.mkdirSync(root);
+        const externalKnowledgeRegistry = new ExternalKnowledgeSourceRegistry(
+          path.join(tmpDir, 'external-sources.json'),
+        );
+        const source = externalKnowledgeRegistry.register({
+          kind: 'android_internals_wiki',
+          displayName: 'Android Internals Wiki',
+          rootRealpath: root,
+          revision: 'a'.repeat(40),
+          contentFingerprint: 'b'.repeat(64),
+          dirty: false,
+          license: 'CC-BY-NC-SA-4.0',
+          rightsAcknowledged: true,
+          sendToProvider: true,
+          consentedBy: 'user-a',
+          scope,
+        });
+        await externalKnowledgeRegistry.withIngestLease(source.sourceId, scope, lease =>
+          lease.activateGeneration({
+            generation: 'generation-a',
+            revision: source.revision,
+            contentFingerprint: source.contentFingerprint,
+            dirty: false,
+            indexedArticleCount: 1,
+            indexedChunkCount: 1,
+          }));
+        const ragStore = new RagStore(path.join(tmpDir, 'rag.json'));
+        ragStore.addChunk({
+          chunkId: 'wiki-handler',
+          kind: 'android_internals_wiki',
+          registryOrigin: 'external_knowledge_registry',
+          knowledgeSourceId: source.sourceId,
+          sourceGeneration: 'generation-a',
+          uri: `android-internals-wiki://${source.sourceId}/handler`,
+          title: 'Handler internals',
+          snippet: '消息队列 Handler callback evidence',
+          indexedAt: Date.now(),
+          license: 'CC-BY-NC-SA-4.0',
+          attribution: 'Android Internals Wiki by Gracker (CC BY-NC-SA 4.0)',
+          sourceStatus: 'finalized',
+          sourceConfidence: 'high',
+          commitHash: source.revision,
+          contentFingerprint: source.contentFingerprint,
+          filePath: 'src/handler.md',
+        }, scope);
+        const {tools} = createTestServer({
+          ragStore,
+          externalKnowledgeRegistry,
+          knowledgeSourceIds: [source.sourceId],
+          knowledgeScope: scope,
+        });
+
+        const result = await callTool(tools, 'lookup_blog_knowledge', {
+          query: '消息队列 Handler',
+          source: 'android_internals_wiki',
+        });
+
+        expect(result).toEqual(expect.objectContaining({
+          success: true,
+          result: expect.objectContaining({
+            legacyPath: false,
+            hits: [expect.objectContaining({
+              chunkId: 'wiki-handler',
+              snippet: '消息队列 Handler callback evidence',
+            })],
+          }),
+        }));
+      } finally {
+        fs.rmSync(tmpDir, {recursive: true, force: true});
+      }
     });
   });
 });

@@ -87,6 +87,7 @@ import {
   buildNegativePatternSection,
 } from '../../../agentv3/analysisPatternMemory';
 import {sanitizeCodeAwareText} from '../../../services/security/codeAwareOutputRegistry';
+import {projectPrivateKnowledgeToolResult} from '../../../services/rag/toolResultProjectionFilter';
 import { runSnapshots } from '../../../agentv3/selfImprove/strategyFingerprint';
 import { verifyConclusion, generateCorrectionPrompt, isConclusionIncomplete } from './claudeVerifier';
 import { backendLogPath } from '../../../runtimePaths';
@@ -615,6 +616,10 @@ function buildClaudeSdkSystemPrompt(
   return blocks;
 }
 
+function projectClaudeToolResultForPlan(toolName: string, result: unknown): string {
+  return stringifySdkToolResult(projectPrivateKnowledgeToolResult(toolName, result) ?? result);
+}
+
 export const __testing = {
   getSdkResultErrorMessage,
   isMissingSdkConversationError,
@@ -630,6 +635,7 @@ export const __testing = {
   normalizeClaudeBridgeConclusionUpdate,
   sanitizeClaudeConclusionText,
   shouldMarkCorrectionTimeoutPartial,
+  projectClaudeToolResultForPlan,
 };
 
 /** Sleep for the given milliseconds. */
@@ -1602,7 +1608,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
                 recordPlanOrPrePlanToolCall(ctx.analysisPlan, {
                   toolName: matchedTool.name,
                   input: matchedTool.input,
-                  resultText: resultStr,
+                  resultText: projectClaudeToolResultForPlan(matchedTool.name, observed.result),
                 });
               }
 
@@ -2773,6 +2779,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
           knowledgeScope,
           codeAwareMode: options.codeAwareMode,
           codebaseIds: options.codebaseIds,
+          knowledgeSourceIds: options.knowledgeSourceIds,
         });
         mcpServer = mcp.server;
         allowedTools = mcp.allowedTools;
@@ -3689,6 +3696,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
       knowledgeScope,
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
+      knowledgeSourceIds: options.knowledgeSourceIds,
     });
 
     // Phase 9: (removed — skillCatalog was populated but never used in prompt;

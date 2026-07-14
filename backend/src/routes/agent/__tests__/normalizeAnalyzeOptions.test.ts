@@ -65,6 +65,23 @@ describe('normalizeAnalyzeOptions', () => {
     });
   });
 
+  it('preserves authorized knowledge sources for smart deep-dive requests', () => {
+    expect(normalizeAnalyzeOptions(
+      {
+        preset: 'smart',
+        smartAction: 'analyze',
+        knowledgeSourceIds: ['wiki-a', 'wiki-a', 'wiki-b'],
+      },
+      { endpoint: '/analyze', hasReferenceTraceId: false },
+    )).toEqual({
+      analysisMode: 'auto',
+      preset: 'smart',
+      smartAction: 'analyze',
+      smartSelection: { scope: 'all' },
+      knowledgeSourceIds: ['wiki-a', 'wiki-b'],
+    });
+  });
+
   it('defaults smart analyze selection to all scenes', () => {
     expect(normalizeAnalyzeOptions(
       { preset: 'smart', smartAction: 'analyze' },
@@ -103,12 +120,18 @@ describe('normalizeAnalyzeOptions', () => {
 
   it('accepts normal continuation runs and comparison options', () => {
     expect(normalizeAnalyzeOptions(
-      { analysisMode: 'fast', codeAwareMode: 'metadata_only', codebaseIds: ['a', 'a', 'b'] },
+      {
+        analysisMode: 'fast',
+        codeAwareMode: 'metadata_only',
+        codebaseIds: ['a', 'a', 'b'],
+        knowledgeSourceIds: ['wiki-a', 'wiki-a', 'wiki-b'],
+      },
       { endpoint: '/sessions/:id/runs', hasReferenceTraceId: true },
     )).toEqual({
       analysisMode: 'fast',
       codeAwareMode: 'metadata_only',
       codebaseIds: ['a', 'b'],
+      knowledgeSourceIds: ['wiki-a', 'wiki-b'],
     });
   });
 

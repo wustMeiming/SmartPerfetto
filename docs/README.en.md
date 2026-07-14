@@ -12,6 +12,7 @@ SmartPerfetto is an Android performance analysis platform built on Perfetto. Thi
 | User evaluating SmartPerfetto features | [Feature Overview](getting-started/features.en.md) | [Basic Usage](getting-started/usage.en.md), [Configuration Guide](getting-started/configuration.en.md) |
 | Multi-trace result comparison user | [Multi-Trace Analysis Result Comparison](getting-started/multi-trace-result-comparison.en.md) | [Basic Usage](getting-started/usage.en.md), [API Reference](reference/api.en.md) |
 | User who wants AI to reference local source code | [Code-Aware Analysis](getting-started/code-aware-analysis.en.md) | [CLI Reference](reference/cli.en.md), [MCP Tools Reference](reference/mcp-tools.en.md) |
+| User connecting a private Android Internals knowledge base | [Android Internals External Knowledge](getting-started/android-internals-knowledge.en.md) | [API Reference](reference/api.en.md), [MCP Tools Reference](reference/mcp-tools.en.md) |
 | Backend API integrator | [API Reference](reference/api.en.md) | [MCP Tools Reference](reference/mcp-tools.en.md) |
 | CLI or automation user | [CLI Reference](reference/cli.en.md) | [API Reference](reference/api.en.md) |
 | Contributor | [Root AGENTS.md](../AGENTS.md) | [Product Surface Rules](../.claude/rules/product-surface.md), [Testing Rules](../.claude/rules/testing.md), [Contributing Guide](../CONTRIBUTING.md) |

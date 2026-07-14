@@ -262,6 +262,51 @@ describe('experimental Pi agent-core runtime contract', () => {
     ]);
   });
 
+  it('projects private wiki results before recording Pi plan evidence', async () => {
+    const plan = {
+      phases: [{
+        id: 'p-knowledge',
+        name: '知识解释',
+        goal: '查询 Android 系统知识',
+        expectedTools: ['lookup_blog_knowledge'],
+        status: 'in_progress',
+        summary: '',
+      }],
+      successCriteria: '完成知识解释',
+      submittedAt: 1,
+      toolCallLog: [],
+    } as any;
+    const spec: SharedToolSpec = {
+      name: 'lookup_blog_knowledge',
+      description: 'Lookup private Android knowledge',
+      exposure: 'public',
+      inputSchema: {query: z.string()},
+      handler: jest.fn(async () => ({content: [{type: 'text', text: JSON.stringify({
+        result: {
+          query: 'Handler',
+          probed: ['android_internals_wiki'],
+          retrievedAt: 1,
+          legacyPath: false,
+          hits: [{
+            chunkId: 'wiki-1',
+            score: 1,
+            metadata: {kind: 'android_internals_wiki', knowledgeSourceId: 'source-a'},
+            snippet: 'PI_PLAN_PRIVATE_WIKI_CANARY',
+          }],
+        },
+      })}]} as RuntimeToolResult)),
+    };
+    const tool = createPiAgentCoreToolFromSharedSpec(spec, {
+      allowedToolNames: new Set([spec.name]),
+      analysisPlan: {current: plan},
+    });
+
+    await tool.execute('wiki-call', {query: 'Handler'}, undefined);
+
+    const serialized = JSON.stringify(plan.toolCallLog);
+    expect(serialized).not.toContain('PI_PLAN_PRIVATE_WIKI_CANARY');
+  });
+
   it('repairs recoverable Pi submit_plan argument drift before shared tool validation', () => {
     const repaired = repairPiAgentCoreSubmitPlanArgs({
       phases: [
@@ -359,6 +404,45 @@ describe('experimental Pi agent-core runtime contract', () => {
       taskId: 'call-1',
       result: 'ok',
     });
+  });
+
+  it('projects private wiki results before emitting Pi agent responses', () => {
+    const update = projectPiAgentCoreEventToStreamingUpdate({
+      type: 'tool_execution_end',
+      toolName: 'lookup_blog_knowledge',
+      toolCallId: 'wiki-call',
+      result: {content: [{type: 'text', text: JSON.stringify({result: {
+        query: 'Handler',
+        probed: ['android_internals_wiki'],
+        retrievedAt: 1,
+        legacyPath: false,
+        hits: [{
+          chunkId: 'wiki-1',
+          score: 1,
+          metadata: {kind: 'android_internals_wiki', knowledgeSourceId: 'source-a'},
+          snippet: 'PI_PRIVATE_WIKI_CANARY',
+        }],
+      }})}]},
+    });
+
+    const serialized = JSON.stringify(update);
+    expect(serialized).not.toContain('PI_PRIVATE_WIKI_CANARY');
+    expect(serialized).toContain('snippetHash');
+  });
+
+  it('never emits raw private wiki partial tool updates', () => {
+    const update = projectPiAgentCoreEventToStreamingUpdate({
+      type: 'tool_execution_update',
+      toolName: 'lookup_blog_knowledge',
+      toolCallId: 'wiki-call',
+      partialResult: 'PI_PRIVATE_WIKI_PARTIAL_CANARY',
+    });
+
+    expect(JSON.stringify(update)).not.toContain('PI_PRIVATE_WIKI_PARTIAL_CANARY');
+    expect(update).toEqual(expect.objectContaining({
+      type: 'progress',
+      content: expect.objectContaining({update: 'knowledge_lookup_in_progress'}),
+    }));
   });
 
   it('filters Pi message deltas so tool args and reasoning are not logged as visible text', () => {

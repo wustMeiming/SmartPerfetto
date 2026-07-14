@@ -131,12 +131,20 @@
       "duration_ns": "25000000",
       "process": "app",
       "thread": "main",
-      "name": "ActivityThread::performCreate"
+      "name": "SyntheticHandler: dispatchMessage"
     },
     {
       "type": "atrace-slice",
       "at_ns": "300000000",
       "duration_ns": "26000000",
+      "process": "app",
+      "thread": "main",
+      "name": "ActivityThread::performCreate"
+    },
+    {
+      "type": "atrace-slice",
+      "at_ns": "325000000",
+      "duration_ns": "27000000",
       "process": "app",
       "thread": "main",
       "name": "ActivityThread::performResume"

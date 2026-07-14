@@ -73,6 +73,7 @@ import {
 import { verifyConclusion } from '../claude/claudeVerifier';
 import { getExtendedKnowledgeBase } from '../../../services/sqlKnowledgeBase';
 import { sanitizeCodeAwareText } from '../../../services/security/codeAwareOutputRegistry';
+import {projectPrivateKnowledgeToolResult} from '../../../services/rag/toolResultProjectionFilter';
 import { getProviderService, type ProviderConfig, type ProviderScope } from '../../../services/providerManager';
 import type { RuntimeSelection } from '../../runtimeSelection';
 import type { EngineCapabilities } from '../../runtimeDescriptorTypes';
@@ -747,16 +748,18 @@ export async function dispatchOpenCodeBridgeRequest(
           signal: options.getSignal?.(),
         }),
       );
+      const projected = projectPrivateKnowledgeToolResult(definition.name, result);
+      const resultText = summarizeOpenCodeToolResult(projected ?? result);
       recordPlanOrPrePlanToolCall(options.analysisPlan, {
         toolName: definition.name,
         input: args,
-        resultText: summarizeOpenCodeToolResult(result),
+        resultText,
       });
       emitUpdate?.({
         type: 'agent_response',
         content: {
           taskId,
-          result: summarizeOpenCodeToolResult(result),
+          result: resultText,
         },
         timestamp: Date.now(),
       });
@@ -2238,6 +2241,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       knowledgeScope,
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
+      knowledgeSourceIds: options.knowledgeSourceIds,
       referenceTraceId: options.referenceTraceId,
       ...(comparisonContext ? { comparisonContext } : {}),
     });
