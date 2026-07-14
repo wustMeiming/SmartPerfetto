@@ -312,9 +312,9 @@
       "source_file": "backend/skills/atomic/rendering_pipeline_detection.skill.yaml",
       "parameters": {},
       "required_steps": [
-        "thread_signals"
+        "score_pipelines"
       ],
-      "semantic_step": "thread_signals",
+      "semantic_step": "score_pipelines",
       "required_marker": "SmartPerfetto::CASE::rendering-jank"
     },
     {
