@@ -6,7 +6,16 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from '@jest/globals';
 import { applyEnterpriseMinimalSchema } from '../../enterpriseSchema';
 import { BatchTraceRunRepository } from '../batchTraceStore';
-import { BATCH_TRACE_RUN_SCHEMA_VERSION, type BatchTraceRunV1 } from '../batchTraceTypes';
+import {
+  BATCH_TRACE_DOMAIN_ANALYSIS_SCHEMA_VERSION,
+  BATCH_TRACE_DOMAIN_EVIDENCE_SCHEMA_VERSION,
+  BATCH_TRACE_RUN_SCHEMA_VERSION,
+  type BatchTraceRunV1,
+} from '../batchTraceTypes';
+import {
+  HEAP_PATH_CLUSTER_SCHEMA_VERSION,
+  HEAP_PATH_NORMALIZATION_VERSION,
+} from '../../../types/heapPathCluster';
 
 function db(): Database.Database {
   const database = new Database(':memory:');
@@ -59,6 +68,39 @@ function run(): BatchTraceRunV1 {
       metrics: [],
       limitations: [],
     },
+    domainAnalysis: {
+      schemaVersion: BATCH_TRACE_DOMAIN_ANALYSIS_SCHEMA_VERSION,
+      operation: 'heap_path_cluster',
+      evidence: {
+        schemaVersion: BATCH_TRACE_DOMAIN_EVIDENCE_SCHEMA_VERSION,
+        skillId: 'android_heap_dominator_path_extract',
+        sourceStepId: 'dominator_paths',
+        requiredColumns: ['path'],
+        rowCount: 1,
+        rejectedRowCount: 0,
+        truncatedRowCount: 0,
+        rows: [{
+          refId: 'batch-row-1',
+          traceOrdinal: 0,
+          traceIdentity: 'trace-a',
+          traceId: 'trace-a',
+          values: {path: '[ROOT] Root -> Leak'},
+        }],
+      },
+      result: {
+        schemaVersion: HEAP_PATH_CLUSTER_SCHEMA_VERSION,
+        normalizationVersion: HEAP_PATH_NORMALIZATION_VERSION,
+        status: 'insufficient_samples',
+        seedHash: 'seed',
+        selectedK: null,
+        silhouetteScore: null,
+        collapseTolerancePct: 5,
+        input: {traceCount: 1, sampleCount: 1, rowCount: 1, rejectedRowCount: 0},
+        clusters: [],
+        failures: [],
+        limitations: [],
+      },
+    },
   };
 }
 
@@ -71,6 +113,7 @@ describe('BatchTraceRunRepository', () => {
     const stored = repository.getRun({ tenantId: 'tenant-a', workspaceId: 'workspace-a' }, 'batch-1');
 
     expect(stored?.id).toBe('batch-1');
+    expect(stored?.domainAnalysis).toEqual(run().domainAnalysis);
     expect(database.prepare('SELECT COUNT(*) AS count FROM batch_trace_inputs').get()).toMatchObject({ count: 1 });
     expect(database.prepare('SELECT COUNT(*) AS count FROM batch_trace_results').get()).toMatchObject({ count: 1 });
     expect(database.prepare('SELECT COUNT(*) AS count FROM batch_trace_metrics').get()).toMatchObject({ count: 1 });
