@@ -1434,7 +1434,7 @@
       "trace": {
         "file": "trace.overlay.pftrace",
         "format": "perfetto-protobuf",
-        "sha256": "2e6a951520693480b5316c262b57557a564ec9277b24e97fac49b4bb8e747e73",
+        "sha256": "0827bcf705796a74829d16c8d1a8bd313d7f505975f72ee62ab7b2dc33756950",
         "materialization": "base-plus-overlay"
       },
       "android": {
@@ -1474,6 +1474,7 @@
         "skills": [
           "android_gpu_work_period_track",
           "gpu_analysis",
+          "gpu_compute_kernel_analysis",
           "gpu_freq_in_range",
           "gpu_frequency_analysis",
           "gpu_metrics",
@@ -1517,6 +1518,23 @@
               "gpu_freq_overview"
             ],
             "semantic_step": "gpu_freq_overview",
+            "required_marker": "SmartPerfetto::CASE::gpu-workload"
+          },
+          {
+            "id": "execute-gpu_compute_kernel_analysis",
+            "type": "skill",
+            "target": "gpu_compute_kernel_analysis",
+            "mode": "semantic",
+            "source_file": "backend/skills/composite/gpu_compute_kernel_analysis.skill.yaml",
+            "parameters": {
+              "max_rows": 50
+            },
+            "required_steps": [
+              "data_check",
+              "kernel_summary",
+              "launch_configuration"
+            ],
+            "semantic_step": "kernel_summary",
             "required_marker": "SmartPerfetto::CASE::gpu-workload"
           },
           {

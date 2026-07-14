@@ -146,6 +146,11 @@ const SEMANTIC_STEP_OVERRIDES = new Map([
   ['cpu_topology_view', 'read_topology'],
   ['network_analysis', 'network_slice_overview'],
   ['android_heap_dominator_path_extract', 'dominator_paths'],
+  ['gpu_compute_kernel_analysis', 'kernel_summary'],
+]);
+
+const REQUIRED_STEP_OVERRIDES = new Map([
+  ['gpu_compute_kernel_analysis', 'launch_configuration'],
 ]);
 
 const EXPECTED_LIMITATIONS = new Map([
@@ -279,8 +284,15 @@ function skillExpectation(skill, family, identities) {
   const selectedStepIndex = semanticStepIndex >= 0
     ? semanticStepIndex
     : steps.findIndex((step) => typeof step?.id === 'string');
-  const requiredSteps = selectedStepIndex >= 0
-    ? steps.slice(0, selectedStepIndex + 1).map((step) => step.id).filter(Boolean)
+  const requiredStep = REQUIRED_STEP_OVERRIDES.get(definition.name);
+  const requiredStepIndex = requiredStep
+    ? steps.findIndex((step) => step.id === requiredStep)
+    : selectedStepIndex;
+  if (requiredStep && requiredStepIndex < 0) {
+    throw new Error(`Unknown required step override for ${definition.name}: ${requiredStep}`);
+  }
+  const requiredSteps = requiredStepIndex >= 0
+    ? steps.slice(0, Math.max(selectedStepIndex, requiredStepIndex) + 1).map((step) => step.id).filter(Boolean)
     : [];
   const limitation = EXPECTED_LIMITATIONS.get(definition.name);
   return {
@@ -445,6 +457,34 @@ function scenarioForFamily(family) {
       {type: 'gpu-work-period', at_ns: '450000000', duration_ns: '30000000', gpu_id: 0, uid: 10999, active_duration_ns: '24000000', cpu: 0},
       {type: 'gpu-frequency', at_ns: '450000000', gpu_id: 0, value: 700000, cpu: 0},
       {type: 'gpu-power-state', at_ns: '460000000', old_state: 0, new_state: 2, cpu: 0},
+      {
+        type: 'gpu-compute-kernel',
+        at_ns: '500000000',
+        duration_ns: '12000000',
+        process: 'app',
+        gpu_id: 0,
+        context: '1001',
+        kernel: 'SyntheticComputeKernelA',
+        demangled_kernel: 'SyntheticComputeKernelA(float*)',
+        arch: 'synthetic-v1',
+        grid: {x: 64, y: 2, z: 1},
+        workgroup: {x: 32, y: 2, z: 1},
+        args: {registers_per_thread: 24, shared_mem_static: 1024, shared_mem_dynamic: 2048, barriers_per_block: 2, waves_per_multiprocessor: 4},
+      },
+      {
+        type: 'gpu-compute-kernel',
+        at_ns: '540000000',
+        duration_ns: '7000000',
+        process: 'app',
+        gpu_id: 0,
+        context: '1001',
+        kernel: 'SyntheticComputeKernelB',
+        demangled_kernel: 'SyntheticComputeKernelB(int*)',
+        arch: 'synthetic-v1',
+        grid: {x: 32, y: 1, z: 1},
+        workgroup: {x: 16, y: 1, z: 1},
+        args: {registers_per_thread: 16, shared_mem_static: 512, shared_mem_dynamic: 0, barriers_per_block: 1, waves_per_multiprocessor: 2},
+      },
     );
   }
   return {

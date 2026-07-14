@@ -11,6 +11,9 @@ const {sha256Buffer} = require('./hash.cjs');
 const FIRST_SYNTHETIC_PID = 700000;
 const HEAP_GRAPH_EXTENSION = '.com.android.art.tracing.ArtHeapGraphTracePacket.heapGraph';
 const HEAP_GRAPH_LIMITS = Object.freeze({types: 5000, objects: 10000, roots: 1000, references: 50000});
+const GPU_COMPUTE_KERNELS_EXTENSION = '.perfetto.protos.GpuInternedData.computeKernels';
+const GPU_COMPUTE_ARG_NAMES_EXTENSION = '.perfetto.protos.GpuInternedData.computeArgNames';
+const GPU_COMPUTE_MAX_ARGS = 64;
 const HEAP_ROOT_TYPES = new Set([
   'ROOT_UNKNOWN',
   'ROOT_JNI_GLOBAL',
@@ -82,6 +85,22 @@ function nonNegativeInt64String(value, field) {
     throw new Error(`${field} must fit in a signed 64-bit integer`);
   }
   return validated;
+}
+
+function positiveUint64String(value, field) {
+  const validated = decimalString(value, field);
+  const numeric = BigInt(validated);
+  if (numeric === 0n || numeric > 18446744073709551615n) {
+    throw new Error(`${field} must be a positive unsigned 64-bit integer`);
+  }
+  return validated;
+}
+
+function positiveUint32(value, field) {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > 4294967295) {
+    throw new Error(`${field} must be a positive unsigned 32-bit integer`);
+  }
+  return value;
 }
 
 function nonEmptyString(value, field) {
@@ -270,6 +289,84 @@ function validateManagedHeapGraph(signal, process) {
   };
 }
 
+function validateGpuComputeKernel(signal, process, signalIndex) {
+  const gpuId = nonNegativeInteger(signal.gpu_id, 'gpu-compute-kernel gpu_id');
+  if (gpuId > 2147483647) throw new Error('gpu-compute-kernel gpu_id must fit in a signed 32-bit integer');
+  const context = positiveUint64String(signal.context, 'gpu-compute-kernel context');
+  const duration = positiveUint64String(signal.duration_ns, 'gpu-compute-kernel duration_ns');
+  const kernel = nonEmptyString(signal.kernel, 'gpu-compute-kernel kernel');
+  const demangledKernel = nonEmptyString(
+    signal.demangled_kernel,
+    'gpu-compute-kernel demangled_kernel',
+  );
+  const arch = nonEmptyString(signal.arch, 'gpu-compute-kernel arch');
+
+  function dimensions(value, field) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`${field} must be an object`);
+    }
+    return {
+      x: positiveUint32(value.x, `${field}.x`),
+      y: positiveUint32(value.y, `${field}.y`),
+      z: positiveUint32(value.z, `${field}.z`),
+    };
+  }
+
+  if (!signal.args || typeof signal.args !== 'object' || Array.isArray(signal.args)) {
+    throw new Error('gpu-compute-kernel args must be an object');
+  }
+  const sortedArgs = Object.entries(signal.args).sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0);
+  if (sortedArgs.length > GPU_COMPUTE_MAX_ARGS) {
+    throw new Error(`gpu-compute-kernel args exceed ${GPU_COMPUTE_MAX_ARGS}`);
+  }
+
+  const iidBase = (signalIndex + 1) * 1000;
+  const computeArgNames = [];
+  const args = sortedArgs.map(([name, value], index) => {
+    const validatedName = nonEmptyString(name, `gpu-compute-kernel args[${index}].name`);
+    const validatedValue = nonNegativeSafeInteger(value, `gpu-compute-kernel args.${validatedName}`);
+    const nameIid = iidBase + 100 + index;
+    computeArgNames.push({iid: nameIid, name: validatedName});
+    return {nameIid, uintValue: validatedValue};
+  });
+
+  return {
+    gpuId,
+    context,
+    duration,
+    queueIid: iidBase + 1,
+    stageIid: iidBase + 2,
+    kernelIid: iidBase + 3,
+    eventId: iidBase + 4,
+    graphicsContext: {iid: context, pid: process.pid, api: 'OPEN_CL'},
+    queueSpecification: {
+      iid: iidBase + 1,
+      name: 'Synthetic Compute Queue',
+      description: 'Deterministic SmartPerfetto compute queue',
+      category: 'OTHER',
+    },
+    stageSpecification: {
+      iid: iidBase + 2,
+      name: 'Compute',
+      description: 'Vendor-neutral compute stage',
+      category: 'COMPUTE',
+    },
+    computeKernel: {
+      iid: iidBase + 3,
+      name: kernel,
+      demangledName: demangledKernel,
+      arch,
+    },
+    computeArgNames,
+    launch: {
+      gridSize: dimensions(signal.grid, 'gpu-compute-kernel grid'),
+      workgroupSize: dimensions(signal.workgroup, 'gpu-compute-kernel workgroup'),
+      args,
+    },
+  };
+}
+
 function printEvent(timestamp, tid, buf) {
   return {timestamp, pid: tid, print: {buf}};
 }
@@ -421,6 +518,32 @@ function encodeScenarioOverlay(repoRoot, scenario, options) {
           startTimeNs: timestamp,
           endTimeNs: end,
           totalActiveDurationNs: decimalString(signal.active_duration_ns, 'gpu-work-period active_duration_ns'),
+        },
+      });
+    } else if (signal.type === 'gpu-compute-kernel') {
+      const process = identities.processDefinitions.get(signal.process);
+      if (!process) throw new Error(`signal references unknown process ${signal.process}`);
+      const compute = validateGpuComputeKernel(signal, process, index);
+      dataPackets.push({
+        timestamp,
+        internedData: {
+          graphicsContexts: [compute.graphicsContext],
+          gpuSpecifications: [compute.queueSpecification, compute.stageSpecification],
+          [GPU_COMPUTE_KERNELS_EXTENSION]: [compute.computeKernel],
+          [GPU_COMPUTE_ARG_NAMES_EXTENSION]: compute.computeArgNames,
+        },
+      });
+      dataPackets.push({
+        timestamp,
+        gpuRenderStageEvent: {
+          eventId: compute.eventId,
+          duration: compute.duration,
+          hwQueueIid: compute.queueIid,
+          stageIid: compute.stageIid,
+          gpuId: compute.gpuId,
+          context: compute.context,
+          kernelIid: compute.kernelIid,
+          launch: compute.launch,
         },
       });
     } else if (signal.type === 'gpu-frequency') {

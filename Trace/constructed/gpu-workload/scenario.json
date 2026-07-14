@@ -163,6 +163,62 @@
       "old_state": 0,
       "new_state": 2,
       "cpu": 0
+    },
+    {
+      "type": "gpu-compute-kernel",
+      "at_ns": "500000000",
+      "duration_ns": "12000000",
+      "process": "app",
+      "gpu_id": 0,
+      "context": "1001",
+      "kernel": "SyntheticComputeKernelA",
+      "demangled_kernel": "SyntheticComputeKernelA(float*)",
+      "arch": "synthetic-v1",
+      "grid": {
+        "x": 64,
+        "y": 2,
+        "z": 1
+      },
+      "workgroup": {
+        "x": 32,
+        "y": 2,
+        "z": 1
+      },
+      "args": {
+        "registers_per_thread": 24,
+        "shared_mem_static": 1024,
+        "shared_mem_dynamic": 2048,
+        "barriers_per_block": 2,
+        "waves_per_multiprocessor": 4
+      }
+    },
+    {
+      "type": "gpu-compute-kernel",
+      "at_ns": "540000000",
+      "duration_ns": "7000000",
+      "process": "app",
+      "gpu_id": 0,
+      "context": "1001",
+      "kernel": "SyntheticComputeKernelB",
+      "demangled_kernel": "SyntheticComputeKernelB(int*)",
+      "arch": "synthetic-v1",
+      "grid": {
+        "x": 32,
+        "y": 1,
+        "z": 1
+      },
+      "workgroup": {
+        "x": 16,
+        "y": 1,
+        "z": 1
+      },
+      "args": {
+        "registers_per_thread": 16,
+        "shared_mem_static": 512,
+        "shared_mem_dynamic": 0,
+        "barriers_per_block": 1,
+        "waves_per_multiprocessor": 2
+      }
     }
   ]
 }

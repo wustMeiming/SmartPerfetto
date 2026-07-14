@@ -80,6 +80,29 @@ function managedHeapSignal() {
   };
 }
 
+function gpuComputeSignal() {
+  return {
+    type: 'gpu-compute-kernel',
+    at_ns: '150000000',
+    duration_ns: '12000000',
+    process: 'app',
+    gpu_id: 0,
+    context: '1001',
+    kernel: 'SyntheticComputeKernel',
+    demangled_kernel: 'SyntheticComputeKernel(float*)',
+    arch: 'synthetic-v1',
+    grid: {x: 64, y: 1, z: 1},
+    workgroup: {x: 32, y: 1, z: 1},
+    args: {
+      registers_per_thread: 24,
+      shared_mem_static: 1024,
+      shared_mem_dynamic: 2048,
+      barriers_per_block: 2,
+      waves_per_multiprocessor: 4,
+    },
+  };
+}
+
 function queryTrace(tracePath, sql) {
   const result = spawnSync(traceProcessor, ['-Q', sql, tracePath], {
     cwd: repoRoot,
@@ -273,6 +296,71 @@ test('materializes memory, battery, power, GPU, CPU frequency, IRQ, and async ev
       (SELECT COUNT(*) FROM android_lmk_events WHERE process_name = 'com.smartperfetto.fixture') AS lmk,
       (SELECT COUNT(*) FROM android_oom_adj_intervals) AS oom_adj`);
   assert.match(output, /\n(?:[1-9][0-9]*,){14}[1-9][0-9]*\s*$/);
+});
+
+test('materializes a typed GPU compute kernel launch', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-generator-gpu-compute-'));
+  const outputPath = path.join(tempDir, 'combined.pftrace');
+  const scenario = fixtureScenario();
+  scenario.signals.push(gpuComputeSignal());
+  const overlay = encodeScenarioOverlay(repoRoot, scenario, {
+    anchorNs: '1000000000',
+    usedPids: new Set(),
+    sequenceId: 454545,
+  });
+  materializeTrace(Buffer.alloc(0), overlay.buffer, outputPath);
+
+  const output = queryTrace(outputPath, `
+    SELECT
+      s.render_stage_category,
+      s.dur,
+      EXTRACT_ARG(s.arg_set_id, 'kernel_demangled_name') AS kernel,
+      EXTRACT_ARG(s.arg_set_id, 'launch.grid_size.x') AS grid_x,
+      EXTRACT_ARG(s.arg_set_id, 'launch.workgroup_size.x') AS workgroup_x,
+      EXTRACT_ARG(s.arg_set_id, 'registers_per_thread') AS registers,
+      EXTRACT_ARG(s.arg_set_id, 'shared_mem_static') AS shared_static,
+      EXTRACT_ARG(s.arg_set_id, 'shared_mem_dynamic') AS shared_dynamic,
+      EXTRACT_ARG(s.arg_set_id, 'barriers_per_block') AS barriers,
+      EXTRACT_ARG(s.arg_set_id, 'waves_per_multiprocessor') AS waves
+    FROM gpu_slice AS s
+    WHERE s.render_stage_category = 2`);
+  assert.match(
+    output,
+    /\n2,12000000,"SyntheticComputeKernel\(float\*\)",64,32,24,1024,2048,2,4\s*$/,
+  );
+
+  const reorderedScenario = fixtureScenario();
+  const reorderedSignal = gpuComputeSignal();
+  reorderedSignal.args = Object.fromEntries(Object.entries(reorderedSignal.args).reverse());
+  reorderedScenario.signals.push(reorderedSignal);
+  const reordered = encodeScenarioOverlay(repoRoot, reorderedScenario, {
+    anchorNs: '1000000000',
+    usedPids: new Set(),
+    sequenceId: 454545,
+  });
+  assert.deepEqual(reordered.buffer, overlay.buffer);
+});
+
+test('rejects malformed or unbounded GPU compute launches', () => {
+  const zeroDimension = fixtureScenario();
+  const zeroDimensionSignal = gpuComputeSignal();
+  zeroDimensionSignal.workgroup.x = 0;
+  zeroDimension.signals.push(zeroDimensionSignal);
+  assert.throws(
+    () => encodeScenarioOverlay(repoRoot, zeroDimension, {anchorNs: '1', usedPids: new Set(), sequenceId: 1}),
+    /workgroup.x must be a positive unsigned 32-bit integer/,
+  );
+
+  const tooManyArgs = fixtureScenario();
+  const tooManyArgsSignal = gpuComputeSignal();
+  tooManyArgsSignal.args = Object.fromEntries(
+    Array.from({length: 65}, (_, index) => [`arg_${index}`, index]),
+  );
+  tooManyArgs.signals.push(tooManyArgsSignal);
+  assert.throws(
+    () => encodeScenarioOverlay(repoRoot, tooManyArgs, {anchorNs: '1', usedPids: new Set(), sequenceId: 1}),
+    /args exceed 64/,
+  );
 });
 
 test('materializes a managed heap graph with dominator path evidence', () => {
