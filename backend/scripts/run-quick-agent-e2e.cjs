@@ -18,7 +18,7 @@ const QUICK_RUNTIME_KINDS = [
   'pi-agent-core',
   'opencode',
 ];
-const DEFAULT_TRACE = '../test-traces/scroll-demo-customer-scroll.pftrace';
+const DEFAULT_TRACE = '../Trace/real/android-scroll-customer/trace.pftrace';
 const DEFAULT_TIMEOUT_MS = '300000';
 const QUICK_FULL_REPORT_FALLBACK = 'quick_full_report_shape';
 const QUICK_REFERENCE_HEADING = '## 逐句数据引用（结构化来源）';

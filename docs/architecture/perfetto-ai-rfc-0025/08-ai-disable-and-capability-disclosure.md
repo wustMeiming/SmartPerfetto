@@ -474,7 +474,7 @@ Verification notes:
   `compare`, and `capture android --analyze`.
 - CLI deterministic smoke covered `provider list`, `capture presets`,
   `capture config`, `query`, and deterministic `skill` execution.
-- Browser smoke loaded `test-traces/launch_light.pftrace` in dev mode and
+- Browser smoke loaded `Trace/real/android-startup-light/trace.pftrace` in dev mode and
   verified the AI Assistant disabled disclosure, disabled input/send controls,
   and zero analyze requests.
 - `perfetto/ui` production build and `./scripts/update-frontend.sh` passed for

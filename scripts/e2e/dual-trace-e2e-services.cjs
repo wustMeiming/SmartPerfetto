@@ -190,7 +190,7 @@ function childEnvironments(workspace, services, providerBaseUrl) {
       SMARTPERFETTO_E2E_PROVIDER_URL: providerBaseUrl,
       SMARTPERFETTO_E2E_STUB_STATE_URL: `${providerBaseUrl}/__state`,
       SMARTPERFETTO_E2E_ARTIFACT_DIR: workspace.artifactDir,
-      SMARTPERFETTO_E2E_FIXTURE_DIR: PATHS.fixtures,
+      SMARTPERFETTO_E2E_FIXTURE_DIR: workspace.fixtureDir,
       SMARTPERFETTO_E2E_TP_PORT_MIN: String(services.traceProcessorPortMin),
       SMARTPERFETTO_E2E_TP_PORT_MAX: String(services.traceProcessorPortMax),
       SMARTPERFETTO_E2E_CHROME_CHANNEL:

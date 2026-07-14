@@ -895,14 +895,14 @@ describe('Plan 18 — DomainSkillEvalContract', () => {
       cases: [
         {
           caseId: 'scrolling/jank/heavy_mixed',
-          tracePath: 'test-traces/scroll-demo-customer-scroll.pftrace',
+          tracePath: 'Trace/real/android-scroll-customer/trace.pftrace',
           skillId: 'scrolling_analysis',
           description: 'Customer scrolling, mixed jank',
           groundTruthSource: 'manual annotation 2026-04-02',
         },
         {
           caseId: 'startup/heavy/lacunh',
-          tracePath: 'test-traces/lacunh_heavy.pftrace',
+          tracePath: 'Trace/real/android-startup-heavy/trace.pftrace',
           skillId: 'startup_analysis',
           description: 'Heavy app startup',
         },

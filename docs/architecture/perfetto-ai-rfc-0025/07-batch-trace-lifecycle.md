@@ -177,7 +177,7 @@ Validation completed for this implementation:
 - `npm run cli:pack-check` passed, including backend build and CLI package
   manifest validation.
 - `npm run test:scene-trace-regression` passed across all 6 canonical traces.
-- Real CLI smoke passed on `test-traces/launch_light.pftrace`, wrote JSON/HTML
+- Real CLI smoke passed on `Trace/real/android-startup-light/trace.pftrace`, wrote JSON/HTML
   artifacts, and produced promotable `startup.total_ms = 301.839437` and
   `startup.first_frame_ms = 299.818888`.
 - `git diff --check` passed.
@@ -659,7 +659,7 @@ Validation:
 ```bash
 cd backend
 npx jest src/cli-user/commands/__tests__/batch.test.ts --runInBand
-npm run cli:dev -- batch skill startup_analysis ../test-traces/launch_light.pftrace --format json
+npm run cli:dev -- batch skill startup_analysis ../Trace/real/android-startup-light/trace.pftrace --format json
 ```
 
 Expected result: CLI batch can run one real trace, emit JSON, and write

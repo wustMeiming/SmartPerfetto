@@ -179,3 +179,7 @@ providers.json
 # Local E2E evidence (may contain Trace-derived data and machine paths)
 /output/
 .gstack/
+
+# Trace corpus private staging and materialized constructed outputs
+/Trace/real/.private/
+/Trace/.generated/
