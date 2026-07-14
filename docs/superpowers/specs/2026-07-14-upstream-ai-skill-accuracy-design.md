@@ -28,7 +28,8 @@ GPU inventory/occupancy/frequency workflows. Three accuracy gaps remain:
 3. Make upstream-to-local coverage decisions evidence-backed and resistant to
    path-prefix false positives.
 4. Improve analysis accuracy, completeness, explainability, and verifiability
-   across Web/API, CLI, reports, snapshots, and comparison.
+   across Web/API, CLI, and reports while preserving per-trace evidence for
+   snapshots and comparison.
 5. Preserve a strict missing-data boundary: unavailable heap or GPU signals are
    limitations, never proof that a problem is absent.
 
@@ -68,8 +69,8 @@ existing batch trace runner executes those Skills across traces. A typed,
 registered batch post-processor performs deterministic aggregation and returns
 a domain result with evidence references and limitations. GPU compute remains
 a normal single-trace composite Skill. This approach reuses current product
-boundaries and keeps every result consumable by reports, snapshots, CLI, API,
-and comparison.
+boundaries: batch aggregates stay on batch/API/CLI/report surfaces, while
+per-trace extraction evidence remains consumable by snapshots and comparison.
 
 ## Architecture
 
@@ -79,7 +80,7 @@ Add a composite Skill named `android_heap_dominator_path_extract`. It performs
 an availability query before reading managed heap graph data and emits a
 bounded row set containing:
 
-- process name and stable process identity where available;
+- process name plus required stable `upid` identity;
 - heap graph sample timestamp;
 - class name and root type;
 - raw dominator class path;
@@ -113,9 +114,14 @@ only the declared source rows until post-processing completes, then discard
 the unbounded execution object. Normal batch metrics continue to use the
 existing path.
 
-The public `BatchTraceRunV1` contract gains an optional versioned domain
-analysis result. Existing consumers that ignore it remain compatible. The
-result is stored with the batch run and included in JSON/HTML report export.
+The public `BatchTraceRunV1` contract gains an optional discriminated domain
+analysis envelope with `operation`, `schemaVersion`, `result`, and a bounded
+source-evidence artifact. Existing consumers that ignore it remain compatible.
+The artifact assigns deterministic row references and preserves the source
+step, trace identity, `(upid, graph_sample_ts)` sample identity, declared
+columns, bounded rows, and truncation counts. Every cluster evidence reference
+must resolve inside this artifact. The envelope is stored with the batch run
+and included in JSON/HTML report export.
 
 ### 3. Deterministic heap clustering engine
 
@@ -149,7 +155,8 @@ group and a limitation explaining that Silhouette selection was not possible.
 
 ### 4. Heap cluster result contract
 
-Add a versioned `HeapPathClusterAnalysisV1` contract containing:
+Add a versioned `HeapPathClusterAnalysisV1` result inside a generic
+`BatchTraceDomainAnalysisV1` envelope containing:
 
 - status: `completed`, `partial`, `unavailable`, or `insufficient_samples`;
 - input trace/sample/row counts and rejected-row counts;
@@ -160,6 +167,11 @@ Add a versioned `HeapPathClusterAnalysisV1` contract containing:
   members;
 - evidence references back to the per-trace Skill rows;
 - limitations and per-trace failures.
+
+The evidence artifact is not an unbounded copy of `SkillExecutionResult` or
+every DataEnvelope. It stores only validated, bounded source rows. Its row ids
+are stable hashes of source step, trace/sample identity, and canonical row
+content, so a result cannot cite an empty or transient envelope id.
 
 This is deterministic evidence, not an agent conclusion. Claim verification
 may support statements such as "this retaining signature appears in 8 of 10
@@ -196,10 +208,11 @@ The first version reuses existing surfaces:
 - API and CLI submit the extraction Skill through the batch trace workflow;
 - the batch run persists the typed cluster result;
 - JSON and HTML batch reports render a cluster summary and limitations;
-- promoted snapshots keep bounded cluster summary metrics and evidence links,
-  not the complete path matrix;
-- comparison can compare those promoted summaries without recomputing or
-  discarding provenance;
+- promoted snapshots keep only their own per-trace extraction metrics and
+  evidence links; the cross-trace cluster aggregate remains owned by the batch
+  run and must not be copied into each single-trace snapshot;
+- comparison can compare per-trace extraction metrics independently, while the
+  cross-trace cluster result is consumed from the batch run/report;
 - live raw two-trace analysis can continue to use `compare_skill` for the
   extraction and GPU Skills, while true clustering uses the batch operation.
 
@@ -239,10 +252,10 @@ Batch trace request
        -> TF-IDF
        -> deterministic K-Means / Silhouette selection
        -> parent-child retained-size collapse
-       -> HeapPathClusterAnalysisV1
+  -> BatchTraceDomainAnalysisV1<HeapPathClusterAnalysisV1>
   -> BatchTraceRun persistence
   -> JSON/HTML report
-  -> optional bounded snapshot promotion and comparison
+  -> per-trace snapshot promotion preserves only per-trace metrics/evidence
 
 Single trace GPU request
   -> gpu_compute_kernel_analysis
@@ -328,8 +341,9 @@ The paired public review is expected in:
    cannot be rendered as proof of health or absence of a leak.
 4. Heap clustering has a data-present semantic fixture; GPU compute has a real
    compute-category/launch-argument semantic fixture.
-5. Reports, snapshots, API, CLI, and comparison preserve the same result and
-   provenance boundaries.
+5. API, CLI, and reports preserve the batch cluster result; snapshots and
+   comparison preserve per-trace evidence without duplicating the cross-trace
+   aggregate into single-trace records.
 6. No provider runtime receives a private implementation path or different
    analytical behavior.
 7. The upstream gap report cannot mark a file covered solely because its path
