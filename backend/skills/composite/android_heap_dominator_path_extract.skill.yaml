@@ -179,7 +179,7 @@ steps:
         SELECT
           tree.id,
           ROW_NUMBER() OVER (
-            PARTITION BY upid, graph_sample_ts
+            PARTITION BY tree.upid, tree.graph_sample_ts
             ORDER BY tree.self_size DESC, cumulative.cumulative_size DESC, tree.id
           ) AS row_number
         FROM _heap_graph_dominator_class_tree AS tree
@@ -207,31 +207,23 @@ steps:
       JOIN __sp_heap_dominator_ancestor_ids AS ancestor USING (id);
 
       CREATE OR REPLACE PERFETTO TABLE __sp_heap_dominator_paths AS
+      WITH RECURSIVE paths(id, path, root_type) AS (
+        SELECT
+          id,
+          '[' || COALESCE(root_type, 'ROOT') || '] ' || label AS path,
+          COALESCE(root_type, 'ROOT') AS root_type
+        FROM __sp_heap_dominator_labels
+        WHERE parent_id IS NULL
+        UNION ALL
+        SELECT
+          child.id,
+          parent.path || ' -> ' || child.label AS path,
+          parent.root_type
+        FROM paths AS parent
+        JOIN __sp_heap_dominator_labels AS child ON child.parent_id = parent.id
+      )
       SELECT id, path, root_type
-      FROM _graph_scan!(
-        (
-          SELECT parent_id AS source_node_id, id AS dest_node_id
-          FROM __sp_heap_dominator_labels
-          WHERE parent_id IS NOT NULL
-        ),
-        (
-          SELECT
-            id,
-            '[' || COALESCE(root_type, 'ROOT') || '] ' || label AS path,
-            COALESCE(root_type, 'ROOT') AS root_type
-          FROM __sp_heap_dominator_labels
-          WHERE parent_id IS NULL
-        ),
-        (path, root_type),
-        (
-          SELECT
-            traversal.id,
-            traversal.path || ' -> ' || label.label AS path,
-            traversal.root_type
-          FROM $table AS traversal
-          JOIN __sp_heap_dominator_labels AS label ON traversal.id = label.id
-        )
-      );
+      FROM paths;
 
       WITH input AS (
         SELECT MIN(MAX(COALESCE(${max_rows|500}, 500), 1), 500) AS max_rows

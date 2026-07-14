@@ -145,6 +145,7 @@ const FAMILIES = [
 const SEMANTIC_STEP_OVERRIDES = new Map([
   ['cpu_topology_view', 'read_topology'],
   ['network_analysis', 'network_slice_overview'],
+  ['android_heap_dominator_path_extract', 'dominator_paths'],
 ]);
 
 const EXPECTED_LIMITATIONS = new Map([
@@ -154,8 +155,6 @@ const EXPECTED_LIMITATIONS = new Map([
   ['io_pressure', {mode: 'graceful_empty', reason: 'The fixture does not yet emit PSI I/O pressure counters.'}],
   ['callstack_analysis', {mode: 'graceful_empty', reason: 'The fixture does not contain perf samples or interned callstacks.'}],
   ['linux_perf_counter_hotspots', {mode: 'graceful_empty', reason: 'The fixture does not contain PMU perf sample/counter packets.'}],
-  ['android_heap_graph_leak_candidates', {mode: 'graceful_empty', reason: 'The fixture does not contain a managed heap graph dump.'}],
-  ['android_memory_v57_ai_diagnostics', {mode: 'graceful_empty', reason: 'Heap-graph diagnostics remain empty without a managed heap graph dump.'}],
   ['native_heap_breakdown', {mode: 'graceful_empty', reason: 'The fixture does not contain heapprofd allocation packets.'}],
   ['wattson_app_startup_power', {mode: 'graceful_empty', reason: 'Wattson startup attribution is device-model gated and unsupported by this base device.'}],
   ['dmabuf_analysis', {mode: 'unavailable', reason: 'The fixture does not contain DMA-BUF allocation/residency events.', expected_error: 'Condition not met'}],
@@ -404,6 +403,24 @@ function scenarioForFamily(family) {
     familySignals.push(
       {type: 'process-stats', at_ns: '400000000', process: 'app', vm_rss_kb: 102400, rss_anon_kb: 81920, rss_file_kb: 20480, rss_shmem_kb: 1024, vm_swap_kb: 1024, vm_hwm_kb: 122880, oom_score_adj: 200},
       {type: 'process-stats', at_ns: '600000000', process: 'app', vm_rss_kb: 174080, rss_anon_kb: 133120, rss_file_kb: 40960, rss_shmem_kb: 2048, vm_swap_kb: 4096, vm_hwm_kb: 184320, oom_score_adj: 900},
+      {type: 'atrace-slice', at_ns: '620000000', duration_ns: '1000000', process: 'app', thread: 'main', name: 'SI$com.smartperfetto.fixture.LeakedActivity.onDestroy'},
+      {
+        type: 'managed-heap-graph',
+        at_ns: '650000000',
+        process: 'app',
+        heap_bytes_allocated: '12582976',
+        types: [
+          {id: 1, class_name: 'com.smartperfetto.fixture.RootHolder', object_size: 64},
+          {id: 2, class_name: 'com.smartperfetto.fixture.LeakContainer', object_size: 8388608},
+          {id: 3, class_name: 'com.smartperfetto.fixture.LeakedActivity', object_size: 4194304},
+        ],
+        objects: [
+          {id: 1, type_id: 1, self_size: 64, reference_object_ids: [2]},
+          {id: 2, type_id: 2, self_size: 8388608, reference_object_ids: [3]},
+          {id: 3, type_id: 3, self_size: 4194304, reference_object_ids: []},
+        ],
+        roots: [{root_type: 'ROOT_JNI_GLOBAL', object_ids: [1]}],
+      },
       {type: 'lmk-kill', at_ns: '700000000', duration_ns: '1000000', process: 'app', thread: 'main', kill_reason: 3, oom_score_adj: 900},
     );
   }

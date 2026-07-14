@@ -9,6 +9,25 @@ const {collectPacketSequenceIds, encodeTrace} = require('./perfetto-proto.cjs');
 const {sha256Buffer} = require('./hash.cjs');
 
 const FIRST_SYNTHETIC_PID = 700000;
+const HEAP_GRAPH_EXTENSION = '.com.android.art.tracing.ArtHeapGraphTracePacket.heapGraph';
+const HEAP_GRAPH_LIMITS = Object.freeze({types: 5000, objects: 10000, roots: 1000, references: 50000});
+const HEAP_ROOT_TYPES = new Set([
+  'ROOT_UNKNOWN',
+  'ROOT_JNI_GLOBAL',
+  'ROOT_JNI_LOCAL',
+  'ROOT_JAVA_FRAME',
+  'ROOT_NATIVE_STACK',
+  'ROOT_STICKY_CLASS',
+  'ROOT_THREAD_BLOCK',
+  'ROOT_MONITOR_USED',
+  'ROOT_THREAD_OBJECT',
+  'ROOT_INTERNED_STRING',
+  'ROOT_FINALIZING',
+  'ROOT_DEBUGGER',
+  'ROOT_REFERENCE_CLEANUP',
+  'ROOT_VM_INTERNAL',
+  'ROOT_JNI_MONITOR',
+]);
 const END_STATES = new Map([
   ['R', '0'],
   ['S', '1'],
@@ -41,6 +60,28 @@ function nonNegativeInteger(value, field) {
     throw new Error(`${field} must be a non-negative integer`);
   }
   return value;
+}
+
+function positiveSafeInteger(value, field) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${field} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function nonNegativeSafeInteger(value, field) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${field} must be a non-negative safe integer`);
+  }
+  return value;
+}
+
+function nonNegativeInt64String(value, field) {
+  const validated = decimalString(value, field);
+  if (BigInt(validated) > 9223372036854775807n) {
+    throw new Error(`${field} must fit in a signed 64-bit integer`);
+  }
+  return validated;
 }
 
 function nonEmptyString(value, field) {
@@ -118,6 +159,115 @@ function actorForSignal(signal, identities) {
     throw new Error(`thread ${signal.thread} does not belong to process ${signal.process}`);
   }
   return {process: resolvedProcess, thread};
+}
+
+function validateManagedHeapGraph(signal, process) {
+  if (!Array.isArray(signal.types) || signal.types.length === 0 || signal.types.length > HEAP_GRAPH_LIMITS.types) {
+    throw new Error(`managed-heap-graph types must contain 1-${HEAP_GRAPH_LIMITS.types} entries`);
+  }
+  if (!Array.isArray(signal.objects) || signal.objects.length === 0 || signal.objects.length > HEAP_GRAPH_LIMITS.objects) {
+    throw new Error(`managed-heap-graph objects must contain 1-${HEAP_GRAPH_LIMITS.objects} entries`);
+  }
+  if (!Array.isArray(signal.roots) || signal.roots.length === 0 || signal.roots.length > HEAP_GRAPH_LIMITS.roots) {
+    throw new Error(`managed-heap-graph roots must contain 1-${HEAP_GRAPH_LIMITS.roots} entries`);
+  }
+
+  const typeIds = new Set();
+  const typeNames = new Map();
+  const types = signal.types.map((type, index) => {
+    const id = positiveSafeInteger(type.id, `managed-heap-graph types[${index}].id`);
+    if (typeIds.has(id)) throw new Error(`managed-heap-graph duplicate type id: ${id}`);
+    typeIds.add(id);
+    const className = nonEmptyString(type.class_name, `managed-heap-graph types[${index}].class_name`);
+    typeNames.set(id, className);
+    return {
+      id,
+      className,
+      objectSize: nonNegativeSafeInteger(type.object_size, `managed-heap-graph types[${index}].object_size`),
+    };
+  });
+
+  const objectIds = new Set();
+  for (const [index, object] of signal.objects.entries()) {
+    const id = positiveSafeInteger(object.id, `managed-heap-graph objects[${index}].id`);
+    if (objectIds.has(id)) throw new Error(`managed-heap-graph duplicate object id: ${id}`);
+    objectIds.add(id);
+  }
+  let referenceCount = 0;
+  const fieldNames = [];
+  const objects = signal.objects.map((object, index) => {
+    const typeId = positiveSafeInteger(object.type_id, `managed-heap-graph objects[${index}].type_id`);
+    if (!typeIds.has(typeId)) {
+      throw new Error(`managed-heap-graph object ${object.id} references unknown type ${typeId}`);
+    }
+    if (!Array.isArray(object.reference_object_ids)) {
+      throw new Error(`managed-heap-graph objects[${index}].reference_object_ids must be an array`);
+    }
+    referenceCount += object.reference_object_ids.length;
+    if (referenceCount > HEAP_GRAPH_LIMITS.references) {
+      throw new Error(`managed-heap-graph references exceed ${HEAP_GRAPH_LIMITS.references}`);
+    }
+    const referenceFieldId = [];
+    const referenceObjectId = object.reference_object_ids.map((referenceId, referenceIndex) => {
+      const id = positiveSafeInteger(
+        referenceId,
+        `managed-heap-graph objects[${index}].reference_object_ids[${referenceIndex}]`,
+      );
+      if (!objectIds.has(id)) {
+        throw new Error(`managed-heap-graph object ${object.id} references unknown object ${id}`);
+      }
+      const fieldId = fieldNames.length + 1;
+      referenceFieldId.push(fieldId);
+      fieldNames.push({
+        iid: fieldId,
+        str: Buffer.from(`${typeNames.get(typeId)}.syntheticRef${referenceIndex + 1}`),
+      });
+      return id;
+    });
+    return {
+      id: object.id,
+      typeId,
+      selfSize: nonNegativeSafeInteger(object.self_size, `managed-heap-graph objects[${index}].self_size`),
+      referenceFieldId,
+      referenceObjectId,
+    };
+  });
+
+  const roots = signal.roots.map((root, index) => {
+    if (!HEAP_ROOT_TYPES.has(root.root_type)) {
+      throw new Error(`managed-heap-graph roots[${index}].root_type is invalid`);
+    }
+    if (!Array.isArray(root.object_ids) || root.object_ids.length === 0) {
+      throw new Error(`managed-heap-graph roots[${index}].object_ids must be a non-empty array`);
+    }
+    referenceCount += root.object_ids.length;
+    if (referenceCount > HEAP_GRAPH_LIMITS.references) {
+      throw new Error(`managed-heap-graph references exceed ${HEAP_GRAPH_LIMITS.references}`);
+    }
+    const objectIdsForRoot = root.object_ids.map((objectId, objectIndex) => {
+      const id = positiveSafeInteger(
+        objectId,
+        `managed-heap-graph roots[${index}].object_ids[${objectIndex}]`,
+      );
+      if (!objectIds.has(id)) throw new Error(`managed-heap-graph root references unknown object ${id}`);
+      return id;
+    });
+    return {rootType: root.root_type, objectIds: objectIdsForRoot};
+  });
+
+  return {
+    pid: process.pid,
+    heapBytesAllocated: nonNegativeInt64String(
+      signal.heap_bytes_allocated,
+      'managed-heap-graph heap_bytes_allocated',
+    ),
+    types,
+    objects,
+    roots,
+    fieldNames,
+    continued: false,
+    index: 0,
+  };
 }
 
 function printEvent(timestamp, tid, buf) {
@@ -220,6 +370,13 @@ function encodeScenarioOverlay(repoRoot, scenario, options) {
         stats.oomScoreAdj = signal.oom_score_adj;
       }
       dataPackets.push({timestamp, processStats: {processes: [stats], collectionEndTimestamp: timestamp}});
+    } else if (signal.type === 'managed-heap-graph') {
+      const process = identities.processDefinitions.get(signal.process);
+      if (!process) throw new Error(`signal references unknown process ${signal.process}`);
+      dataPackets.push({
+        timestamp,
+        [HEAP_GRAPH_EXTENSION]: validateManagedHeapGraph(signal, process),
+      });
     } else if (signal.type === 'battery-counters') {
       const battery = {};
       if (signal.capacity_percent !== undefined) battery.capacityPercent = finiteNumber(signal.capacity_percent, 'battery capacity_percent');

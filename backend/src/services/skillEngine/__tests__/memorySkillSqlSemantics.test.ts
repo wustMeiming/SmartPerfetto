@@ -126,7 +126,8 @@ describe('memory skill SQL semantic guards', () => {
       ],
     });
     expect(sql).toContain('_graph_aggregating_scan!');
-    expect(sql).toContain('PARTITION BY upid, graph_sample_ts');
+    expect(sql).toContain('WITH RECURSIVE paths');
+    expect(sql).toContain('PARTITION BY tree.upid, tree.graph_sample_ts');
     expect(sql).toContain('c.cumulative_size AS retained_size_bytes');
     expect(sql).toContain('p.root_type');
     expect(sql).toContain('MIN(MAX(COALESCE(${max_rows|500}, 500), 1), 500)');

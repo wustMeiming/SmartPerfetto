@@ -12,7 +12,7 @@ Run `npm run trace:build` to materialize base-plus-overlay traces under `Trace/.
 | [Input and interaction latency](./input-interaction-latency/) | interaction | Android 16 / API 36 (tested API 35-36) | android-scroll-customer | 13 target(s) |
 | [Linux and Android system state](./linux-system-state/) | linux | Android 16 / API 36 (tested API 35-36) | android-startup-light | 5 target(s) |
 | [Media, network, and camera pipeline](./media-network-camera/) | media | Android 16 / API 36 (tested API 35-36) | android-scroll-customer | 8 target(s) |
-| [Memory and GC pressure](./memory-gc-pressure/) | memory | Android 16 / API 36 (tested API 35-36) | android-startup-light | 19 target(s) |
+| [Memory and GC pressure](./memory-gc-pressure/) | memory | Android 16 / API 36 (tested API 35-36) | android-startup-light | 20 target(s) |
 | [Power and thermal throttling](./power-thermal/) | power | Android 16 / API 36 (tested API 35-36) | android-scroll-customer | 19 target(s) |
 | [Rendering pipeline jank](./rendering-jank/) | scrolling | Android 16 / API 36 (tested API 35-36) | android-scroll-customer | 46 target(s) |
 | [Scheduler and CPU contention](./scheduler-cpu-contention/) | cpu | Android 16 / API 36 (tested API 35-36) | android-scroll-customer | 36 target(s) |

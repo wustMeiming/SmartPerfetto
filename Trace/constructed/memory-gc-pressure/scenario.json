@@ -150,6 +150,69 @@
       "oom_score_adj": 900
     },
     {
+      "type": "atrace-slice",
+      "at_ns": "620000000",
+      "duration_ns": "1000000",
+      "process": "app",
+      "thread": "main",
+      "name": "SI$com.smartperfetto.fixture.LeakedActivity.onDestroy"
+    },
+    {
+      "type": "managed-heap-graph",
+      "at_ns": "650000000",
+      "process": "app",
+      "heap_bytes_allocated": "12582976",
+      "types": [
+        {
+          "id": 1,
+          "class_name": "com.smartperfetto.fixture.RootHolder",
+          "object_size": 64
+        },
+        {
+          "id": 2,
+          "class_name": "com.smartperfetto.fixture.LeakContainer",
+          "object_size": 8388608
+        },
+        {
+          "id": 3,
+          "class_name": "com.smartperfetto.fixture.LeakedActivity",
+          "object_size": 4194304
+        }
+      ],
+      "objects": [
+        {
+          "id": 1,
+          "type_id": 1,
+          "self_size": 64,
+          "reference_object_ids": [
+            2
+          ]
+        },
+        {
+          "id": 2,
+          "type_id": 2,
+          "self_size": 8388608,
+          "reference_object_ids": [
+            3
+          ]
+        },
+        {
+          "id": 3,
+          "type_id": 3,
+          "self_size": 4194304,
+          "reference_object_ids": []
+        }
+      ],
+      "roots": [
+        {
+          "root_type": "ROOT_JNI_GLOBAL",
+          "object_ids": [
+            1
+          ]
+        }
+      ]
+    },
+    {
       "type": "lmk-kill",
       "at_ns": "700000000",
       "duration_ns": "1000000",
