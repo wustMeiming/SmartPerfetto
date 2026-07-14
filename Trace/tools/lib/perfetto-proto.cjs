@@ -19,7 +19,11 @@ function loadTraceType(repoRoot) {
     if (target.startsWith('protos/')) return path.join(perfettoRoot, target);
     return protobuf.util.path.resolve(origin, target);
   };
-  root.loadSync(path.join(perfettoRoot, 'protos/perfetto/trace/trace.proto'));
+  root.loadSync([
+    path.join(perfettoRoot, 'protos/perfetto/trace/trace.proto'),
+    path.join(perfettoRoot, 'protos/third_party/android/art/heap_graph.proto'),
+    path.join(perfettoRoot, 'protos/perfetto/trace/gpu/gpu_interned_data.proto'),
+  ]);
   root.resolveAll();
   const traceType = root.lookupType('perfetto.protos.Trace');
   cache.set(normalizedRoot, traceType);

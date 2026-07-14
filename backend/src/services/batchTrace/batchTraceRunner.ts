@@ -24,6 +24,7 @@ import {
 } from './batchTraceLimits';
 import { aggregateBatchTraceResults } from './batchTraceAggregator';
 import { extractBatchTraceMetrics } from './batchTraceMetricExtractor';
+import { retainBatchSourceEnvelope, runBatchPostProcessor } from './batchTracePostProcessor';
 import {
   BATCH_TRACE_RUN_SCHEMA_VERSION,
   type BatchTraceInputV1,
@@ -150,6 +151,7 @@ export async function runBatchSkill(
 
   const results: BatchTraceResultV1[] = [];
   const batchLocalTraceIds: string[] = [];
+  const sourceEnvelopes = new Map<number, ReturnType<typeof retainBatchSourceEnvelope>>();
 
   const recordResult = (result: BatchTraceResultV1): void => {
     results.push(result);
@@ -198,6 +200,15 @@ export async function runBatchSkill(
         () => executor.execute(input.skillId, resolvedTraceId, input.params ?? {}),
       );
       const envelopes = SkillExecutor.toDataEnvelopes(skillResult, undefined, { traceId: resolvedTraceId });
+      if (skill.batch_analysis) {
+        const sourceEnvelope = envelopes.find(envelope => envelope.meta.stepId === skill.batch_analysis?.source_step);
+        if (sourceEnvelope) {
+          sourceEnvelopes.set(traceInput.ordinal, retainBatchSourceEnvelope(
+            sourceEnvelope,
+            skill.batch_analysis.per_trace_row_limit,
+          ));
+        }
+      }
       const metrics = extractBatchTraceMetrics({
         skillId: input.skillId,
         ordinal: traceInput.ordinal,
@@ -242,6 +253,23 @@ export async function runBatchSkill(
 
   const perTrace = results.sort((a, b) => a.ordinal - b.ordinal);
   const status = statusForResults(perTrace);
+  const domainAnalysis = skill.batch_analysis
+    ? runBatchPostProcessor({
+      skillId: skill.name,
+      config: skill.batch_analysis,
+      traces: perTrace.map(result => {
+        const retained = sourceEnvelopes.get(result.ordinal);
+        return {
+          ordinal: result.ordinal,
+          traceIdentity: result.input.traceId ?? result.input.tracePath ?? result.input.label ?? `trace-${result.ordinal}`,
+          ...(result.traceId ? {traceId: result.traceId} : {}),
+          status: result.status,
+          ...(retained ? {sourceEnvelope: retained.envelope, preTruncatedRowCount: retained.truncatedRowCount} : {}),
+          ...(result.error ? {error: result.error} : {}),
+        };
+      }),
+    })
+    : undefined;
   return {
     schemaVersion: BATCH_TRACE_RUN_SCHEMA_VERSION,
     id: runId,
@@ -260,5 +288,6 @@ export async function runBatchSkill(
     },
     perTrace,
     aggregate: aggregateBatchTraceResults(perTrace),
+    ...(domainAnalysis ? {domainAnalysis} : {}),
   };
 }

@@ -38,6 +38,23 @@
       "required_marker": "SmartPerfetto::CASE::gpu-workload"
     },
     {
+      "id": "execute-gpu_compute_kernel_analysis",
+      "type": "skill",
+      "target": "gpu_compute_kernel_analysis",
+      "mode": "semantic",
+      "source_file": "backend/skills/composite/gpu_compute_kernel_analysis.skill.yaml",
+      "parameters": {
+        "max_rows": 50
+      },
+      "required_steps": [
+        "data_check",
+        "kernel_summary",
+        "launch_configuration"
+      ],
+      "semantic_step": "kernel_summary",
+      "required_marker": "SmartPerfetto::CASE::gpu-workload"
+    },
+    {
       "id": "definition-gpu_freq_in_range",
       "type": "skill",
       "target": "gpu_freq_in_range",

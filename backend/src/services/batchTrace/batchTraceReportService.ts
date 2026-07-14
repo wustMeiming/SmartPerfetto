@@ -55,6 +55,49 @@ function limitationItems(run: BatchTraceRunV1): string {
   return limitations.map(item => `<li>${escapeHtml(item)}</li>`).join('\n');
 }
 
+function listItems(values: string[]): string {
+  if (values.length === 0) return '<li>None</li>';
+  return values.map(value => `<li>${escapeHtml(value)}</li>`).join('\n');
+}
+
+function domainAnalysisSection(run: BatchTraceRunV1): string {
+  const domain = run.domainAnalysis;
+  if (!domain || domain.operation !== 'heap_path_cluster') return '';
+  const result = domain.result;
+  const clusterRows = result.clusters.map(cluster => `<tr>
+    <td><code>${escapeHtml(cluster.id)}</code></td>
+    <td>${escapeHtml(cluster.representativePath)}</td>
+    <td>${cluster.traceCount} (${formatNumber(cluster.traceSupportPct)}%)</td>
+    <td>${cluster.sampleCount}</td>
+    <td>${cluster.rowCount}</td>
+    <td>${formatNumber(cluster.meanRetainedBytes)}</td>
+    <td>${formatNumber(cluster.p95RetainedBytes)}</td>
+    <td>${escapeHtml(cluster.collapsedPaths.join('; '))}</td>
+    <td>${cluster.evidenceRefIds.length}</td>
+  </tr>`).join('\n');
+  const failures = result.failures.map(failure =>
+    `trace ordinal ${failure.traceOrdinal}${failure.traceId ? ` (${failure.traceId})` : ''}: ${failure.reason}`);
+  return `<h2>Heap Path Cluster Analysis</h2>
+  <p><strong>Status:</strong> ${escapeHtml(result.status)}</p>
+  <p><strong>Selected K:</strong> ${result.selectedK ?? 'N/A'}</p>
+  <p><strong>Silhouette:</strong> ${result.silhouetteScore === null ? 'N/A' : formatNumber(result.silhouetteScore)}</p>
+  <p><strong>Input:</strong> ${result.input.traceCount} traces, ${result.input.sampleCount} samples, ${result.input.rowCount} rows</p>
+  <p><strong>Evidence rows:</strong> ${domain.evidence.rowCount}</p>
+  <p><strong>Rejected rows:</strong> ${domain.evidence.rejectedRowCount}</p>
+  <p><strong>Truncated rows:</strong> ${domain.evidence.truncatedRowCount}</p>
+  <p><strong>Seed:</strong> <code>${escapeHtml(result.seedHash)}</code></p>
+  <table>
+    <thead>
+      <tr><th>Cluster</th><th>Representative path</th><th>Trace support</th><th>Samples</th><th>Rows</th><th>Mean retained bytes</th><th>P95 retained bytes</th><th>Collapsed paths</th><th>Evidence refs</th></tr>
+    </thead>
+    <tbody>${clusterRows}</tbody>
+  </table>
+  <h3>Cluster Limitations</h3>
+  <ul>${listItems(result.limitations)}</ul>
+  <h3>Cluster Failures</h3>
+  <ul>${listItems(failures)}</ul>`;
+}
+
 export function renderBatchTraceHtmlReport(run: BatchTraceRunV1): string {
   return `<!doctype html>
 <html lang="en">
@@ -89,6 +132,7 @@ export function renderBatchTraceHtmlReport(run: BatchTraceRunV1): string {
     </thead>
     <tbody>${aggregateRows(run)}</tbody>
   </table>
+  ${domainAnalysisSection(run)}
   <h2>Limitations</h2>
   <ul>${limitationItems(run)}</ul>
 </body>

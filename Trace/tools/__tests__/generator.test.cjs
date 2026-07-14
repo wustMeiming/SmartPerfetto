@@ -60,6 +60,49 @@ function fixtureScenario() {
   };
 }
 
+function managedHeapSignal() {
+  return {
+    type: 'managed-heap-graph',
+    at_ns: '150000000',
+    process: 'app',
+    heap_bytes_allocated: '12352',
+    types: [
+      {id: 1, class_name: 'RootHolder', object_size: 64},
+      {id: 2, class_name: 'LeakContainer', object_size: 8192},
+      {id: 3, class_name: 'LeakedActivity', object_size: 4096},
+    ],
+    objects: [
+      {id: 1, type_id: 1, self_size: 64, reference_object_ids: [2]},
+      {id: 2, type_id: 2, self_size: 8192, reference_object_ids: [3]},
+      {id: 3, type_id: 3, self_size: 4096, reference_object_ids: []},
+    ],
+    roots: [{root_type: 'ROOT_JNI_GLOBAL', object_ids: [1]}],
+  };
+}
+
+function gpuComputeSignal() {
+  return {
+    type: 'gpu-compute-kernel',
+    at_ns: '150000000',
+    duration_ns: '12000000',
+    process: 'app',
+    gpu_id: 0,
+    context: '1001',
+    kernel: 'SyntheticComputeKernel',
+    demangled_kernel: 'SyntheticComputeKernel(float*)',
+    arch: 'synthetic-v1',
+    grid: {x: 64, y: 1, z: 1},
+    workgroup: {x: 32, y: 1, z: 1},
+    args: {
+      registers_per_thread: 24,
+      shared_mem_static: 1024,
+      shared_mem_dynamic: 2048,
+      barriers_per_block: 2,
+      waves_per_multiprocessor: 4,
+    },
+  };
+}
+
 function queryTrace(tracePath, sql) {
   const result = spawnSync(traceProcessor, ['-Q', sql, tracePath], {
     cwd: repoRoot,
@@ -253,6 +296,216 @@ test('materializes memory, battery, power, GPU, CPU frequency, IRQ, and async ev
       (SELECT COUNT(*) FROM android_lmk_events WHERE process_name = 'com.smartperfetto.fixture') AS lmk,
       (SELECT COUNT(*) FROM android_oom_adj_intervals) AS oom_adj`);
   assert.match(output, /\n(?:[1-9][0-9]*,){14}[1-9][0-9]*\s*$/);
+});
+
+test('materializes a typed GPU compute kernel launch', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-generator-gpu-compute-'));
+  const outputPath = path.join(tempDir, 'combined.pftrace');
+  const scenario = fixtureScenario();
+  scenario.signals.push(gpuComputeSignal());
+  const overlay = encodeScenarioOverlay(repoRoot, scenario, {
+    anchorNs: '1000000000',
+    usedPids: new Set(),
+    sequenceId: 454545,
+  });
+  materializeTrace(Buffer.alloc(0), overlay.buffer, outputPath);
+
+  const output = queryTrace(outputPath, `
+    SELECT
+      s.render_stage_category,
+      s.dur,
+      EXTRACT_ARG(s.arg_set_id, 'kernel_demangled_name') AS kernel,
+      EXTRACT_ARG(s.arg_set_id, 'launch.grid_size.x') AS grid_x,
+      EXTRACT_ARG(s.arg_set_id, 'launch.workgroup_size.x') AS workgroup_x,
+      EXTRACT_ARG(s.arg_set_id, 'registers_per_thread') AS registers,
+      EXTRACT_ARG(s.arg_set_id, 'shared_mem_static') AS shared_static,
+      EXTRACT_ARG(s.arg_set_id, 'shared_mem_dynamic') AS shared_dynamic,
+      EXTRACT_ARG(s.arg_set_id, 'barriers_per_block') AS barriers,
+      EXTRACT_ARG(s.arg_set_id, 'waves_per_multiprocessor') AS waves
+    FROM gpu_slice AS s
+    WHERE s.render_stage_category = 2`);
+  assert.match(
+    output,
+    /\n2,12000000,"SyntheticComputeKernel\(float\*\)",64,32,24,1024,2048,2,4\s*$/,
+  );
+
+  const reorderedScenario = fixtureScenario();
+  const reorderedSignal = gpuComputeSignal();
+  reorderedSignal.args = Object.fromEntries(Object.entries(reorderedSignal.args).reverse());
+  reorderedScenario.signals.push(reorderedSignal);
+  const reordered = encodeScenarioOverlay(repoRoot, reorderedScenario, {
+    anchorNs: '1000000000',
+    usedPids: new Set(),
+    sequenceId: 454545,
+  });
+  assert.deepEqual(reordered.buffer, overlay.buffer);
+});
+
+test('rejects malformed or unbounded GPU compute launches', () => {
+  const zeroDimension = fixtureScenario();
+  const zeroDimensionSignal = gpuComputeSignal();
+  zeroDimensionSignal.workgroup.x = 0;
+  zeroDimension.signals.push(zeroDimensionSignal);
+  assert.throws(
+    () => encodeScenarioOverlay(repoRoot, zeroDimension, {anchorNs: '1', usedPids: new Set(), sequenceId: 1}),
+    /workgroup.x must be a positive unsigned 32-bit integer/,
+  );
+
+  const tooManyArgs = fixtureScenario();
+  const tooManyArgsSignal = gpuComputeSignal();
+  tooManyArgsSignal.args = Object.fromEntries(
+    Array.from({length: 65}, (_, index) => [`arg_${index}`, index]),
+  );
+  tooManyArgs.signals.push(tooManyArgsSignal);
+  assert.throws(
+    () => encodeScenarioOverlay(repoRoot, tooManyArgs, {anchorNs: '1', usedPids: new Set(), sequenceId: 1}),
+    /args exceed 64/,
+  );
+});
+
+test('materializes a managed heap graph with dominator path evidence', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-generator-heap-'));
+  const outputPath = path.join(tempDir, 'combined.pftrace');
+  const scenario = fixtureScenario();
+  scenario.signals.push(managedHeapSignal());
+  const overlay = encodeScenarioOverlay(repoRoot, scenario, {
+    anchorNs: '1000000000',
+    usedPids: new Set(),
+    sequenceId: 444444,
+  });
+  materializeTrace(Buffer.alloc(0), overlay.buffer, outputPath);
+
+  const availability = queryTrace(outputPath, `
+    INCLUDE PERFETTO MODULE android.memory.heap_graph.class_summary_tree;
+    SELECT
+      (SELECT COUNT(*) FROM heap_graph_object) AS object_count,
+      (SELECT COUNT(*) FROM android_heap_graph_class_summary_tree) AS class_count`);
+  assert.match(availability, /\n3,[3-9][0-9]*\s*$/);
+
+  const dominator = queryTrace(outputPath, `
+    INCLUDE PERFETTO MODULE android.memory.heap_graph.dominator_class_tree;
+    INCLUDE PERFETTO MODULE graphs.scan;
+    INCLUDE PERFETTO MODULE graphs.hierarchy;
+
+    CREATE PERFETTO TABLE test_heap_cumulatives AS
+    SELECT * FROM _graph_aggregating_scan!(
+      (
+        SELECT id AS source_node_id, parent_id AS dest_node_id
+        FROM _heap_graph_dominator_class_tree
+        WHERE parent_id IS NOT NULL
+      ),
+      (
+        SELECT parent.id, parent.self_count AS cumulative_count,
+               parent.self_size AS cumulative_size
+        FROM _heap_graph_dominator_class_tree AS parent
+        LEFT JOIN _heap_graph_dominator_class_tree AS child
+          ON child.parent_id = parent.id
+        WHERE child.id IS NULL
+      ),
+      (cumulative_count, cumulative_size),
+      (
+        WITH child_totals AS (
+          SELECT id, SUM(cumulative_count) AS cumulative_count,
+                 SUM(cumulative_size) AS cumulative_size
+          FROM $table
+          GROUP BY id
+        )
+        SELECT child_totals.id,
+               child_totals.cumulative_count + node.self_count AS cumulative_count,
+               child_totals.cumulative_size + node.self_size AS cumulative_size
+        FROM child_totals
+        JOIN _heap_graph_dominator_class_tree AS node USING (id)
+      )
+    );
+
+    CREATE PERFETTO TABLE test_heap_top AS
+    SELECT id FROM (
+      SELECT tree.id,
+             ROW_NUMBER() OVER (
+               PARTITION BY tree.upid, tree.graph_sample_ts
+               ORDER BY tree.self_size DESC, cumulative.cumulative_size DESC, tree.id
+             ) AS row_number
+      FROM _heap_graph_dominator_class_tree AS tree
+      JOIN test_heap_cumulatives AS cumulative USING (id)
+    ) WHERE row_number = 1;
+
+    CREATE PERFETTO TABLE test_heap_ancestors AS
+    SELECT id FROM _tree_reachable_ancestors_or_self!((
+      SELECT id, parent_id FROM _heap_graph_dominator_class_tree
+    ), (SELECT id FROM test_heap_top));
+
+    CREATE PERFETTO TABLE test_heap_labels AS
+    SELECT tree.id, tree.parent_id,
+           IFNULL(tree.name, '[Unknown]') || ' [' || tree.self_count || ']' AS label,
+           tree.root_type
+    FROM _heap_graph_dominator_class_tree AS tree
+    JOIN test_heap_ancestors AS ancestor USING (id);
+
+    CREATE PERFETTO TABLE test_heap_paths AS
+    WITH RECURSIVE paths(id, path, root_type) AS (
+      SELECT id, '[' || COALESCE(root_type, 'ROOT') || '] ' || label AS path,
+             COALESCE(root_type, 'ROOT') AS root_type
+      FROM test_heap_labels
+      WHERE parent_id IS NULL
+      UNION ALL
+      SELECT child.id, parent.path || ' -> ' || child.label, parent.root_type
+      FROM paths AS parent
+      JOIN test_heap_labels AS child ON child.parent_id = parent.id
+    )
+    SELECT id, path, root_type FROM paths;
+
+    SELECT paths.root_type, paths.path, tree.self_size, cumulative.cumulative_size
+    FROM test_heap_top AS top
+    JOIN _heap_graph_dominator_class_tree AS tree ON tree.id = top.id
+    JOIN test_heap_cumulatives AS cumulative ON cumulative.id = top.id
+    JOIN test_heap_paths AS paths ON paths.id = top.id`);
+  assert.match(
+    dominator,
+    /"ROOT_JNI_GLOBAL","\[ROOT_JNI_GLOBAL\] RootHolder \[1\] -> LeakContainer \[1\]",8192,12288/,
+  );
+});
+
+test('rejects malformed or unbounded managed heap graphs', () => {
+  const unknownReference = fixtureScenario();
+  const unknownReferenceSignal = managedHeapSignal();
+  unknownReferenceSignal.objects[1].reference_object_ids = [999];
+  unknownReference.signals.push(unknownReferenceSignal);
+  assert.throws(
+    () => encodeScenarioOverlay(repoRoot, unknownReference, {anchorNs: '1', usedPids: new Set(), sequenceId: 1}),
+    /references unknown object 999/,
+  );
+
+  const duplicateType = fixtureScenario();
+  const duplicateTypeSignal = managedHeapSignal();
+  duplicateTypeSignal.types[1].id = 1;
+  duplicateType.signals.push(duplicateTypeSignal);
+  assert.throws(
+    () => encodeScenarioOverlay(repoRoot, duplicateType, {anchorNs: '1', usedPids: new Set(), sequenceId: 1}),
+    /duplicate type id: 1/,
+  );
+
+  const oversizedHeap = fixtureScenario();
+  const oversizedHeapSignal = managedHeapSignal();
+  oversizedHeapSignal.heap_bytes_allocated = '9223372036854775808';
+  oversizedHeap.signals.push(oversizedHeapSignal);
+  assert.throws(
+    () => encodeScenarioOverlay(repoRoot, oversizedHeap, {anchorNs: '1', usedPids: new Set(), sequenceId: 1}),
+    /must fit in a signed 64-bit integer/,
+  );
+
+  const unbounded = fixtureScenario();
+  const unboundedSignal = managedHeapSignal();
+  unboundedSignal.objects = Array.from({length: 10001}, (_, index) => ({
+    id: index + 1,
+    type_id: 1,
+    self_size: 1,
+    reference_object_ids: [],
+  }));
+  unbounded.signals.push(unboundedSignal);
+  assert.throws(
+    () => encodeScenarioOverlay(repoRoot, unbounded, {anchorNs: '1', usedPids: new Set(), sequenceId: 1}),
+    /objects must contain 1-10000 entries/,
+  );
 });
 
 test('rejects unsafe or imprecise scenario values', () => {

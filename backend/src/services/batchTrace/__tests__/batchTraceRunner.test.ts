@@ -24,17 +24,31 @@ jest.mock('../../skillEngine/skillExecutor', () => ({
   },
 }));
 
-function registry(type: 'atomic' | 'comparison' = 'atomic'): SkillRegistry {
+function registry(type: 'atomic' | 'comparison' = 'atomic', batchAnalysis = false): SkillRegistry {
   const skillRegistry = new SkillRegistry();
   skillRegistry.upsertSkill({
     name: 'startup_analysis',
     version: '1',
-    type,
+    type: batchAnalysis ? 'composite' : type,
     meta: {
       display_name: 'Startup',
       description: 'Startup',
     },
-    sql: 'select 1',
+    ...(batchAnalysis ? {
+      steps: [{id: 'dominator_paths', type: 'atomic', sql: 'select 1'}],
+      batch_analysis: {
+        operation: 'heap_path_cluster',
+        source_step: 'dominator_paths',
+        output_contract: 'HeapPathClusterAnalysisV1',
+        per_trace_row_limit: 500,
+        total_row_limit: 5000,
+        required_columns: [
+          'upid', 'process_name', 'graph_sample_ts', 'path', 'class_name',
+          'root_type', 'self_count', 'retained_count', 'self_size_bytes',
+          'retained_size_bytes',
+        ],
+      },
+    } : {sql: 'select 1'}),
   });
   return skillRegistry;
 }
@@ -159,5 +173,66 @@ describe('runBatchSkill', () => {
       leaseStore: leaseStore(),
     })).rejects.toThrow('unsupported_batch_skill_type:comparison');
     expect(tp.loadTraceFromFilePath).not.toHaveBeenCalled();
+  });
+
+  it('runs a declared post-processor while leaving non-batch Skills unchanged', async () => {
+    executeMock = jest.fn(async (_skillId, traceId) => ({
+      skillId: 'startup_analysis',
+      skillName: 'Heap paths',
+      success: true,
+      displayResults: [],
+      diagnostics: [],
+      executionTimeMs: 5,
+      traceId,
+    } as SkillExecutionResult));
+    toDataEnvelopesMock = jest.fn((result) => {
+      const traceId = String((result as SkillExecutionResult & {traceId: string}).traceId);
+      const leaked = traceId.includes('a.pftrace') || traceId.includes('b.pftrace');
+      return [{
+        ...envelope(),
+        meta: {...envelope().meta, stepId: 'dominator_paths'},
+        data: {
+          columns: [
+            'upid', 'process_name', 'graph_sample_ts', 'path', 'class_name',
+            'root_type', 'self_count', 'retained_count', 'self_size_bytes',
+            'retained_size_bytes',
+          ],
+          rows: [[
+            1,
+            'app',
+            traceId,
+            leaked
+              ? '[ROOT_JNI_GLOBAL] Root [1] -> LeakedActivity [1]'
+              : '[ROOT_JAVA_FRAME] Thread [1] -> BitmapCache [1]',
+            leaked ? 'LeakedActivity' : 'BitmapCache',
+            leaked ? 'ROOT_JNI_GLOBAL' : 'ROOT_JAVA_FRAME',
+            1,
+            2,
+            128,
+            leaked ? 4000 : 9000,
+          ]],
+        },
+      }];
+    });
+    const inputs = ['a.pftrace', 'b.pftrace', 'c.pftrace', 'd.pftrace']
+      .map((tracePath, ordinal) => ({ordinal, source: 'local_path' as const, tracePath}));
+
+    const batchRun = await runBatchSkill({
+      surface: 'cli',
+      skillId: 'startup_analysis',
+      traceInputs: inputs,
+    }, {traceProcessor: traceProcessor(), registry: registry('atomic', true)});
+    const ordinaryRun = await runBatchSkill({
+      surface: 'cli',
+      skillId: 'startup_analysis',
+      traceInputs: inputs.slice(0, 1),
+    }, {traceProcessor: traceProcessor(), registry: registry()});
+
+    expect(batchRun.domainAnalysis).toMatchObject({
+      operation: 'heap_path_cluster',
+      evidence: {rowCount: 4},
+      result: {status: 'completed', selectedK: 2},
+    });
+    expect(ordinaryRun.domainAnalysis).toBeUndefined();
   });
 });

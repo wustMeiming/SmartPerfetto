@@ -222,4 +222,41 @@ describe('custom skill loading', () => {
       value: 'bytes',
     });
   });
+
+  it('rejects an invalid batch analysis contract from an external pack', async () => {
+    const compositeDir = path.join(tmpDir, 'composite');
+    await fs.mkdir(compositeDir, { recursive: true });
+    await fs.writeFile(
+      path.join(compositeDir, 'invalid_batch.skill.yaml'),
+      [
+        'name: invalid_batch',
+        'version: "1"',
+        'type: composite',
+        'meta:',
+        '  display_name: Invalid Batch',
+        '  description: Invalid external contract',
+        'batch_analysis:',
+        '  operation: heap_path_cluster',
+        '  source_step: missing',
+        '  output_contract: HeapPathClusterAnalysisV1',
+        '  per_trace_row_limit: 10',
+        '  total_row_limit: 20',
+        '  required_columns: [path]',
+        'steps:',
+        '  - id: rows',
+        '    type: atomic',
+        '    sql: SELECT 1 AS value',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const registry = new SkillRegistry();
+    await expect(registry.loadSkillRoots([{
+      rootPath: tmpDir,
+      origin: 'external_pack',
+      packId: 'invalid-pack',
+      packVersion: '1',
+    }])).rejects.toThrow('skill_validation_failed:invalid_batch');
+  });
 });

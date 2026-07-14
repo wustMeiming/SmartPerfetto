@@ -14,7 +14,7 @@
   "trace": {
     "file": "trace.overlay.pftrace",
     "format": "perfetto-protobuf",
-    "sha256": "4587bab434e00b01b06c43fc676a0bac58d3ecd5eed40be4f6b3cbe0ed967c67",
+    "sha256": "7f8327497c3bcc9d04675a98794eee6afc5e39d056db27ebc1cd0f5d8ee35d5d",
     "materialization": "base-plus-overlay"
   },
   "android": {
@@ -53,6 +53,7 @@
   "coverage": {
     "skills": [
       "android_bitmap_memory_per_process",
+      "android_heap_dominator_path_extract",
       "android_heap_graph_leak_candidates",
       "android_heap_graph_summary",
       "android_memory_v57_ai_diagnostics",
@@ -89,10 +90,26 @@
         "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
       },
       {
+        "id": "execute-android_heap_dominator_path_extract",
+        "type": "skill",
+        "target": "android_heap_dominator_path_extract",
+        "mode": "semantic",
+        "source_file": "backend/skills/composite/android_heap_dominator_path_extract.skill.yaml",
+        "parameters": {
+          "max_rows": 500
+        },
+        "required_steps": [
+          "data_check",
+          "dominator_paths"
+        ],
+        "semantic_step": "dominator_paths",
+        "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
+      },
+      {
         "id": "execute-android_heap_graph_leak_candidates",
         "type": "skill",
         "target": "android_heap_graph_leak_candidates",
-        "mode": "graceful_empty",
+        "mode": "semantic",
         "source_file": "backend/skills/atomic/android_heap_graph_leak_candidates.skill.yaml",
         "parameters": {
           "lifecycle_slice_prefix": "SI$",
@@ -103,7 +120,6 @@
           "leak_candidates"
         ],
         "semantic_step": "leak_candidates",
-        "limitation_reason": "The fixture does not contain a managed heap graph dump.",
         "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
       },
       {
@@ -125,7 +141,7 @@
         "id": "execute-android_memory_v57_ai_diagnostics",
         "type": "skill",
         "target": "android_memory_v57_ai_diagnostics",
-        "mode": "graceful_empty",
+        "mode": "semantic",
         "source_file": "backend/skills/composite/android_memory_v57_ai_diagnostics.skill.yaml",
         "parameters": {
           "min_size_mb": 1,
@@ -136,7 +152,6 @@
           "heap_graph_repeated_objects"
         ],
         "semantic_step": "heap_graph_repeated_objects",
-        "limitation_reason": "Heap-graph diagnostics remain empty without a managed heap graph dump.",
         "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
       },
       {

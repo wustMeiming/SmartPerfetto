@@ -760,6 +760,11 @@ skills:
     workflow: trace-comparison
     disposition: exported
     destination: references/generated/skills/multi_trace_result_comparison.md
+  android_heap_dominator_path_extract:
+    source: backend/skills/composite/android_heap_dominator_path_extract.skill.yaml
+    workflow: memory
+    disposition: exported
+    destination: references/generated/skills/android_heap_dominator_path_extract.md
   android_memory_v57_ai_diagnostics:
     source: backend/skills/composite/android_memory_v57_ai_diagnostics.skill.yaml
     workflow: memory
@@ -845,6 +850,11 @@ skills:
     workflow: gpu-rendering
     disposition: exported
     destination: references/generated/skills/gpu_analysis.md
+  gpu_compute_kernel_analysis:
+    source: backend/skills/composite/gpu_compute_kernel_analysis.skill.yaml
+    workflow: gpu-rendering
+    disposition: exported
+    destination: references/generated/skills/gpu_compute_kernel_analysis.md
   gpu_v57_ai_diagnostics:
     source: backend/skills/composite/gpu_v57_ai_diagnostics.skill.yaml
     workflow: gpu-rendering

@@ -7,8 +7,11 @@ import type {
   MultiTraceComparisonRun,
   NormalizedMetricValue,
 } from '../../types/multiTraceComparison';
+import type { HeapPathClusterAnalysisV1 } from '../../types/heapPathCluster';
 
 export const BATCH_TRACE_RUN_SCHEMA_VERSION = 'batch_trace_run@1' as const;
+export const BATCH_TRACE_DOMAIN_ANALYSIS_SCHEMA_VERSION = 'batch_trace_domain_analysis@1' as const;
+export const BATCH_TRACE_DOMAIN_EVIDENCE_SCHEMA_VERSION = 'batch_trace_domain_evidence@1' as const;
 
 export type BatchTraceInputSource = 'local_path' | 'workspace_trace';
 export type BatchTraceRunStatus =
@@ -79,6 +82,36 @@ export interface BatchTraceAggregateMetricV1 {
   outlierOrdinals: number[];
 }
 
+export type BatchTraceDomainEvidenceValue = string | number | boolean | null;
+
+export interface BatchTraceDomainEvidenceRowV1 {
+  refId: string;
+  traceOrdinal: number;
+  traceIdentity: string;
+  traceId?: string;
+  values: Record<string, BatchTraceDomainEvidenceValue>;
+}
+
+export interface BatchTraceDomainEvidenceArtifactV1 {
+  schemaVersion: typeof BATCH_TRACE_DOMAIN_EVIDENCE_SCHEMA_VERSION;
+  skillId: string;
+  sourceStepId: string;
+  requiredColumns: string[];
+  rowCount: number;
+  rejectedRowCount: number;
+  truncatedRowCount: number;
+  rows: BatchTraceDomainEvidenceRowV1[];
+}
+
+export interface HeapPathClusterDomainAnalysisV1 {
+  schemaVersion: typeof BATCH_TRACE_DOMAIN_ANALYSIS_SCHEMA_VERSION;
+  operation: 'heap_path_cluster';
+  evidence: BatchTraceDomainEvidenceArtifactV1;
+  result: HeapPathClusterAnalysisV1;
+}
+
+export type BatchTraceDomainAnalysisV1 = HeapPathClusterDomainAnalysisV1;
+
 export interface BatchTraceRunV1 {
   schemaVersion: typeof BATCH_TRACE_RUN_SCHEMA_VERSION;
   id: string;
@@ -101,6 +134,7 @@ export interface BatchTraceRunV1 {
     metrics: BatchTraceAggregateMetricV1[];
     limitations: string[];
   };
+  domainAnalysis?: BatchTraceDomainAnalysisV1;
   report?: {
     htmlPath?: string;
     jsonPath?: string;

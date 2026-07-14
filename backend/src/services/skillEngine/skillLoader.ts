@@ -20,6 +20,7 @@ import { SkillDefinition, ModuleLayer, DialogueCapability } from './types';
 import { generateRenderingPipelineDetectionSkill } from '../renderingPipelineDetectionSkillGenerator';
 import logger from '../../utils/logger';
 import { validateSkillConditions, validateFragmentReferences } from './skillValidator';
+import { validateSkillBatchAnalysis } from './skillBatchAnalysis';
 import {
   DisplayContractIssue,
   formatDisplayContractIssue,
@@ -440,6 +441,7 @@ export class SkillRegistry {
     displayIssues: DisplayContractIssue[];
     conditionIssueCount: number;
     fragmentIssueCount: number;
+    batchAnalysisIssueCount: number;
   } {
     const displayWarnings = this.validateAndLogDisplayWarnings(skill, filePath);
 
@@ -453,10 +455,16 @@ export class SkillRegistry {
       logger.warn('SkillLoader', `[${skill.name}.${w.stepId}] ${w.message}`);
     }
 
+    const batchAnalysisIssues = validateSkillBatchAnalysis(skill);
+    for (const validationIssue of batchAnalysisIssues) {
+      logger.warn('SkillLoader', `[${skill.name}.${validationIssue.path}] ${validationIssue.message}`);
+    }
+
     return {
       displayIssues: displayWarnings,
       conditionIssueCount: condWarnings.length,
       fragmentIssueCount: fragWarnings.length,
+      batchAnalysisIssueCount: batchAnalysisIssues.length,
     };
   }
 
@@ -488,6 +496,7 @@ export class SkillRegistry {
         validation.displayIssues.length > 0
         || validation.conditionIssueCount > 0
         || validation.fragmentIssueCount > 0
+        || validation.batchAnalysisIssueCount > 0
       )
     ) {
       throw new Error(`skill_validation_failed:${skill.name}`);
