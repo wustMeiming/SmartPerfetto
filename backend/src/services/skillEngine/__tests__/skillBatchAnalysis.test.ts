@@ -33,6 +33,8 @@ const validBatchAnalysis = {
     'path',
     'class_name',
     'root_type',
+    'self_count',
+    'retained_count',
     'self_size_bytes',
     'retained_size_bytes',
   ],

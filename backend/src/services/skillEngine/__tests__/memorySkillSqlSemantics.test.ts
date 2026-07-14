@@ -121,7 +121,8 @@ describe('memory skill SQL semantic guards', () => {
       total_row_limit: 5000,
       required_columns: [
         'upid', 'process_name', 'graph_sample_ts', 'path', 'class_name',
-        'root_type', 'self_size_bytes', 'retained_size_bytes',
+        'root_type', 'self_count', 'retained_count', 'self_size_bytes',
+        'retained_size_bytes',
       ],
     });
     expect(sql).toContain('_graph_aggregating_scan!');
