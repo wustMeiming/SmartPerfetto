@@ -148,7 +148,7 @@ expect(skill.batch_analysis).toEqual({
   operation: 'heap_path_cluster', source_step: 'dominator_paths',
   output_contract: 'HeapPathClusterAnalysisV1', per_trace_row_limit: 500,
   total_row_limit: 5000,
-  required_columns: ['upid', 'process_name', 'graph_sample_ts', 'path', 'class_name', 'root_type', 'self_size_bytes', 'retained_size_bytes'],
+  required_columns: ['upid', 'process_name', 'graph_sample_ts', 'path', 'class_name', 'root_type', 'self_count', 'retained_count', 'self_size_bytes', 'retained_size_bytes'],
 });
 ```
 
@@ -184,7 +184,9 @@ contract gate treats it as an error.
 Use the upstream dominator-class-tree query, then add a bottom-up
 `_graph_aggregating_scan!` over `_heap_graph_dominator_class_tree` to compute
 `cumulative_count` and `cumulative_size`. Build root-to-node paths with
-`_graph_scan!`, carrying the root node's `root_type` to every descendant.
+`WITH RECURSIVE paths`, carrying the root node's `root_type` to every
+descendant. A direct `_graph_scan!` string-path accumulator is not compatible
+with the data-present heap graph contract.
 Partition top-node selection and all identities by `(upid, graph_sample_ts)`.
 Expose:
 
