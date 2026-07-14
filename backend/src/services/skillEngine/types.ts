@@ -394,6 +394,15 @@ export interface ComparisonSkillConfig {
   output_contract?: 'ComparisonMatrix';
 }
 
+export interface SkillBatchAnalysisConfig {
+  operation: 'heap_path_cluster';
+  source_step: string;
+  output_contract: 'HeapPathClusterAnalysisV1';
+  per_trace_row_limit: number;
+  total_row_limit: number;
+  required_columns: string[];
+}
+
 export interface SkillDefinition {
   name: string;
   version: string;
@@ -424,6 +433,10 @@ export interface SkillDefinition {
   // Comparison skills are metadata contracts executed by comparison services,
   // not by the single-trace SQL SkillExecutor.
   comparison?: ComparisonSkillConfig;
+
+  // Optional cross-trace post-processing contract. The single-trace Skill
+  // remains responsible only for bounded evidence extraction.
+  batch_analysis?: SkillBatchAnalysisConfig;
 
   // 诊断规则（diagnostic 使用）
   rules?: DiagnosticRule[];

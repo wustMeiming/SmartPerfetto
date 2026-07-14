@@ -21,6 +21,7 @@ import path from 'path';
 import yaml from 'js-yaml';
 import { SkillDefinition } from '../../services/skillEngine/types';
 import { validateSkillConditions } from '../../services/skillEngine/skillValidator';
+import { validateSkillBatchAnalysis } from '../../services/skillEngine/skillBatchAnalysis';
 import {
   formatDisplayContractIssue,
   validateSkillDisplayContract,
@@ -709,6 +710,9 @@ function validateSql(sql: string): { errors: string[]; warnings: string[] } {
 export function validateContracts(skill: SkillDefinition, filePath?: string): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
+
+  errors.push(...validateSkillBatchAnalysis(skill).map(validationIssue =>
+    `${validationIssue.path}: ${validationIssue.message}`));
 
   // 1. Input declarations completeness
   if (Array.isArray(skill.inputs)) {
