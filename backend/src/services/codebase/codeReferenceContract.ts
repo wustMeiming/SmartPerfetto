@@ -12,11 +12,11 @@ import {
 
 const CODE_FILE_EXTENSION = '(?:kt|java|kts|xml|cpp|cc|c|h|hpp|m|mm|swift|rs|go|py|ts|tsx|js|jsx|sql|md)';
 const PATH_WITH_LINE_RANGE = new RegExp(
-  `\\b[\\w.-]+(?:\\/[\\w.-]+)+\\.${CODE_FILE_EXTENSION}(?::(?:L)?\\d+(?:-\\d+)?|\\s+L\\d+(?:-\\d+)?)\\b`,
+  `\\b[\\w.-]+(?:\\/[\\w.-]+)*\\.${CODE_FILE_EXTENSION}(?::(?:L)?\\d+(?:-\\d+)?|\\s+L\\d+(?:-\\d+)?)\\b`,
   'i',
 );
 const FILE_PATH_FIELD = new RegExp(
-  `\\bfilePath\\b[\\s"'\u0060|:=]{1,16}[\\w.-]+(?:\\/[\\w.-]+)+\\.${CODE_FILE_EXTENSION}\\b`,
+  `\\bfilePath\\b[\\s"'\u0060|:=]{1,16}[\\w.-]+(?:\\/[\\w.-]+)*\\.${CODE_FILE_EXTENSION}\\b`,
   'i',
 );
 const LINE_RANGE_FIELD = /\blineRange\b[\s"'`|:=]{1,16}(?:L)?\d+(?:-\d+)?\b/i;

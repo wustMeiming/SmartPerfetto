@@ -10,7 +10,7 @@ const SOURCE_LOOKUP_TOOLS = new Set([
 ]);
 
 const MAX_SOURCE_CODE_REFERENCES = 8;
-const CODE_FILE_PATH = /^[\w.-]+(?:\/[\w.-]+)+\.(?:kt|java|kts|xml|cpp|cc|c|h|hpp|m|mm|swift|rs|go|py|ts|tsx|js|jsx|sql|md)$/i;
+const CODE_FILE_PATH = /^[\w.-]+(?:\/[\w.-]+)*\.(?:kt|java|kts|xml|cpp|cc|c|h|hpp|m|mm|swift|rs|go|py|ts|tsx|js|jsx|sql|md)$/i;
 const sourceCodeReferencesByOwner = new WeakMap<object, SourceLookupCodeReference[]>();
 
 export interface SourceLookupCodeReference {

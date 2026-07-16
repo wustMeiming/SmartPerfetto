@@ -15,7 +15,9 @@ import {
 describe('codeReferenceContract', () => {
   it.each([
     'app/src/main/java/demo/StartupHooks.kt:L10-L20',
+    'StartupHooks.kt:L10-L20',
     'filePath: app/src/main/java/demo/StartupHooks.kt, lineRange: 10-20',
+    'filePath: StartupHooks.kt, lineRange: 10-20',
     '{"filePath":"app/src/main/java/demo/StartupHooks.kt","lineRange":{"start":10,"end":20}}',
     'filePath: app/src/main/java/demo/StartupHooks.kt, chunkId: chunk-1, 行号不可用',
     'filePath = app/src/main/java/demo/StartupHooks.kt; chunkId = chunk-1; line number unavailable',
@@ -47,7 +49,7 @@ describe('codeReferenceContract', () => {
               {
                 chunkId: 'chunk-1',
                 metadata: {
-                  filePath: './app/src/main/java/demo/StartupHooks.kt',
+                  filePath: './StartupHooks.kt',
                   lineRange: {start: 10, end: 20},
                 },
               },
@@ -68,7 +70,7 @@ describe('codeReferenceContract', () => {
 
     expect(references).toEqual([{
       chunkId: 'chunk-1',
-      filePath: 'app/src/main/java/demo/StartupHooks.kt',
+      filePath: 'StartupHooks.kt',
       lineRange: {start: 10, end: 20},
     }]);
     expect(extractSourceLookupCodeReferences('execute_sql', {
