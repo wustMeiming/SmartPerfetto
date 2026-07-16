@@ -212,8 +212,15 @@ Immediately after the product commit, generate and verify the public projection
 from that exact commit, commit it in `Perfetto-Skills`, then record the paired
 commit and final `required` fingerprint here before publishing.
 
+All 101 Strategy/registry source files are now explicitly classified by
+`backend/skills/public-export.yaml`: portable comparison, scene-reconstruction,
+retrieval-safety, Skill methodology, and pipeline knowledge are exported;
+SmartPerfetto Case Library, session/memory, frontend pre-query, final-report
+runtime, and report-rendering templates remain product-only with explicit
+reasons.
+
 Impact fingerprint:
-`66c2ccf1f796e93c83952af9e2308809b86b6a9a9a8de95e6962542a27ec08e3`.
+`fe62defae1724db001a2b467e92280c4958f96fd871f2e6e59590cdc9c2d1b94`.
 
 ## Perfetto submodule landing closure
 

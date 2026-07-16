@@ -1251,6 +1251,15 @@ strategies:
     workflow: rendering-pipeline
     disposition: exported
     destination: references/generated/strategies/arch-webview.template.md
+  backend/strategies/case-background-case-line-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto Case Library retrieval and runtime localization
+  backend/strategies/case-background-case-line.template.md:
+    disposition: product-only
+    reason: SmartPerfetto Case Library retrieval and runtime localization
+  backend/strategies/case-background-context-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto Case Library retrieval and runtime localization
   backend/strategies/case-background-context.template.md:
     disposition: product-only
     reason: SmartPerfetto runtime, session, case, language, or codebase orchestration
@@ -1264,6 +1273,10 @@ strategies:
     workflow: trace-comparison
     disposition: exported
     destination: references/generated/strategies/comparison-conclusion.template.md
+  backend/strategies/comparison-context-en.template.md:
+    workflow: trace-comparison
+    disposition: exported
+    destination: references/generated/strategies/comparison-context-en.template.md
   backend/strategies/comparison-context.template.md:
     workflow: trace-comparison
     disposition: exported
@@ -1395,6 +1408,12 @@ strategies:
   backend/strategies/prompt-complexity-classifier.template.md:
     disposition: product-only
     reason: SmartPerfetto runtime, session, case, language, or codebase orchestration
+  backend/strategies/prompt-final-report-correction-system-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto final-report runtime orchestration
+  backend/strategies/prompt-final-report-correction-system-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto final-report runtime orchestration
   backend/strategies/prompt-final-report-missing-sections-en.template.md:
     disposition: product-only
     reason: SmartPerfetto runtime, session, case, language, or codebase orchestration
@@ -1430,12 +1449,106 @@ strategies:
   backend/strategies/prompt-role.template.md:
     disposition: product-only
     reason: SmartPerfetto runtime, session, case, language, or codebase orchestration
+  backend/strategies/prompt-runtime-conversation-context-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto runtime session and conversation orchestration
+  backend/strategies/prompt-runtime-conversation-context-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto runtime session and conversation orchestration
+  backend/strategies/prompt-runtime-conversation-turn-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto runtime session and conversation orchestration
+  backend/strategies/prompt-runtime-conversation-turn-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto runtime session and conversation orchestration
+  backend/strategies/prompt-runtime-fast-memory-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto runtime session and memory orchestration
+  backend/strategies/prompt-runtime-fast-memory-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto runtime session and memory orchestration
+  backend/strategies/prompt-runtime-sql-pitfalls-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto runtime memory and SQL retry orchestration
+  backend/strategies/prompt-runtime-sql-pitfalls-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto runtime memory and SQL retry orchestration
+  backend/strategies/prompt-runtime-trace-context-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto frontend pre-query and evidence-reference orchestration
+  backend/strategies/prompt-runtime-trace-context-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto frontend pre-query and evidence-reference orchestration
+  backend/strategies/prompt-scene-stage3-summary.template.md:
+    workflow: scene-reconstruction
+    disposition: exported
+    destination: references/generated/strategies/prompt-scene-stage3-summary.template.md
   backend/strategies/prompt-session-continuity-break.template.md:
     disposition: product-only
     reason: SmartPerfetto runtime, session, case, language, or codebase orchestration
+  backend/strategies/report-runtime-recovery-contract-section-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-runtime-recovery-contract-section-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-runtime-recovery-hypothesis-empty-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-runtime-recovery-hypothesis-empty-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-runtime-recovery-missing-contract-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-runtime-recovery-missing-contract-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-runtime-recovery-phase-empty-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-runtime-recovery-phase-empty-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-runtime-recovery-section-evidence-empty-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-runtime-recovery-section-evidence-empty-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-runtime-recovery-truncation-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-runtime-recovery-truncation-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto report rendering and runtime recovery surface
+  backend/strategies/report-smart-analysis-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto Smart Analysis report rendering surface
+  backend/strategies/report-smart-analysis-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto Smart Analysis report rendering surface
+  backend/strategies/report-smart-scene-inventory-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto Smart Analysis report rendering surface
+  backend/strategies/report-smart-scene-inventory-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto Smart Analysis report rendering surface
+  backend/strategies/retrieved-context-safety.template.md:
+    workflow: trace-overview
+    disposition: exported
+    destination: references/generated/strategies/retrieved-context-safety.template.md
+  backend/strategies/retrieved-context-tool-safety.template.md:
+    workflow: trace-overview
+    disposition: exported
+    destination: references/generated/strategies/retrieved-context-tool-safety.template.md
   backend/strategies/runtime-correctness.strategy.md:
     disposition: product-only
     reason: SmartPerfetto runtime, session, case, language, or codebase orchestration
+  backend/strategies/scene-presentation.registry.yaml:
+    workflow: scene-reconstruction
+    disposition: exported
+    destination: references/generated/strategies/scene-presentation.registry.yaml.md
   backend/strategies/scene-reconstruction-verifier.template.md:
     workflow: scene-reconstruction
     disposition: exported
