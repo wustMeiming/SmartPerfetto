@@ -54,7 +54,6 @@ import {
   getAnalysisPlanCompletionStatus,
   type AnalysisPlanCompletionStatus,
 } from '../../../agentv3/planCompletionStatus';
-import { isConclusionLikePlanPhase } from '../../../agentv3/planPhaseSemantics';
 import {
   formatPlanEvidenceGap,
   recordPlanOrPrePlanToolCall,
@@ -109,6 +108,7 @@ import {
 } from '../../runtimeCommon';
 import { buildRuntimeCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
 import { resolveRuntimeQuickMode } from '../../quickModeResolution';
+import {reconcileDeliveredFinalReportPhase} from '../../finalReportPhaseReconciliation';
 import {
   buildRuntimeQuickEvidenceDirectAnswer,
   type RuntimeQuickEvidenceCounts,
@@ -1747,26 +1747,18 @@ export function completeOpenCodeFinalReportPhaseIfDelivered(
   outputLanguage: string,
   now: () => number = Date.now,
 ): PlanPhase | undefined {
-  if (!plan?.phases?.length) return undefined;
-  if (!hasDeliverableFinalReportHeading(conclusion)) return undefined;
-
-  const pendingPhases = getOpenCodePlanCompletionStatus(plan).pendingPhases;
-  if (pendingPhases.length !== 1) return undefined;
-
-  const [phase] = pendingPhases;
-  if (!phase || !isConclusionLikePlanPhase(phase)) return undefined;
-
-  phase.status = 'completed';
-  phase.completedAt = now();
-  phase.summary = localize(
-    outputLanguage as any,
-    '最终报告已由 OpenCode 直接交付；该最终结论阶段按完整报告自动闭合。',
-    'The final report was delivered by OpenCode; the final-report phase was auto-closed from the complete report.',
-  );
-  if (phase.summary.length < MIN_PHASE_SUMMARY_CHARS) {
-    phase.summary = `${phase.summary} OK`;
-  }
-  return phase;
+  return reconcileDeliveredFinalReportPhase({
+    plan,
+    conclusion,
+    minSummaryChars: MIN_PHASE_SUMMARY_CHARS,
+    isDeliverableReport: hasDeliverableFinalReportHeading,
+    buildSummary: () => localize(
+      outputLanguage as any,
+      '最终报告已由 OpenCode 直接交付；该最终结论阶段按完整报告自动闭合。',
+      'The final report was delivered by OpenCode; the final-report phase was auto-closed from the complete report.',
+    ),
+    now,
+  });
 }
 
 export function sanitizeOpenCodeConclusionText(conclusion: string): string {

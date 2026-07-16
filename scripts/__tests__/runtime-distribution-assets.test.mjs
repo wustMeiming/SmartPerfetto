@@ -66,3 +66,12 @@ test('backend gate installs every dependency tree consumed by verify:pr', () => 
   assert.match(gate, /run: npm ci && npm --prefix backend ci/);
   assert.match(gate, /run: npm --prefix backend run verify:pr/);
 });
+
+test('manual Deepseek E2E can isolate the source and RAG context matrix', () => {
+  const workflow = readFileSync(
+    join(root, '.github/workflows/agent-deepseek-e2e.yml'),
+    'utf8',
+  );
+  assert.match(workflow, /options:\s+[\s\S]*- context/);
+  assert.match(workflow, /context\)\s+npm run verify:e2e:deepseek-context/);
+});

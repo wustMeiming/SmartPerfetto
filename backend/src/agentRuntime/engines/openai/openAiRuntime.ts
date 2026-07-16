@@ -147,6 +147,7 @@ import {
   type AnalysisRunSpec,
 } from '../../analysisRunSpec';
 import type { RuntimeSelection } from '../../runtimeSelection';
+import {reconcileDeliveredFinalReportPhase} from '../../finalReportPhaseReconciliation';
 import { buildFocusAppEvidencePayload } from '../../focusAppEvidence';
 import { buildQuickProcessIdentityDirectAnswer } from '../../quickProcessIdentityDirectAnswer';
 import {
@@ -1179,6 +1180,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
                 `openai-answer-${continuation}-${finalReportContinuations}`,
               )
             : undefined;
+          let suppressedRunAnswer = '';
           let planCompleteIdleTimer: ReturnType<typeof setTimeout> | undefined;
           const clearPlanCompleteIdleTimer = () => {
             if (planCompleteIdleTimer) {
@@ -1238,6 +1240,9 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
                   onToolCalled: () => {
                     observedToolCalls++;
                   },
+                  onSuppressedAnswerDelta: delta => {
+                    suppressedRunAnswer += delta;
+                  },
                 });
                 if (delta) {
                   runAnswer += delta;
@@ -1272,7 +1277,35 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
 
           analysisAbortScope.throwIfAborted();
           rounds += runTurns || stream.currentTurn || 0;
-          const planStatus = this.getPlanCompletionStatus(sessionId, quickMode);
+          let planStatus = this.getPlanCompletionStatus(sessionId, quickMode);
+          const completedStreamFinalOutput = readCompletedStreamFinalOutput(stream, {
+            streamCompleted,
+            completedByPlanIdle,
+            timedOut,
+          });
+          const reconciliationCandidate = chooseOpenAiConclusionText({
+            candidate: typeof completedStreamFinalOutput === 'string'
+              ? completedStreamFinalOutput
+              : (completedStreamFinalOutput
+                  ? JSON.stringify(completedStreamFinalOutput)
+                  : suppressedRunAnswer),
+            accumulatedAnswer: suppressedRunAnswer,
+            completedByPlanIdle,
+            planComplete: false,
+          });
+          if (this.reconcileCompletedConclusionPhase({
+            sessionId,
+            quickMode,
+            conclusion: reconciliationCandidate,
+            query,
+            sceneType,
+            comparisonIdentity: context.comparisonIdentity,
+          })) {
+            planStatus = this.getPlanCompletionStatus(sessionId, quickMode);
+            if (!runAnswer.trim()) {
+              runAnswer = reconciliationCandidate;
+            }
+          }
           const streamFinalOutput = readPlanEligibleStreamFinalOutput(stream, {
             streamCompleted,
             completedByPlanIdle,
@@ -2494,6 +2527,46 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     });
   }
 
+  private reconcileCompletedConclusionPhase(input: {
+    sessionId: string;
+    quickMode: boolean;
+    conclusion: string;
+    query?: string;
+    sceneType?: SceneType;
+    comparisonIdentity?: FinalResultComparisonIdentity;
+  }): boolean {
+    if (input.quickMode) return false;
+    const conclusion = sanitizeOpenAiConclusionText(input.conclusion);
+    const phase = reconcileDeliveredFinalReportPhase({
+      plan: this.sessionPlans.get(input.sessionId)?.current,
+      conclusion,
+      minSummaryChars: MIN_PHASE_SUMMARY_CHARS,
+      isDeliverableReport: candidate => (
+        isSubstantialReportText(candidate) &&
+        !assessFinalReportContractCompleteness({
+          conclusion: candidate,
+          query: input.query,
+          sceneType: input.sceneType,
+        }) &&
+        !assessFinalResultComparisonIdentity(candidate, input.comparisonIdentity)
+      ),
+      buildSummary: candidate => candidate.replace(/\s+/g, ' ').trim().slice(0, 600),
+    });
+    if (!phase) return false;
+    this.emitUpdate({
+      type: 'plan_phase_updated',
+      content: {
+        phaseId: phase.id,
+        phaseName: phase.name,
+        status: 'completed',
+        summary: phase.summary,
+        reconciledFromFinalReport: true,
+      },
+      timestamp: Date.now(),
+    });
+    return true;
+  }
+
   private shouldFinalizeAfterPlanComplete(
     sessionId: string,
     quickMode: boolean,
@@ -3041,6 +3114,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       toolInputsByTaskId: Map<string, { toolName: string; args: Record<string, unknown> }>;
       tracePairContext?: TracePairContext;
       onToolCalled?: () => void;
+      onSuppressedAnswerDelta?: (delta: string) => void;
     },
   ): string {
     const now = Date.now();
@@ -3049,6 +3123,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       if (data?.type === 'output_text_delta' && typeof data.delta === 'string') {
         const delta = filterOpenAiVisibleAnswerDelta(data.delta, streamContext.answerStreamFilter);
         if (!this.shouldExposeOpenAiAnswerDelta(streamContext.sessionId, streamContext.quickMode)) {
+          if (delta) streamContext.onSuppressedAnswerDelta?.(delta);
           return '';
         }
         if (!delta) return '';

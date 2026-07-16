@@ -148,6 +148,7 @@ const suites = {
       '--require-text', 'StartupHooks.kt',
       '--require-non-partial',
       '--forbid-degraded-fallback', 'verification_failed',
+      '--forbid-degraded-fallback', 'partial_result_after_incomplete_plan',
     ],
   },
   'context-rag': {
@@ -166,6 +167,7 @@ const suites = {
       '--require-successful-lookup', 'lookup_blog_knowledge',
       '--require-non-partial',
       '--forbid-degraded-fallback', 'verification_failed',
+      '--forbid-degraded-fallback', 'partial_result_after_incomplete_plan',
     ],
   },
   'context-combined': {
@@ -189,6 +191,7 @@ const suites = {
       '--require-text', 'StartupHooks.kt',
       '--require-non-partial',
       '--forbid-degraded-fallback', 'verification_failed',
+      '--forbid-degraded-fallback', 'partial_result_after_incomplete_plan',
     ],
   },
 };

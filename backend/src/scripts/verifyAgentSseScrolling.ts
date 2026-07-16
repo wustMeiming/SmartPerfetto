@@ -1261,6 +1261,16 @@ async function collectSseSummary(
                 summary.planSubmittedCount += 1;
               } else if (sourceEventType === 'agent_response') {
                 summary.agentResponseCount += 1;
+              } else if (sourceEventType === 'degraded') {
+                summary.degradedCount += 1;
+                const fallback = typeof payload?.degradedFallback === 'string'
+                  ? payload.degradedFallback
+                  : undefined;
+                if (fallback) {
+                  summary.degradedFallbackCounts[fallback] =
+                    (summary.degradedFallbackCounts[fallback] ?? 0) + 1;
+                }
+                summary.degradedEvents.push(fallback ? {fallback} : {});
               }
               break;
             }

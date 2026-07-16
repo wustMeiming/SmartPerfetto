@@ -61,7 +61,25 @@ const PRIVATE_EVENT_POLICIES: Record<StreamingUpdate['type'], PrivateEventPolicy
   scene_story_smart_eta_refined: 'suppress',
 };
 
-function privateProgress(language: OutputLanguage, sourceType: StreamingUpdate['type']): StreamingUpdate['content'] {
+function privateDegradedFallback(
+  sourceType: StreamingUpdate['type'],
+  content: StreamingUpdate['content'],
+): string | undefined {
+  if (sourceType !== 'degraded' || !content || typeof content !== 'object' || Array.isArray(content)) {
+    return undefined;
+  }
+  const fallback = (content as Record<string, unknown>).fallback;
+  return typeof fallback === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(fallback)
+    ? fallback
+    : undefined;
+}
+
+function privateProgress(
+  language: OutputLanguage,
+  sourceType: StreamingUpdate['type'],
+  sourceContent?: StreamingUpdate['content'],
+): StreamingUpdate['content'] {
+  const degradedFallback = privateDegradedFallback(sourceType, sourceContent);
   return {
     phase: sourceType,
     message: localize(
@@ -71,6 +89,7 @@ function privateProgress(language: OutputLanguage, sourceType: StreamingUpdate['
     ),
     privateModelTextSuppressed: true,
     sourceEventType: sourceType,
+    ...(degradedFallback ? {degradedFallback} : {}),
   };
 }
 
@@ -110,7 +129,7 @@ export function projectCodeAwareStreamingUpdate(
     return {
       ...update,
       type: 'progress',
-      content: privateProgress(language, update.type),
+      content: privateProgress(language, update.type, update.content),
     };
   }
   if (policy === 'error') {

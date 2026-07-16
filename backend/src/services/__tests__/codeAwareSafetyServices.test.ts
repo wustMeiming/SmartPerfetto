@@ -617,6 +617,42 @@ describe('code-aware streaming application boundary', () => {
     }
   });
 
+  it('preserves only a privacy-safe degraded diagnostic code for private E2E gates', () => {
+    const projected = projectCodeAwareStreamingUpdate(
+      'session-stream',
+      {
+        type: 'degraded',
+        content: {
+          fallback: 'verification_failed',
+          message: 'PRIVATE_DEGRADED_MESSAGE_CANARY',
+        },
+        timestamp,
+      },
+      true,
+      'en',
+    );
+
+    expect(projected.type).toBe('progress');
+    expect(projected.content).toMatchObject({
+      sourceEventType: 'degraded',
+      degradedFallback: 'verification_failed',
+      privateModelTextSuppressed: true,
+    });
+    expect(JSON.stringify(projected)).not.toContain('PRIVATE_DEGRADED_MESSAGE_CANARY');
+
+    const unsafe = projectCodeAwareStreamingUpdate(
+      'session-stream',
+      {
+        type: 'degraded',
+        content: {fallback: 'PRIVATE_UNSAFE_FALLBACK_CANARY'},
+        timestamp,
+      },
+      true,
+      'en',
+    );
+    expect(unsafe.content).not.toHaveProperty('degradedFallback');
+  });
+
   it('keeps ordinary sessions byte-preserving and sanitizes source-aware conclusions', () => {
     const ordinary = {type: 'answer_token' as const, content: {token: 'ordinary'}, timestamp};
     expect(projectCodeAwareStreamingUpdate('ordinary', ordinary, false, 'en')).toBe(ordinary);

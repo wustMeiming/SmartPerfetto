@@ -37,6 +37,27 @@ function plan(phases: PlanPhase[]): AnalysisPlanV3 {
   };
 }
 
+function startupFinalReportForReconciliation(): string {
+  return [
+    '## 综合结论',
+    '',
+    '本次为冷启动，TTID=1912ms，TTFD 数据不可用；当前 trace 的首帧延迟主要来自主线程同步负载。',
+    '',
+    '## 阶段耗时分解',
+    '',
+    'startup_detail 显示 ChaosTask self_ms=456ms，LoadSimulator self_ms=457ms，合计占启动窗口 68%。',
+    '',
+    '## 根因拆解',
+    '',
+    'A4 主线程重任务与当前 trace 的 Running 证据一致，证据引用 art-10 和 art-32。',
+    '',
+    '## App/系统分层建议',
+    '',
+    '- App 层：拆分首帧前同步任务，并延迟非关键初始化。',
+    '- 系统/平台层：当前 trace 未发现可确认的平台瓶颈，保持监测。',
+  ].join('\n');
+}
+
 type RawOpenAiOutputTextDeltaForTest = {
   type: 'raw_model_stream_event';
   data: {
@@ -50,6 +71,7 @@ type OpenAiStreamContextForTest = {
   quickMode: boolean;
   answerStreamFilter: ReturnType<typeof __testing.createOpenAiReasoningFilterState>;
   toolInputsByTaskId: Map<string, { toolName: string; args: Record<string, unknown> }>;
+  onSuppressedAnswerDelta?: (delta: string) => void;
 };
 
 function rawOutputTextDelta(delta: string): RawOpenAiOutputTextDeltaForTest {
@@ -131,6 +153,7 @@ type OpenAiRuntimeTestAccess = {
   detectVendor: (...args: unknown[]) => Promise<string | null>;
   getPlanCompletionStatus: (...args: unknown[]) => unknown;
   shouldFinalizeAfterPlanComplete: (...args: unknown[]) => boolean;
+  reconcileCompletedConclusionPhase: (...args: unknown[]) => boolean;
   shouldRequestFinalReportAfterPlanComplete: (...args: unknown[]) => boolean;
   buildFinalReportAfterPlanCompletePrompt: (...args: unknown[]) => string;
   formatPlanContinuationMessage: (...args: unknown[]) => string;
@@ -1244,6 +1267,98 @@ describe('OpenAIRuntime plan completion guard', () => {
     expect(runtime.shouldFinalizeAfterPlanComplete('s1', true, 'final text')).toBe(false);
   });
 
+  it('reconciles the sole in-progress conclusion phase from a deliverable final report', () => {
+    const runtime = createOpenAiRuntimeForTest();
+    const conclusionPhase = phase('p2', 'in_progress');
+    conclusionPhase.name = '综合结论';
+    conclusionPhase.goal = '输出最终报告和优化建议';
+    conclusionPhase.expectedTools = [];
+    runtime.sessionPlans.set('s1', {
+      current: plan([phase('p1', 'completed'), conclusionPhase]),
+      history: [],
+    });
+    const finalReport = startupFinalReportForReconciliation();
+
+    expect(runtime.reconcileCompletedConclusionPhase({
+      sessionId: 's1',
+      quickMode: false,
+      conclusion: finalReport,
+      query: '分析启动性能',
+      sceneType: 'startup',
+    })).toBe(true);
+    expect(runtime.getPlanCompletionStatus('s1', false)).toMatchObject({
+      complete: true,
+      pendingPhases: [],
+    });
+    expect(conclusionPhase).toMatchObject({
+      status: 'completed',
+      summary: expect.stringContaining('TTID=1912ms'),
+    });
+  });
+
+  it('does not reconcile conclusion output while an evidence phase remains pending', () => {
+    const runtime = createOpenAiRuntimeForTest();
+    const conclusionPhase = phase('p3', 'in_progress');
+    conclusionPhase.name = '综合结论';
+    conclusionPhase.goal = '输出最终报告和优化建议';
+    conclusionPhase.expectedTools = [];
+    runtime.sessionPlans.set('s1', {
+      current: plan([phase('p1', 'completed'), phase('p2', 'pending'), conclusionPhase]),
+      history: [],
+    });
+
+    expect(runtime.reconcileCompletedConclusionPhase({
+      sessionId: 's1',
+      quickMode: false,
+      conclusion: '## 综合结论\n\n这是一份超过两百字但取证阶段尚未完成的最终报告。'.repeat(8),
+      query: '分析启动性能',
+      sceneType: 'startup',
+    })).toBe(false);
+    expect(conclusionPhase.status).toBe('in_progress');
+  });
+
+  it('does not reconcile a conclusion phase from an incomplete report contract', () => {
+    const runtime = createOpenAiRuntimeForTest();
+    const conclusionPhase = phase('p2', 'in_progress');
+    conclusionPhase.name = '综合结论';
+    conclusionPhase.goal = '输出最终报告和优化建议';
+    conclusionPhase.expectedTools = [];
+    runtime.sessionPlans.set('s1', {
+      current: plan([phase('p1', 'completed'), conclusionPhase]),
+      history: [],
+    });
+
+    expect(runtime.reconcileCompletedConclusionPhase({
+      sessionId: 's1',
+      quickMode: false,
+      conclusion: '## 综合结论\n\n当前启动比较慢，建议继续检查。'.repeat(12),
+      query: '分析启动性能',
+      sceneType: 'startup',
+    })).toBe(false);
+    expect(conclusionPhase.status).toBe('in_progress');
+  });
+
+  it('does not reconcile a conclusion phase with an unmet structured expected call', () => {
+    const runtime = createOpenAiRuntimeForTest();
+    const conclusionPhase = phase('p2', 'in_progress');
+    conclusionPhase.name = '综合结论';
+    conclusionPhase.goal = '输出最终报告和优化建议';
+    conclusionPhase.expectedCalls = [{tool: 'lookup_blog_knowledge'}];
+    runtime.sessionPlans.set('s1', {
+      current: plan([phase('p1', 'completed'), conclusionPhase]),
+      history: [],
+    });
+
+    expect(runtime.reconcileCompletedConclusionPhase({
+      sessionId: 's1',
+      quickMode: false,
+      conclusion: startupFinalReportForReconciliation(),
+      query: '分析启动性能',
+      sceneType: 'startup',
+    })).toBe(false);
+    expect(conclusionPhase.status).toBe('in_progress');
+  });
+
   it('does not read finalOutput after forced plan-complete aborts', () => {
     const stream = {
       get finalOutput() {
@@ -1322,13 +1437,17 @@ describe('OpenAIRuntime plan completion guard', () => {
       history: [],
     });
 
+    const captured: string[] = [];
+    const context = streamContext('s-pending', false);
+    context.onSuppressedAnswerDelta = value => captured.push(value);
     const delta = runtime.handleStreamEvent(
       rawOutputTextDelta('我将重新制定计划并继续分析。'),
       'zh-CN',
-      streamContext('s-pending', false),
+      context,
     );
 
     expect(delta).toBe('');
+    expect(captured).toEqual(['我将重新制定计划并继续分析。']);
     expect(updates.some(update => update.type === 'answer_token')).toBe(false);
   });
 

@@ -178,7 +178,7 @@ OPENAI_API_KEY=... npm run verify:e2e:deepseek
 
 For CI-backed real-provider validation, use the manual GitHub Actions workflow
 `Agent Deepseek E2E`. It requires the repository secret `DEEPSEEK_API_KEY` and
-accepts `suite=all|startup|scrolling`; keep it manual because it consumes
+accepts `suite=all|startup|scrolling|context`; keep it manual because it consumes
 provider quota and secrets.
 
 Flutter TextureView and SurfaceView must be verified separately because their

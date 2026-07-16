@@ -63,7 +63,6 @@ import {
   getAnalysisPlanCompletionStatus,
   type AnalysisPlanCompletionStatus,
 } from '../../../agentv3/planCompletionStatus';
-import { isConclusionLikePlanPhase } from '../../../agentv3/planPhaseSemantics';
 import {
   formatPlanEvidenceGap,
   recordPlanOrPrePlanToolCall,
@@ -116,6 +115,7 @@ import {
 import { buildRuntimeCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
 import { assessFinalReportContractCompleteness } from '../../../services/finalReportContractGate';
 import { resolveRuntimeQuickMode } from '../../quickModeResolution';
+import {reconcileDeliveredFinalReportPhase} from '../../finalReportPhaseReconciliation';
 import {
   buildRuntimeQuickEvidenceDirectAnswer,
   type RuntimeQuickEvidenceCounts,
@@ -480,29 +480,21 @@ export function completePiAgentCoreFinalReportPhaseIfDelivered(
   outputLanguage: OutputLanguage,
   now: () => number = Date.now,
 ): PlanPhase | undefined {
-  if (!plan?.phases?.length) return undefined;
   const sanitizedConclusion = sanitizePiAgentCoreConclusionText(conclusion);
-  if (
-    !hasDeliverableFinalReportHeading(sanitizedConclusion) ||
-    !looksLikeFinalReport(sanitizedConclusion)
-  ) {
-    return undefined;
-  }
-
-  const status = getPiAgentCorePlanCompletionStatus(plan);
-  if (status.complete || status.pendingPhases.length !== 1) return undefined;
-
-  const [phase] = status.pendingPhases;
-  if (!phase || !isConclusionLikePlanPhase(phase)) return undefined;
-
-  phase.status = 'completed';
-  phase.completedAt = now();
-  phase.summary = localize(
-    outputLanguage,
-    '最终报告已由 Pi Agent Core 直接交付；该最终结论阶段按完整报告自动闭合。',
-    'The final report was delivered by Pi Agent Core; the final-report phase was auto-closed from the complete report.',
-  );
-  return phase;
+  return reconcileDeliveredFinalReportPhase({
+    plan,
+    conclusion: sanitizedConclusion,
+    minSummaryChars: MIN_PHASE_SUMMARY_CHARS,
+    isDeliverableReport: candidate => (
+      hasDeliverableFinalReportHeading(candidate) && looksLikeFinalReport(candidate)
+    ),
+    buildSummary: () => localize(
+      outputLanguage,
+      '最终报告已由 Pi Agent Core 直接交付；该最终结论阶段按完整报告自动闭合。',
+      'The final report was delivered by Pi Agent Core; the final-report phase was auto-closed from the complete report.',
+    ),
+    now,
+  });
 }
 
 function formatIncompletePlanMessage(
