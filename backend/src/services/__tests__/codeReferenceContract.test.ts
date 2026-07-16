@@ -2,7 +2,15 @@
 // Copyright (C) 2024-2026 Gracker (Chris)
 // This file is part of SmartPerfetto. See LICENSE for details.
 
-import {hasConcreteCodeReference} from '../codebase/codeReferenceContract';
+import type {AnalysisPlanV3} from '../../agentv3/types';
+import {
+  completeFinalReportCodeReferences,
+  hasConcreteCodeReference,
+} from '../codebase/codeReferenceContract';
+import {
+  extractSourceLookupCodeReferences,
+  rememberSourceLookupCodeReferences,
+} from '../codebase/sourceLookupTools';
 
 describe('codeReferenceContract', () => {
   it.each([
@@ -26,5 +34,80 @@ describe('codeReferenceContract', () => {
     'filePath and lineRange are required',
   ])('rejects a non-locatable source mention: %s', reference => {
     expect(hasConcreteCodeReference(reference)).toBe(false);
+  });
+
+  it('extracts only safe, locatable references from nested source lookup results', () => {
+    const references = extractSourceLookupCodeReferences('lookup_app_source', {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          result: {
+            hits: [
+              {
+                chunkId: 'chunk-1',
+                metadata: {
+                  filePath: './app/src/main/java/demo/StartupHooks.kt',
+                  lineRange: {start: 10, end: 20},
+                },
+              },
+              {
+                chunkId: 'chunk-absolute',
+                metadata: {filePath: '/Users/demo/Secret.kt', lineRange: {start: 1, end: 2}},
+              },
+              {
+                chunkId: 'chunk-traversal',
+                filePath: '../outside/Secret.kt',
+                lineRange: {start: 1, end: 2},
+              },
+            ],
+          },
+        }),
+      }],
+    });
+
+    expect(references).toEqual([{
+      chunkId: 'chunk-1',
+      filePath: 'app/src/main/java/demo/StartupHooks.kt',
+      lineRange: {start: 10, end: 20},
+    }]);
+    expect(extractSourceLookupCodeReferences('execute_sql', {
+      chunkId: 'chunk-1',
+      filePath: 'app/src/main/java/demo/StartupHooks.kt',
+    })).toEqual([]);
+  });
+
+  it('deterministically completes a missing final CodeRef from ephemeral source metadata', () => {
+    const plan: AnalysisPlanV3 = {
+      phases: [],
+      successCriteria: 'Explain startup latency',
+      submittedAt: 1,
+      toolCallLog: [{
+        toolName: 'lookup_app_source',
+        timestamp: 2,
+        success: true,
+        returnedCodeReferences: true,
+      }],
+    };
+    rememberSourceLookupCodeReferences(plan, [{
+      chunkId: 'chunk-1',
+      filePath: 'app/src/main/java/demo/StartupHooks.kt',
+      lineRange: {start: 10, end: 20},
+    }]);
+
+    const completed = completeFinalReportCodeReferences({
+      plan,
+      conclusion: '## 最终结论\n启动路径存在候选机制。',
+      outputLanguage: 'zh-CN',
+    });
+
+    expect(completed).toContain('app/src/main/java/demo/StartupHooks.kt:L10-L20');
+    expect(completed).toContain('是否发生仍以 Trace 证据为准');
+    expect(completed).not.toContain('chunk-1');
+    expect(completeFinalReportCodeReferences({
+      plan,
+      conclusion: completed,
+      outputLanguage: 'zh-CN',
+    })).toBe(completed);
   });
 });

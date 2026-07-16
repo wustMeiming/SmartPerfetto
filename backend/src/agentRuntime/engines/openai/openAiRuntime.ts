@@ -150,10 +150,11 @@ import type { RuntimeSelection } from '../../runtimeSelection';
 import {reconcileDeliveredFinalReportPhase} from '../../finalReportPhaseReconciliation';
 import { buildFocusAppEvidencePayload } from '../../focusAppEvidence';
 import {
+  completeFinalReportCodeReferences,
   finalReportMissingRequiredCodeReference,
   loadCodeReferenceContractPrompt,
 } from '../../../services/codebase/codeReferenceContract';
-import { sourceLookupResultHasCodeReferences } from '../../../services/codebase/sourceLookupTools';
+import { extractSourceLookupCodeReferences } from '../../../services/codebase/sourceLookupTools';
 import { buildQuickProcessIdentityDirectAnswer } from '../../quickProcessIdentityDirectAnswer';
 import {
   buildQuickProcessIdentityEvidence,
@@ -1428,6 +1429,11 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         if (analysisContextUsesPrivateKnowledge(options)) {
           conclusion = sanitizeCodeAwareText(sessionId, conclusion);
         }
+        conclusion = completeFinalReportCodeReferences({
+          plan: this.sessionPlans.get(sessionId)?.current,
+          conclusion,
+          outputLanguage: config.outputLanguage,
+        });
         const finalFallbackConclusion = this.buildCompletedPlanFallbackConclusion(sessionId, quickMode, config.outputLanguage);
         if (
           finalFallbackConclusion &&
@@ -1500,17 +1506,25 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
             : undefined,
         };
         if (!quickMode) {
-          const verifyCurrentConclusion = async () => verifyConclusion(result.findings, result.conclusion, {
-            emitUpdate: (update) => this.emitUpdate(update),
-            enableLLM: false,
-            plan: this.sessionPlans.get(sessionId)?.current ?? null,
-            hypotheses: context.hypotheses,
-            sceneType,
-            outputLanguage: config.outputLanguage,
-            query,
-            emitIssueProgress: false,
-            allowPersistentLearning: !analysisContextUsesPrivateKnowledge(options),
-          });
+          const verifyCurrentConclusion = async () => {
+            result.conclusion = completeFinalReportCodeReferences({
+              plan: this.sessionPlans.get(sessionId)?.current,
+              conclusion: result.conclusion,
+              outputLanguage: config.outputLanguage,
+            });
+            result.findings = extractFindingsFromText(result.conclusion);
+            return verifyConclusion(result.findings, result.conclusion, {
+              emitUpdate: (update) => this.emitUpdate(update),
+              enableLLM: false,
+              plan: this.sessionPlans.get(sessionId)?.current ?? null,
+              hypotheses: context.hypotheses,
+              sceneType,
+              outputLanguage: config.outputLanguage,
+              query,
+              emitIssueProgress: false,
+              allowPersistentLearning: !analysisContextUsesPrivateKnowledge(options),
+            });
+          };
           let verification = await verifyCurrentConclusion();
           analysisAbortScope.throwIfAborted();
           let verificationIssue = [
@@ -3211,14 +3225,13 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         projectToolResultForExternalSurface(toolName, rawOutput),
       );
       if (cached) {
+        const codeReferences = extractSourceLookupCodeReferences(cached.toolName, rawOutput);
         recordPlanOrPrePlanToolCall(this.sessionPlans.get(streamContext.sessionId), {
           toolName: cached.toolName,
           input: cached.args,
           resultText,
-          returnedCodeReferences: sourceLookupResultHasCodeReferences(
-            cached.toolName,
-            rawOutput,
-          ),
+          returnedCodeReferences: codeReferences.length > 0,
+          returnedCodeReferenceHints: codeReferences,
         });
         for (const taskId of taskIds) {
           streamContext.toolInputsByTaskId.delete(taskId);

@@ -21,7 +21,8 @@ import {
   isSensitiveRagToolName,
   projectToolResultForExternalSurface,
 } from '../../../services/rag/toolResultProjectionFilter';
-import { sourceLookupResultHasCodeReferences } from '../../../services/codebase/sourceLookupTools';
+import { completeFinalReportCodeReferences } from '../../../services/codebase/codeReferenceContract';
+import { extractSourceLookupCodeReferences } from '../../../services/codebase/sourceLookupTools';
 import {
   createPiAgentCoreSnapshotEngineState,
   getPiAgentCoreSnapshotEngineState,
@@ -845,10 +846,12 @@ export function createPiAgentCoreToolFromSharedSpec(
         signal,
         ...(options.extra && typeof options.extra === 'object' ? options.extra : {}),
       });
+      const codeReferences = extractSourceLookupCodeReferences(spec.name, result);
       recordPlanOrPrePlanToolCall(options.analysisPlan, {
         toolName: spec.name,
         input: toolArgs,
-        returnedCodeReferences: sourceLookupResultHasCodeReferences(spec.name, result),
+        returnedCodeReferences: codeReferences.length > 0,
+        returnedCodeReferenceHints: codeReferences,
         resultText: summarizePiToolResult(
           projectToolResultForExternalSurface(spec.name, result),
         ),
@@ -1512,6 +1515,11 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     if (analysisContextUsesPrivateKnowledge(options)) {
       conclusion = sanitizeCodeAwareText(sessionId, conclusion);
     }
+    conclusion = completeFinalReportCodeReferences({
+      plan: prep.analysisPlan.current,
+      conclusion,
+      outputLanguage: prep.analysisRunSpec.outputLanguage,
+    });
 
     const planStatus = getPiAgentCorePlanCompletionStatus(prep.analysisPlan.current);
     let partial = false;
@@ -1580,17 +1588,25 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     };
 
     if (!prep.quickMode) {
-      const verifyCurrentConclusion = async () => verifyConclusion(result.findings, result.conclusion, {
-        emitUpdate: (update) => this.emit('update', update),
-        enableLLM: false,
-        plan: prep.analysisPlan.current,
-        hypotheses: prep.hypotheses,
-        sceneType: prep.sceneType,
-        outputLanguage: prep.analysisRunSpec.outputLanguage,
-        query,
-        emitIssueProgress: false,
-        allowPersistentLearning: !analysisContextUsesPrivateKnowledge(options),
-      });
+      const verifyCurrentConclusion = async () => {
+        result.conclusion = completeFinalReportCodeReferences({
+          plan: prep.analysisPlan.current,
+          conclusion: result.conclusion,
+          outputLanguage: prep.analysisRunSpec.outputLanguage,
+        });
+        result.findings = extractFindingsFromText(result.conclusion);
+        return verifyConclusion(result.findings, result.conclusion, {
+          emitUpdate: (update) => this.emit('update', update),
+          enableLLM: false,
+          plan: prep.analysisPlan.current,
+          hypotheses: prep.hypotheses,
+          sceneType: prep.sceneType,
+          outputLanguage: prep.analysisRunSpec.outputLanguage,
+          query,
+          emitIssueProgress: false,
+          allowPersistentLearning: !analysisContextUsesPrivateKnowledge(options),
+        });
+      };
       let verification = await verifyCurrentConclusion();
       let verificationIssue = [
         ...verification.heuristicIssues,

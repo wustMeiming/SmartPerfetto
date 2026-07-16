@@ -83,7 +83,8 @@ import { getExtendedKnowledgeBase } from '../../../services/sqlKnowledgeBase';
 import { sanitizeCodeAwareText } from '../../../services/security/codeAwareOutputRegistry';
 import { assessFinalReportContractCompleteness } from '../../../services/finalReportContractGate';
 import {projectToolResultForExternalSurface} from '../../../services/rag/toolResultProjectionFilter';
-import { sourceLookupResultHasCodeReferences } from '../../../services/codebase/sourceLookupTools';
+import {completeFinalReportCodeReferences} from '../../../services/codebase/codeReferenceContract';
+import {extractSourceLookupCodeReferences} from '../../../services/codebase/sourceLookupTools';
 import { getProviderService, type ProviderConfig, type ProviderScope } from '../../../services/providerManager';
 import {providerSubprocessEnv} from '../../../services/providerManager/envIsolation';
 import type { RuntimeSelection } from '../../runtimeSelection';
@@ -817,11 +818,13 @@ export async function dispatchOpenCodeBridgeRequest(
       const resultText = summarizeOpenCodeToolResult(
         projectToolResultForExternalSurface(definition.name, result),
       );
+      const codeReferences = extractSourceLookupCodeReferences(definition.name, result);
       recordPlanOrPrePlanToolCall(options.analysisPlan, {
         toolName: definition.name,
         input: args,
         resultText,
-        returnedCodeReferences: sourceLookupResultHasCodeReferences(definition.name, result),
+        returnedCodeReferences: codeReferences.length > 0,
+        returnedCodeReferenceHints: codeReferences,
       });
       emitUpdate?.({
         type: 'agent_response',
@@ -2222,6 +2225,11 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     if (analysisContextUsesPrivateKnowledge(options)) {
       conclusion = sanitizeCodeAwareText(sessionId, conclusion);
     }
+    conclusion = completeFinalReportCodeReferences({
+      plan: prep.analysisPlan.current,
+      conclusion,
+      outputLanguage: prep.analysisRunSpec.outputLanguage,
+    });
 
     const closedFinalPhase = completeOpenCodeFinalReportPhaseIfDelivered(
       prep.analysisPlan.current,
@@ -2307,17 +2315,25 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     };
 
     if (!prep.quickMode) {
-      const verifyCurrentConclusion = async () => verifyConclusion(result.findings, result.conclusion, {
-        emitUpdate: (update) => this.emitUpdate(update),
-        enableLLM: false,
-        plan: prep.analysisPlan.current,
-        hypotheses: prep.hypotheses,
-        sceneType: prep.sceneType,
-        outputLanguage: prep.analysisRunSpec.outputLanguage,
-        query,
-        emitIssueProgress: false,
-        allowPersistentLearning: !analysisContextUsesPrivateKnowledge(options),
-      });
+      const verifyCurrentConclusion = async () => {
+        result.conclusion = completeFinalReportCodeReferences({
+          plan: prep.analysisPlan.current,
+          conclusion: result.conclusion,
+          outputLanguage: prep.analysisRunSpec.outputLanguage,
+        });
+        result.findings = extractFindingsFromText(result.conclusion);
+        return verifyConclusion(result.findings, result.conclusion, {
+          emitUpdate: (update) => this.emitUpdate(update),
+          enableLLM: false,
+          plan: prep.analysisPlan.current,
+          hypotheses: prep.hypotheses,
+          sceneType: prep.sceneType,
+          outputLanguage: prep.analysisRunSpec.outputLanguage,
+          query,
+          emitIssueProgress: false,
+          allowPersistentLearning: !analysisContextUsesPrivateKnowledge(options),
+        });
+      };
       let verification = await verifyCurrentConclusion();
       let verificationIssue = [
         ...verification.heuristicIssues,

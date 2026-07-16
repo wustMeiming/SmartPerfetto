@@ -98,7 +98,8 @@ import {
   sanitizeCodeAwareText,
 } from '../../../services/security/codeAwareOutputRegistry';
 import {projectToolResultForExternalSurface} from '../../../services/rag/toolResultProjectionFilter';
-import { sourceLookupResultHasCodeReferences } from '../../../services/codebase/sourceLookupTools';
+import {completeFinalReportCodeReferences} from '../../../services/codebase/codeReferenceContract';
+import {extractSourceLookupCodeReferences} from '../../../services/codebase/sourceLookupTools';
 import {diagnosticLogIdentity} from '../../../utils/logger';
 import { runSnapshots } from '../../../agentv3/selfImprove/strategyFingerprint';
 import { verifyConclusion, generateCorrectionPrompt, isConclusionIncomplete } from './claudeVerifier';
@@ -1655,13 +1656,15 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
               // Track tool call for plan adherence with phase matching (P0-1 + P1-1)
               // P1-G5: Best-fit phase-tool matching — search all eligible phases, not just first
               if (matchedTool) {
+                const codeReferences = extractSourceLookupCodeReferences(
+                  matchedTool.name,
+                  observed.result,
+                );
                 recordPlanOrPrePlanToolCall(ctx.analysisPlan, {
                   toolName: matchedTool.name,
                   input: matchedTool.input,
-                  returnedCodeReferences: sourceLookupResultHasCodeReferences(
-                    matchedTool.name,
-                    observed.result,
-                  ),
+                  returnedCodeReferences: codeReferences.length > 0,
+                  returnedCodeReferenceHints: codeReferences,
                   resultText: projectClaudeToolResultForPlan(matchedTool.name, observed.result),
                 });
               }
@@ -1923,6 +1926,12 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
 
         try {
           for (let attempt = 0; attempt < MAX_CORRECTION_ATTEMPTS; attempt++) {
+            conclusionText = completeFinalReportCodeReferences({
+              plan: ctx.analysisPlan.current,
+              conclusion: conclusionText,
+              outputLanguage,
+            });
+            mergedFindings = mergeFindings([extractFindingsFromText(conclusionText)]);
             const reportIsAlreadyDeliverable = correctionResultLooksUsable(conclusionText);
             const verification = await verifyConclusion(mergedFindings, conclusionText, {
               emitUpdate: (update) => this.emitUpdate(update),
@@ -2234,6 +2243,12 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
         conclusionText = sanitizeCodeAwareText(sessionId, conclusionText);
         mergedFindings = mergeFindings([extractFindingsFromText(conclusionText)]);
       }
+      conclusionText = completeFinalReportCodeReferences({
+        plan: ctx.analysisPlan.current,
+        conclusion: conclusionText,
+        outputLanguage: runtimeConfig.outputLanguage,
+      });
+      mergedFindings = mergeFindings([extractFindingsFromText(conclusionText)]);
 
       const baseConfidence = this.estimateConfidence(mergedFindings);
       const turnConfidence = isRuntimePartialResult

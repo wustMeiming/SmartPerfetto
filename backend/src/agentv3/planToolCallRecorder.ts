@@ -14,7 +14,12 @@ import {
   type ToolCallRecord,
 } from './types';
 import { summarizeToolCallInput } from './toolCallSummary';
-import { sourceLookupResultHasCodeReferences } from '../services/codebase/sourceLookupTools';
+import {
+  getSourceLookupCodeReferences,
+  rememberSourceLookupCodeReferences,
+  sourceLookupResultHasCodeReferences,
+  type SourceLookupCodeReference,
+} from '../services/codebase/sourceLookupTools';
 
 const MCP_NAME_PREFIX = 'mcp__smartperfetto__';
 const MAX_PLAN_TOOL_CALL_LOG = 100;
@@ -25,6 +30,8 @@ export interface PlanToolCallRecorderInput {
   resultText?: string;
   /** Privacy-safe fact extracted from the raw result before any external-surface projection. */
   returnedCodeReferences?: boolean;
+  /** Ephemeral only: retained in memory and never copied into ToolCallRecord or snapshots. */
+  returnedCodeReferenceHints?: readonly SourceLookupCodeReference[];
   timestamp?: number;
 }
 
@@ -46,8 +53,10 @@ function shortToolName(toolName: string): string {
 function buildToolCallRecord(input: PlanToolCallRecorderInput): ToolCallRecord {
   const callSummary = summarizeToolCallInput(shortToolName(input.toolName), input.input);
   const success = extractToolCallSuccessFromResult(input.resultText);
-  const returnedCodeReferences = input.returnedCodeReferences ??
-    sourceLookupResultHasCodeReferences(input.toolName, input.resultText);
+  const returnedCodeReferences = input.returnedCodeReferences ?? (
+    Boolean(input.returnedCodeReferenceHints?.length) ||
+    sourceLookupResultHasCodeReferences(input.toolName, input.resultText)
+  );
   return {
     toolName: input.toolName,
     timestamp: input.timestamp ?? Date.now(),
@@ -193,6 +202,7 @@ export function recordPlanToolCall(
 
   const record = { ...candidate, matchedPhaseId };
   plan.toolCallLog.push(record);
+  rememberSourceLookupCodeReferences(plan, input.returnedCodeReferenceHints ?? []);
   if (plan.toolCallLog.length > MAX_PLAN_TOOL_CALL_LOG) {
     plan.toolCallLog.splice(0, plan.toolCallLog.length - MAX_PLAN_TOOL_CALL_LOG);
   }
@@ -216,6 +226,7 @@ export function recordPlanOrPrePlanToolCall(
   }
   const record = buildToolCallRecord(input);
   tracker.prePlanToolCallLog.push(record);
+  rememberSourceLookupCodeReferences(record, input.returnedCodeReferenceHints ?? []);
   if (tracker.prePlanToolCallLog.length > MAX_PLAN_TOOL_CALL_LOG) {
     tracker.prePlanToolCallLog.splice(0, tracker.prePlanToolCallLog.length - MAX_PLAN_TOOL_CALL_LOG);
   }
@@ -238,6 +249,7 @@ export function replayPrePlanToolCalls(tracker: AnalysisPlanTracker | null | und
       ...candidate,
       matchedPhaseId: matchedPhase.id,
     });
+    rememberSourceLookupCodeReferences(plan, getSourceLookupCodeReferences(candidate));
     replayed++;
     if (plan.toolCallLog.length > MAX_PLAN_TOOL_CALL_LOG) {
       plan.toolCallLog.splice(0, plan.toolCallLog.length - MAX_PLAN_TOOL_CALL_LOG);

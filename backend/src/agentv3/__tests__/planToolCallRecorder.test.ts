@@ -10,6 +10,7 @@ import {
   recordPlanOrPrePlanToolCall,
   replayPrePlanToolCalls,
 } from '../planToolCallRecorder';
+import {getSourceLookupCodeReferences} from '../../services/codebase/sourceLookupTools';
 
 function createPlan(): AnalysisPlanV3 {
   return {
@@ -237,6 +238,62 @@ describe('recordPlanToolCall', () => {
     expect(detectedBeforePrivacyProjection).toMatchObject({returnedCodeReferences: true});
     expect(withoutCodeRef).toMatchObject({success: true});
     expect(withoutCodeRef).not.toHaveProperty('returnedCodeReferences');
+  });
+
+  it('keeps locatable source metadata ephemeral while persisting only the audit boolean', () => {
+    const plan = createPlan();
+    const reference = {
+      chunkId: 'chunk-private',
+      filePath: 'app/src/main/java/demo/StartupHooks.kt',
+      lineRange: {start: 10, end: 20},
+    };
+
+    const record = recordPlanToolCall(plan, {
+      toolName: 'lookup_app_source',
+      resultText: JSON.stringify({success: true, chunkRefs: [{chunkId: reference.chunkId}]}),
+      returnedCodeReferenceHints: [reference],
+    });
+
+    expect(record).toMatchObject({success: true, returnedCodeReferences: true});
+    expect(JSON.stringify(record)).not.toContain(reference.filePath);
+    expect(JSON.stringify(plan)).not.toContain(reference.filePath);
+    expect(getSourceLookupCodeReferences(plan)).toEqual([reference]);
+  });
+
+  it('moves ephemeral source metadata onto a plan when a pre-plan lookup is replayed', () => {
+    const tracker: {current: AnalysisPlanV3 | null; prePlanToolCallLog?: AnalysisPlanV3['toolCallLog']} = {
+      current: null,
+    };
+    const reference = {
+      chunkId: 'chunk-pre-plan',
+      filePath: 'app/src/main/java/demo/StartupHooks.kt',
+      lineRange: {start: 30, end: 40},
+    };
+    recordPlanOrPrePlanToolCall(tracker, {
+      toolName: 'lookup_app_source',
+      resultText: '{"success":true}',
+      returnedCodeReferenceHints: [reference],
+    });
+
+    const plan: AnalysisPlanV3 = {
+      phases: [{
+        id: 'p-source',
+        name: '源码定位',
+        goal: '定位启动源码',
+        expectedTools: ['lookup_app_source'],
+        expectedCalls: [{tool: 'lookup_app_source'}],
+        status: 'completed',
+        summary: '源码定位完成。',
+      }],
+      successCriteria: '解释启动瓶颈',
+      submittedAt: 1,
+      toolCallLog: [],
+    };
+    tracker.current = plan;
+
+    expect(replayPrePlanToolCalls(tracker)).toBe(1);
+    expect(getSourceLookupCodeReferences(plan)).toEqual([reference]);
+    expect(JSON.stringify(plan)).not.toContain(reference.filePath);
   });
 
   it('replays pre-plan comparison context calls into the accepted raw trace pair plan', () => {

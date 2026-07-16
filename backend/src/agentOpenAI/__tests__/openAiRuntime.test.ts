@@ -9,6 +9,7 @@ import type { OpenAIAgentConfig } from '../../agentRuntime/engines/openai/openAi
 import * as patternMemory from '../../agentv3/analysisPatternMemory';
 import { createAnalysisRunSpec } from '../../agentRuntime/analysisRunSpec';
 import type { QueryResult, TraceProcessorService } from '../../services/traceProcessorService';
+import {getSourceLookupCodeReferences} from '../../services/codebase/sourceLookupTools';
 
 afterEach(() => {
   jest.restoreAllMocks();
@@ -1606,13 +1607,20 @@ describe('OpenAIRuntime plan completion guard', () => {
       },
     }, 'zh-CN', context);
 
-    expect(runtime.sessionPlans.get('s-private-source')!.current!.toolCallLog)
+    const currentPlan = runtime.sessionPlans.get('s-private-source')!.current!;
+    expect(currentPlan.toolCallLog)
       .toContainEqual(expect.objectContaining({
         toolName: 'lookup_app_source',
         matchedPhaseId: 'p-source',
         success: true,
         returnedCodeReferences: true,
       }));
+    expect(getSourceLookupCodeReferences(currentPlan)).toEqual([{
+      chunkId: 'source-1',
+      filePath: 'app/src/main/java/com/example/StartupHooks.kt',
+      lineRange: {start: 10, end: 20},
+    }]);
+    expect(JSON.stringify(currentPlan)).not.toContain('StartupHooks.kt');
     const serialized = JSON.stringify(updates.filter(update => update.type === 'agent_response'));
     expect(serialized).not.toContain('OPENAI_PRIVATE_SOURCE_CANARY');
     expect(serialized).not.toContain('app/src/main/java/com/example/StartupHooks.kt');

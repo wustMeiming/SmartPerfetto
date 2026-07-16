@@ -5,7 +5,10 @@
 import type {AnalysisPlanV3, ToolCallRecord} from '../../agentv3/types';
 import {loadPromptTemplate} from '../../agentv3/strategyLoader';
 import type {OutputLanguage} from '../../agentv3/outputLanguage';
-import {isSourceLookupToolName} from './sourceLookupTools';
+import {
+  getSourceLookupCodeReferences,
+  isSourceLookupToolName,
+} from './sourceLookupTools';
 
 const CODE_FILE_EXTENSION = '(?:kt|java|kts|xml|cpp|cc|c|h|hpp|m|mm|swift|rs|go|py|ts|tsx|js|jsx|sql|md)';
 const PATH_WITH_LINE_RANGE = new RegExp(
@@ -46,6 +49,29 @@ export function finalReportMissingRequiredCodeReference(input: {
 }): boolean {
   return planHasSuccessfulSourceLookup(input.plan) &&
     !hasConcreteCodeReference(input.conclusion);
+}
+
+export function completeFinalReportCodeReferences(input: {
+  plan: AnalysisPlanV3 | null | undefined;
+  conclusion: string;
+  outputLanguage: OutputLanguage;
+}): string {
+  if (!finalReportMissingRequiredCodeReference(input) || !input.plan) return input.conclusion;
+  const references = getSourceLookupCodeReferences(input.plan);
+  if (references.length === 0) return input.conclusion;
+
+  const heading = input.outputLanguage === 'en'
+    ? '### Source references (candidate mechanisms)'
+    : '### 源码定位（候选机制）';
+  const note = input.outputLanguage === 'en'
+    ? 'These references come from source lookup authorized for this analysis and only locate candidate mechanisms; whether they occurred in this run remains grounded in Trace evidence.'
+    : '以下引用来自本次已授权源码查询，仅用于定位候选机制；本次是否发生仍以 Trace 证据为准。';
+  const items = references.map(reference => reference.lineRange
+    ? `- ${reference.filePath}:L${reference.lineRange.start}-L${reference.lineRange.end}`
+    : input.outputLanguage === 'en'
+      ? `- filePath: ${reference.filePath}; chunkId: ${reference.chunkId}; line number unavailable`
+      : `- filePath: ${reference.filePath}; chunkId: ${reference.chunkId}; 行号不可用`);
+  return `${input.conclusion.trimEnd()}\n\n${heading}\n\n${note}\n\n${items.join('\n')}`;
 }
 
 export function loadCodeReferenceContractPrompt(outputLanguage: OutputLanguage): string {
