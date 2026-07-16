@@ -31,16 +31,10 @@ revised at their shared architectural boundary and re-tested.
 
 The week's feature direction is consistent with the product architecture, but
 the combined change set originally exposed cross-feature gaps that individual
-feature tests did not catch. The current workspace closes the confirmed
-runtime, correctness, security, privacy, scale, localization, accessibility,
-and platform defects. No known P0 or P1 functional defect remains in the
-reviewed working tree.
-
-One release-integration boundary remains intentionally open because this
-review did not originally create a SmartPerfetto product commit: the public
-Perfetto-Skills paired export. The Perfetto submodule boundary is now closed by
-the pushed commit and matching regenerated prebuild recorded below. The public
-projection must still be closed before publishing.
+feature tests did not catch. The landed commits close the confirmed runtime,
+correctness, security, privacy, scale, localization, accessibility, platform,
+Perfetto submodule, and public Perfetto-Skills integration defects. No known P0
+or P1 functional or release-integration defect remains in the reviewed tree.
 
 ## Source and external-RAG composition
 
@@ -169,7 +163,7 @@ Only results produced after the clean-room reset belong in this table.
 | Codebase-aware verification | PASS (source and built `dist` paths) |
 | Full trace corpus regression | PASS (18 validated cases, 12 regenerated constructed cases, semantic regression) |
 | npm CLI dist/pack E2E | PASS (built tree and npm pack) |
-| Public Perfetto-Skills export verification | PASS (234 runtime Skills, 65 strategy sources, 14 pipeline docs) |
+| Public Perfetto-Skills export verification | PASS (234 runtime Skills, 101 classified Strategy/registry sources: 55 exported and 46 product-only, 14 pipeline docs) |
 | Portable package build and artifact verification | PASS (Windows x64, macOS arm64, Linux x64) |
 | Root `verify:pr` | PASS (including 66/66 core suites, 903/903 core tests, architecture, trace processor, and 6/6 scene traces) |
 | Runtime HTTP/browser smoke | PASS (authenticated runtime health and fresh browser render) |
@@ -199,18 +193,21 @@ it does not silently depend on the rejected Homebrew interpreter.
    review, but splitting the route module further is maintainability work, not
    a correctness prerequisite for this landing.
 
-## Perfetto-Skills handoff
+## Perfetto-Skills paired closure
 
-The paired repository `../Perfetto-Skills` is currently clean at
-`c8b2dbed87ef568419eff17424feefab63e70289`. Portable Skill/Strategy inputs in
-this working tree changed, including heap, kernel-wait, camera, startup, and
-scrolling evidence semantics. Because the SmartPerfetto product commit does not
-exist until this reviewed workspace is committed, the immutable paired export
-cannot be generated earlier without creating circular provenance. The impact
-decision is therefore `deferred`, with this section as the durable handoff.
-Immediately after the product commit, generate and verify the public projection
-from that exact commit, commit it in `Perfetto-Skills`, then record the paired
-commit and final `required` fingerprint here before publishing.
+The public projection was generated from the exact clean SmartPerfetto commit
+`eb4ef81e660fc397c8cabe90ab0b499899931909` and committed in the paired
+repository as `8844a1332dc116228f3ae6070465453e7ffbf3a9`. Both commits are reachable
+from their respective `origin/main` branches. The paired impact decision is
+`required`; its change fingerprint is
+`51a41f819d20f26ea3d79c06925cf9ec7c40ee9f5fa5dea2bdb709d70325d41f`.
+
+The paired repository's complete gate passed after synchronization: 651 query
+definitions were statically valid, 6 real-fixture scenes and 11 semantic
+assertions executed, and all 170 tests passed with 1 existing skip. The gate
+also exposed and closed two stale synchronization-test baselines: the immutable
+SmartPerfetto pin and a fixed Strategy source count that duplicated generated
+manifest state.
 
 All 101 Strategy/registry source files are now explicitly classified by
 `backend/skills/public-export.yaml`: portable comparison, scene-reconstruction,
@@ -219,7 +216,9 @@ SmartPerfetto Case Library, session/memory, frontend pre-query, final-report
 runtime, and report-rendering templates remain product-only with explicit
 reasons.
 
-Impact fingerprint:
+Final SmartPerfetto impact decision: `required`.
+
+Final SmartPerfetto impact fingerprint:
 `fe62defae1724db001a2b467e92280c4958f96fd871f2e6e59590cdc9c2d1b94`.
 
 ## Perfetto submodule landing closure
