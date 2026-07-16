@@ -81,9 +81,6 @@ jobs:
   gate:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -93,13 +90,15 @@ jobs:
         with:
           node-version: "24"
           cache: "npm"
-          cache-dependency-path: "backend/package-lock.json"
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install root and backend dependencies
+        run: npm ci && npm --prefix backend ci
 
       - name: Run PR verification gate
-        run: npm run verify:pr
+        run: npm --prefix backend run verify:pr
 
   cross-platform-contracts:
     strategy:

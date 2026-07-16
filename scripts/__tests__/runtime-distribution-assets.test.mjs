@@ -48,3 +48,21 @@ test('Docker CI smokes both static routes and the packaged OpenCode executable',
   assert.match(workflow, /curl -fsS http:\/\/127\.0\.0\.1:3000\/admin-control-plane/);
   assert.match(workflow, /opencode-ai\/bin\/opencode\.exe --version/);
 });
+
+test('backend gate installs every dependency tree consumed by verify:pr', () => {
+  const workflow = readFileSync(
+    join(root, '.github/workflows/backend-agent-regression-gate.yml'),
+    'utf8',
+  );
+  const gate = workflow.slice(
+    workflow.indexOf('  gate:'),
+    workflow.indexOf('  cross-platform-contracts:'),
+  );
+
+  assert.match(
+    gate,
+    /cache-dependency-path: \|\s+package-lock\.json\s+backend\/package-lock\.json/,
+  );
+  assert.match(gate, /run: npm ci && npm --prefix backend ci/);
+  assert.match(gate, /run: npm --prefix backend run verify:pr/);
+});
