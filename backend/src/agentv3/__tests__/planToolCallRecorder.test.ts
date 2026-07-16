@@ -213,6 +213,11 @@ describe('recordPlanToolCall', () => {
       toolName: 'lookup_app_source',
       resultText: JSON.stringify({success: true, result: {hits: []}}),
     });
+    const detectedBeforePrivacyProjection = recordPlanToolCall(plan, {
+      toolName: 'lookup_app_source',
+      resultText: JSON.stringify({success: true, chunkRefs: [{chunkId: 'chunk-1'}]}),
+      returnedCodeReferences: true,
+    });
     const withRawPublicCodeRef = recordPlanToolCall(plan, {
       toolName: 'lookup_aosp_source',
       resultText: JSON.stringify({
@@ -229,6 +234,7 @@ describe('recordPlanToolCall', () => {
       returnedCodeReferences: true,
     });
     expect(withRawPublicCodeRef).toMatchObject({returnedCodeReferences: true});
+    expect(detectedBeforePrivacyProjection).toMatchObject({returnedCodeReferences: true});
     expect(withoutCodeRef).toMatchObject({success: true});
     expect(withoutCodeRef).not.toHaveProperty('returnedCodeReferences');
   });

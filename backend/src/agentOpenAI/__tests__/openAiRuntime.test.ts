@@ -1562,6 +1562,58 @@ describe('OpenAIRuntime plan completion guard', () => {
     expect(serialized).toContain('snippetHash');
   });
 
+  it('records source references before projecting private tool output', () => {
+    const { runtime, updates } = createRuntimeWithUpdates();
+    const sourcePhase = phase('p-source', 'in_progress');
+    sourcePhase.expectedCalls = [{ tool: 'lookup_app_source' }];
+    runtime.sessionPlans.set('s-private-source', {
+      current: plan([sourcePhase]),
+      history: [],
+    });
+    const context = streamContext('s-private-source', false);
+    runtime.handleStreamEvent({
+      type: 'run_item_stream_event',
+      name: 'tool_called',
+      item: { rawItem: {
+        callId: 'source-call',
+        name: 'lookup_app_source',
+        arguments: JSON.stringify({ query: 'StartupHooks' }),
+      } },
+    }, 'zh-CN', context);
+    runtime.handleStreamEvent({
+      type: 'run_item_stream_event',
+      name: 'tool_output',
+      item: { rawItem: {
+        callId: 'source-call',
+        output: JSON.stringify({ result: {
+          query: 'StartupHooks',
+          hits: [{
+            chunkId: 'source-1',
+            score: 1,
+            metadata: {
+              kind: 'app_source',
+              codebaseId: 'codebase-a',
+              filePath: 'app/src/main/java/com/example/StartupHooks.kt',
+              lineRange: { start: 10, end: 20 },
+            },
+            snippet: 'OPENAI_PRIVATE_SOURCE_CANARY',
+          }],
+        } }),
+      } },
+    }, 'zh-CN', context);
+
+    expect(runtime.sessionPlans.get('s-private-source')!.current!.toolCallLog)
+      .toContainEqual(expect.objectContaining({
+        toolName: 'lookup_app_source',
+        matchedPhaseId: 'p-source',
+        returnedCodeReferences: true,
+      }));
+    const serialized = JSON.stringify(updates.filter(update => update.type === 'agent_response'));
+    expect(serialized).not.toContain('OPENAI_PRIVATE_SOURCE_CANARY');
+    expect(serialized).not.toContain('app/src/main/java/com/example/StartupHooks.kt');
+    expect(serialized).toContain('snippetHash');
+  });
+
   it('strips OpenAI-compatible reasoning markers from visible text', () => {
     expect(__testing.stripOpenAiReasoningArtifacts(
       '<think>内部推理不应展示</think>\n\n## 综合结论\n\n用户可见结论。</think>',

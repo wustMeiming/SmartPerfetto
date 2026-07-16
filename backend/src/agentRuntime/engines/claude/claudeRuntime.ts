@@ -98,6 +98,7 @@ import {
   sanitizeCodeAwareText,
 } from '../../../services/security/codeAwareOutputRegistry';
 import {projectToolResultForExternalSurface} from '../../../services/rag/toolResultProjectionFilter';
+import { sourceLookupResultHasCodeReferences } from '../../../services/codebase/sourceLookupTools';
 import {diagnosticLogIdentity} from '../../../utils/logger';
 import { runSnapshots } from '../../../agentv3/selfImprove/strategyFingerprint';
 import { verifyConclusion, generateCorrectionPrompt, isConclusionIncomplete } from './claudeVerifier';
@@ -1657,6 +1658,10 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
                 recordPlanOrPrePlanToolCall(ctx.analysisPlan, {
                   toolName: matchedTool.name,
                   input: matchedTool.input,
+                  returnedCodeReferences: sourceLookupResultHasCodeReferences(
+                    matchedTool.name,
+                    observed.result,
+                  ),
                   resultText: projectClaudeToolResultForPlan(matchedTool.name, observed.result),
                 });
               }

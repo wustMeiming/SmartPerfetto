@@ -21,6 +21,7 @@ import {
   isSensitiveRagToolName,
   projectToolResultForExternalSurface,
 } from '../../../services/rag/toolResultProjectionFilter';
+import { sourceLookupResultHasCodeReferences } from '../../../services/codebase/sourceLookupTools';
 import {
   createPiAgentCoreSnapshotEngineState,
   getPiAgentCoreSnapshotEngineState,
@@ -847,6 +848,7 @@ export function createPiAgentCoreToolFromSharedSpec(
       recordPlanOrPrePlanToolCall(options.analysisPlan, {
         toolName: spec.name,
         input: toolArgs,
+        returnedCodeReferences: sourceLookupResultHasCodeReferences(spec.name, result),
         resultText: summarizePiToolResult(
           projectToolResultForExternalSurface(spec.name, result),
         ),

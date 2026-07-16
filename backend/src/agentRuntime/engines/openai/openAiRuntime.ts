@@ -153,6 +153,7 @@ import {
   finalReportMissingRequiredCodeReference,
   loadCodeReferenceContractPrompt,
 } from '../../../services/codebase/codeReferenceContract';
+import { sourceLookupResultHasCodeReferences } from '../../../services/codebase/sourceLookupTools';
 import { buildQuickProcessIdentityDirectAnswer } from '../../quickProcessIdentityDirectAnswer';
 import {
   buildQuickProcessIdentityEvidence,
@@ -3213,6 +3214,10 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           toolName: cached.toolName,
           input: cached.args,
           resultText,
+          returnedCodeReferences: sourceLookupResultHasCodeReferences(
+            cached.toolName,
+            rawItem?.output,
+          ),
         });
         for (const taskId of taskIds) {
           streamContext.toolInputsByTaskId.delete(taskId);

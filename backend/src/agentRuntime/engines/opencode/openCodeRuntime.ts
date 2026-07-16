@@ -83,6 +83,7 @@ import { getExtendedKnowledgeBase } from '../../../services/sqlKnowledgeBase';
 import { sanitizeCodeAwareText } from '../../../services/security/codeAwareOutputRegistry';
 import { assessFinalReportContractCompleteness } from '../../../services/finalReportContractGate';
 import {projectToolResultForExternalSurface} from '../../../services/rag/toolResultProjectionFilter';
+import { sourceLookupResultHasCodeReferences } from '../../../services/codebase/sourceLookupTools';
 import { getProviderService, type ProviderConfig, type ProviderScope } from '../../../services/providerManager';
 import {providerSubprocessEnv} from '../../../services/providerManager/envIsolation';
 import type { RuntimeSelection } from '../../runtimeSelection';
@@ -820,6 +821,7 @@ export async function dispatchOpenCodeBridgeRequest(
         toolName: definition.name,
         input: args,
         resultText,
+        returnedCodeReferences: sourceLookupResultHasCodeReferences(definition.name, result),
       });
       emitUpdate?.({
         type: 'agent_response',
