@@ -35,6 +35,10 @@ import {
   type VerifierMisdiagnosisSeverity,
 } from '../../../agentv3/strategyLoader';
 import { assessFinalReportContractCompleteness } from '../../../services/finalReportContractGate';
+import {
+  finalReportMissingRequiredCodeReference,
+  loadCodeReferenceContractPrompt,
+} from '../../../services/codebase/codeReferenceContract';
 
 interface CompiledMisdiagnosisPattern {
   pattern: RegExp;
@@ -1285,6 +1289,13 @@ export async function verifyConclusion(
   // Layer 2: Plan adherence check
   const planIssues = verifyPlanAdherence(plan ?? null);
   heuristicIssues.push(...planIssues);
+  if (finalReportMissingRequiredCodeReference({plan, conclusion})) {
+    heuristicIssues.push({
+      type: 'missing_evidence',
+      severity: 'error',
+      message: loadCodeReferenceContractPrompt(outputLanguage),
+    });
+  }
 
   // Layer 2.5: Hypothesis resolution check (P0-G4)
   if (hypotheses && hypotheses.length > 0) {

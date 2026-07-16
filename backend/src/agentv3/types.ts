@@ -449,6 +449,8 @@ export interface ToolCallRecord {
   timestamp: number;
   /** Explicit execution outcome when the runtime result exposed one. Failed calls remain auditable but never satisfy evidence gates. */
   success?: boolean;
+  /** True only when a source lookup returned at least one locatable CodeRef; no source content is persisted here. */
+  returnedCodeReferences?: boolean;
   /** Phase ID this tool call was matched to (if any) */
   matchedPhaseId?: string;
   /**

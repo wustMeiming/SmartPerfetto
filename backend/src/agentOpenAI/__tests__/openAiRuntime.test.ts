@@ -1951,6 +1951,40 @@ describe('OpenAIRuntime plan completion guard', () => {
     })).toBe(true);
   });
 
+  it('requests final-report continuation when a successful source lookup lacks a locatable CodeRef', () => {
+    const runtime = createOpenAiRuntimeForTest();
+    const completedPlan = plan([phase('p1', 'completed'), phase('p2', 'completed')]);
+    completedPlan.toolCallLog.push({
+      toolName: 'lookup_app_source',
+      timestamp: Date.now(),
+      matchedPhaseId: 'p1',
+      success: true,
+      returnedCodeReferences: true,
+    });
+    runtime.sessionPlans.set('source-session', {current: completedPlan, history: []});
+    const report = startupFinalReportForReconciliation();
+    const input = {
+      sessionId: 'source-session',
+      quickMode: false,
+      planStatus: {complete: true, hasPlan: true, pendingPhases: []},
+      fallbackConclusion: undefined,
+      completedByPlanIdle: false,
+      timedOut: false,
+      finalReportContinuations: 0,
+      query: '分析启动性能',
+      sceneType: 'startup' as const,
+    };
+
+    expect(runtime.shouldRequestFinalReportAfterPlanComplete({
+      ...input,
+      conclusion: `${report}\n\n源码参考：StartupHooks.kt。`,
+    })).toBe(true);
+    expect(runtime.shouldRequestFinalReportAfterPlanComplete({
+      ...input,
+      conclusion: `${report}\n\n源码定位：app/src/main/java/demo/StartupHooks.kt:L10-L20。`,
+    })).toBe(false);
+  });
+
   it('requests final-report continuation when the memory scene contract is incomplete', () => {
     const runtime = createOpenAiRuntimeForTest();
     const planStatus = {
@@ -2116,13 +2150,14 @@ describe('OpenAIRuntime plan completion guard', () => {
   it('uses a full-report continuation prompt that preserves scene-specific sections', () => {
     const runtime = createOpenAiRuntimeForTest();
 
-    const zhPrompt = runtime.buildFinalReportAfterPlanCompletePrompt('zh-CN');
+    const zhPrompt = runtime.buildFinalReportAfterPlanCompletePrompt('zh-CN', true);
     expect(zhPrompt).toContain('继续遵守本轮场景策略');
     expect(zhPrompt).toContain('Final Report Contract');
     expect(zhPrompt).toContain('场景契约要求的结构');
     expect(zhPrompt).toContain('完整性优先');
     expect(zhPrompt).toContain('先输出 Final Report Contract 要求的必需结构');
     expect(zhPrompt).toContain('证据类型');
+    expect(zhPrompt).toContain('relative/path/File.kt:L10-L20');
     expect(zhPrompt).toContain('版本/政策敏感');
     expect(zhPrompt).toContain('缺失数据只能写成限制');
     expect(zhPrompt).not.toContain('2500-3500');

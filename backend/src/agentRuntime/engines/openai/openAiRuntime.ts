@@ -149,6 +149,10 @@ import {
 import type { RuntimeSelection } from '../../runtimeSelection';
 import {reconcileDeliveredFinalReportPhase} from '../../finalReportPhaseReconciliation';
 import { buildFocusAppEvidencePayload } from '../../focusAppEvidence';
+import {
+  finalReportMissingRequiredCodeReference,
+  loadCodeReferenceContractPrompt,
+} from '../../../services/codebase/codeReferenceContract';
 import { buildQuickProcessIdentityDirectAnswer } from '../../quickProcessIdentityDirectAnswer';
 import {
   buildQuickProcessIdentityEvidence,
@@ -1344,6 +1348,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
               ? stream.history as AgentInputItem[]
               : [];
             if (this.shouldRequestFinalReportAfterPlanComplete({
+              sessionId,
               quickMode,
               planStatus,
               conclusion,
@@ -1368,7 +1373,10 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
                 ...streamHistory,
                 {
                   role: 'user',
-                  content: this.buildFinalReportAfterPlanCompletePrompt(config.outputLanguage),
+                  content: this.buildFinalReportAfterPlanCompletePrompt(
+                    config.outputLanguage,
+                    this.finalReportMissingCodeReference(sessionId, conclusion),
+                  ),
                 } as AgentInputItem,
               ];
               currentPreviousResponseId = undefined;
@@ -2586,6 +2594,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
   }
 
   private shouldRequestFinalReportAfterPlanComplete(input: {
+    sessionId?: string;
     quickMode: boolean;
     planStatus: PlanCompletionStatus;
     conclusion: string;
@@ -2621,10 +2630,21 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       return true;
     }
     if (assessFinalResultComparisonIdentity(conclusion, input.comparisonIdentity)) return true;
+    if (input.sessionId && this.finalReportMissingCodeReference(input.sessionId, conclusion)) return true;
     return looksLikeProcessNarrationParagraph(conclusion.split(/\n{2,}/)[0] || '');
   }
 
-  private buildFinalReportAfterPlanCompletePrompt(outputLanguage: OutputLanguage): string {
+  private finalReportMissingCodeReference(sessionId: string, conclusion: string): boolean {
+    return finalReportMissingRequiredCodeReference({
+      plan: this.sessionPlans.get(sessionId)?.current,
+      conclusion,
+    });
+  }
+
+  private buildFinalReportAfterPlanCompletePrompt(
+    outputLanguage: OutputLanguage,
+    requireCodeReference = false,
+  ): string {
     const templateName = outputLanguage === 'en'
       ? 'prompt-openai-final-report-continuation-en'
       : 'prompt-openai-final-report-continuation-zh';
@@ -2632,7 +2652,9 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     if (!template) {
       throw new Error(`Missing OpenAI final-report continuation prompt template: ${templateName}`);
     }
-    return template;
+    return requireCodeReference
+      ? `${template}\n\n${loadCodeReferenceContractPrompt(outputLanguage)}`
+      : template;
   }
 
   private formatPlanCompleteReportContinuationMessage(outputLanguage: OutputLanguage): string {

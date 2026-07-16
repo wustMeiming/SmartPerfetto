@@ -14,6 +14,7 @@ import {
   type ToolCallRecord,
 } from './types';
 import { summarizeToolCallInput } from './toolCallSummary';
+import {isSourceLookupToolName} from '../services/codebase/sourceLookupTools';
 
 const MCP_NAME_PREFIX = 'mcp__smartperfetto__';
 const MAX_PLAN_TOOL_CALL_LOG = 100;
@@ -43,10 +44,13 @@ function shortToolName(toolName: string): string {
 function buildToolCallRecord(input: PlanToolCallRecorderInput): ToolCallRecord {
   const callSummary = summarizeToolCallInput(shortToolName(input.toolName), input.input);
   const success = extractToolCallSuccessFromResult(input.resultText);
+  const returnedCodeReferences = isSourceLookupToolName(input.toolName) &&
+    toolResultContainsCodeReference(input.resultText);
   return {
     toolName: input.toolName,
     timestamp: input.timestamp ?? Date.now(),
     ...(success === undefined ? {} : { success }),
+    ...(returnedCodeReferences ? {returnedCodeReferences: true} : {}),
     ...callSummary,
   };
 }
@@ -114,6 +118,34 @@ function collectToolResultCandidates(resultText: string): string[] {
     // A tool result may append a reasoning nudge after its leading JSON object.
   }
   return [...new Set(candidates)];
+}
+
+function containsCodeReference(value: unknown, depth = 0): boolean {
+  if (depth > 6 || value == null) return false;
+  if (Array.isArray(value)) return value.some(entry => containsCodeReference(entry, depth + 1));
+  if (typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  const metadata = record.metadata;
+  const filePath = typeof record.filePath === 'string'
+    ? record.filePath
+    : metadata && typeof metadata === 'object'
+      ? (metadata as Record<string, unknown>).filePath
+      : undefined;
+  if (
+    typeof record.chunkId === 'string' &&
+    typeof filePath === 'string'
+  ) {
+    return true;
+  }
+  return Object.values(record).some(entry => containsCodeReference(entry, depth + 1));
+}
+
+function toolResultContainsCodeReference(resultText?: string): boolean {
+  if (!resultText) return false;
+  return collectToolResultCandidates(resultText).some(candidate => {
+    const parsed = parseLeadingJsonObject(candidate.trim());
+    return parsed ? containsCodeReference(parsed) : false;
+  });
 }
 
 export function extractToolCallSuccessFromResult(resultText?: string): boolean | undefined {

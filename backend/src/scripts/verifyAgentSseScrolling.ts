@@ -31,6 +31,7 @@ import {
 } from '../middleware/auth';
 import { writeTraceMetadata } from '../services/traceMetadataStore';
 import {CodeLookupLedger} from '../services/codebase/codeLookupLedger';
+import {hasConcreteCodeReference} from '../services/codebase/codeReferenceContract';
 import {
   privateProjectedSourceEventType,
   successfulCodeLookupToolCounts,
@@ -976,13 +977,6 @@ function hasProcessNarration(text: string): boolean {
     /(?:update_plan_phase|submit_plan|resolve_hypothesis|阶段状态更新|执行剩余阶段|继续执行剩余阶段|OpenAI plan|provider 未主动结束 stream|plan 未完成|plan 已完成)/i.test(compact);
 }
 
-function hasConcreteCodeReferences(text: string): boolean {
-  return /\b(?:chunkId|evidence_ref_id|source_ref)\b/i.test(text)
-    || /\b(?:resolve_symbol|lookup_app_source)\s*\(/i.test(text)
-    || (/\bfilePath\b/i.test(text) && /\blineRange\b/i.test(text))
-    || /\b[\w.-]+(?:\/[\w.-]+)+\.(?:kt|java|kts|xml|cpp|cc|c|h|hpp|m|mm|swift|rs|go|py|ts|tsx|js|jsx|sql|md)(?::(?:L)?\d+(?:-\d+)?|\s+L\d+(?:-\d+)?)\b/i.test(text);
-}
-
 function clampTracePairSplitPercent(value: number): number {
   if (!Number.isFinite(value)) return 50;
   return Math.min(82, Math.max(18, Math.round(value)));
@@ -1125,7 +1119,7 @@ function recordConclusionEvidence(
     summary.conclusionChars = Math.max(summary.conclusionChars, text.length);
     summary.conclusionHasConcreteEvidenceRefs ||= hasConcreteEvidenceReferences(text);
     summary.conclusionHasEvidenceIndex ||= hasEvidenceIndex(text);
-    summary.conclusionHasConcreteCodeRefs ||= hasConcreteCodeReferences(text);
+    summary.conclusionHasConcreteCodeRefs ||= hasConcreteCodeReference(text);
     return;
   }
 
@@ -1137,7 +1131,7 @@ function recordConclusionEvidence(
   summary.analysisCompletedHasEvidenceIndex ||= hasEvidenceIndex(text);
   summary.analysisCompletedHasFinalReportHeading ||= hasFinalReportHeading(text);
   summary.analysisCompletedHasProcessNarration ||= hasProcessNarration(text);
-  summary.analysisCompletedHasConcreteCodeRefs ||= hasConcreteCodeReferences(text);
+  summary.analysisCompletedHasConcreteCodeRefs ||= hasConcreteCodeReference(text);
 }
 
 async function collectSseSummary(

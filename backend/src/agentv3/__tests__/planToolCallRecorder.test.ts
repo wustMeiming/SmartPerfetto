@@ -189,6 +189,50 @@ describe('recordPlanToolCall', () => {
     ]);
   });
 
+  it('records whether a source lookup actually returned a CodeRef', () => {
+    const plan = createPlan();
+    const withCodeRef = recordPlanToolCall(plan, {
+      toolName: 'lookup_app_source',
+      resultText: JSON.stringify({content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          result: {
+            hits: [{
+              chunkId: 'chunk-1',
+              metadata: {
+                filePath: 'app/src/main/java/demo/StartupHooks.kt',
+                lineRange: {start: 10, end: 20},
+              },
+            }],
+          },
+        }),
+      }]}),
+    });
+    const withoutCodeRef = recordPlanToolCall(plan, {
+      toolName: 'lookup_app_source',
+      resultText: JSON.stringify({success: true, result: {hits: []}}),
+    });
+    const withRawPublicCodeRef = recordPlanToolCall(plan, {
+      toolName: 'lookup_aosp_source',
+      resultText: JSON.stringify({
+        success: true,
+        results: [{chunk: {
+          chunkId: 'aosp-chunk-1',
+          filePath: 'frameworks/base/core/java/android/app/ActivityThread.java',
+        }}],
+      }),
+    });
+
+    expect(withCodeRef).toMatchObject({
+      success: true,
+      returnedCodeReferences: true,
+    });
+    expect(withRawPublicCodeRef).toMatchObject({returnedCodeReferences: true});
+    expect(withoutCodeRef).toMatchObject({success: true});
+    expect(withoutCodeRef).not.toHaveProperty('returnedCodeReferences');
+  });
+
   it('replays pre-plan comparison context calls into the accepted raw trace pair plan', () => {
     const tracker: { current: AnalysisPlanV3 | null; prePlanToolCallLog?: AnalysisPlanV3['toolCallLog'] } = {
       current: null,

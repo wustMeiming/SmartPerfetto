@@ -22,6 +22,7 @@ import {
   loadSelectionTemplate,
   renderTemplate,
 } from './strategyLoader';
+import {loadCodeReferenceContractPrompt} from '../services/codebase/codeReferenceContract';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from './outputLanguage';
 import {
   QUICK_TRIAGE_MAX_CHINESE_CHARS,
@@ -740,6 +741,7 @@ export function buildSystemPromptParts(
         codebaseIds: context.codebaseIds.join(', '),
       }), false, { truncatable: true });
     }
+    push(3, 'code_reference_contract', loadCodeReferenceContractPrompt(outputLanguage));
   }
 
   if (context.sceneType === 'multi_trace_result_comparison') {

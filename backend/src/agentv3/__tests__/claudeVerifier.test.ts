@@ -1243,6 +1243,73 @@ describe('verifySceneCompleteness — startup cold-start checks', () => {
 });
 
 describe('verifyConclusion progress output', () => {
+  it('requires a locatable CodeRef after a successful source lookup', async () => {
+    const sourcePlan = makePlan({
+      toolCallLog: [
+        {
+          toolName: 'mcp__smartperfetto__lookup_app_source',
+          timestamp: Date.now(),
+          matchedPhaseId: 'phase-1',
+          success: true,
+          returnedCodeReferences: true,
+        },
+      ],
+    });
+    const reportWithoutLocation = [
+      '## 综合结论',
+      '',
+      'StartupHooks.kt 显示首帧前存在同步初始化，但当前 trace 证据才是本次发生的证明。',
+      '',
+      '## 关键证据链',
+      '',
+      'TTID=1912ms，证据来自 art-10。',
+    ].join('\n');
+
+    const missing = await verifyConclusion([], reportWithoutLocation, {
+      enableLLM: false,
+      plan: sourcePlan,
+      outputLanguage: 'zh-CN',
+    });
+    expect(missing.heuristicIssues).toContainEqual(expect.objectContaining({
+      type: 'missing_evidence',
+      severity: 'error',
+      message: expect.stringContaining('relative/path/File.kt:L10-L20'),
+    }));
+
+    const locatable = await verifyConclusion(
+      [],
+      `${reportWithoutLocation}\n\n源码定位：app/src/main/java/demo/StartupHooks.kt:L10-L20。`,
+      {
+        enableLLM: false,
+        plan: sourcePlan,
+        outputLanguage: 'zh-CN',
+      },
+    );
+    expect(locatable.heuristicIssues.filter(issue =>
+      issue.message.includes('relative/path/File.kt:L10-L20'),
+    )).toHaveLength(0);
+  });
+
+  it('does not require a CodeRef when the source lookup returned no references', async () => {
+    const sourcePlan = makePlan({
+      toolCallLog: [{
+        toolName: 'lookup_app_source',
+        timestamp: Date.now(),
+        matchedPhaseId: 'phase-1',
+        success: true,
+      }],
+    });
+
+    const result = await verifyConclusion([], '## 综合结论\n\n源码查询无命中，结论仅使用 trace 证据。', {
+      enableLLM: false,
+      plan: sourcePlan,
+      outputLanguage: 'zh-CN',
+    });
+    expect(result.heuristicIssues.filter(issue =>
+      issue.message.includes('relative/path/File.kt:L10-L20'),
+    )).toHaveLength(0);
+  });
+
   it('treats missing startup final-report contract sections as correction errors', async () => {
     const conclusion = [
       '# 启动性能分析报告',
