@@ -433,6 +433,46 @@ describe('tool result projection and session registry', () => {
     expect(sidecar.chunkRefs[0].attribution).toContain('CC BY-NC-SA');
   });
 
+  it.each([
+    ['single MCP text output', (text: string) => ({type: 'text', text})],
+    ['OpenAI protocol text output', (text: string) => [{type: 'input_text', text}]],
+  ])('projects %s without exposing source paths or snippets', (_name, wrap) => {
+    const rawText = JSON.stringify({
+      success: true,
+      result: {
+        query: 'StartupHooks',
+        probed: ['app_source'],
+        retrievedAt: 1714600000000,
+        legacyPath: false,
+        hits: [{
+          chunkId: 'source-1',
+          score: 1,
+          metadata: {
+            kind: 'app_source',
+            codebaseId: 'codebase-a',
+            filePath: 'app/src/main/java/com/example/StartupHooks.kt',
+            lineRange: {start: 10, end: 20},
+          },
+          snippet: 'PRIVATE_OPENAI_SOURCE_CANARY',
+        }],
+      },
+    });
+
+    const projected = projectToolResultForExternalSurface('lookup_app_source', wrap(rawText));
+
+    expect(projected).toEqual(expect.objectContaining({
+      toolName: 'lookup_app_source',
+      outcome: 'success',
+      chunkRefs: [expect.objectContaining({
+        chunkId: 'source-1',
+        kind: 'app_source',
+        snippetHash: expect.any(String),
+      })],
+    }));
+    expect(JSON.stringify(projected)).not.toContain('StartupHooks.kt');
+    expect(JSON.stringify(projected)).not.toContain('PRIVATE_OPENAI_SOURCE_CANARY');
+  });
+
   it('projects public blog retrieval results without copying snippets', () => {
     const projected = projectToolResultForExternalSurface('lookup_blog_knowledge', {
       query: 'Binder latency',

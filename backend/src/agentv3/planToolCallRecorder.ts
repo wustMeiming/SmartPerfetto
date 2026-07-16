@@ -129,6 +129,17 @@ export function extractToolCallSuccessFromResult(resultText?: string): boolean |
     if (!parsed) continue;
     if (typeof parsed.success === 'boolean') return parsed.success;
     if (parsed.isError === true) return false;
+    if (parsed.outcome === 'success') return true;
+    if (
+      parsed.outcome === 'rejected' ||
+      parsed.outcome === 'budget_exceeded' ||
+      parsed.outcome === 'consent_blocked' ||
+      parsed.outcome === 'license_blocked' ||
+      parsed.outcome === 'unresolved' ||
+      parsed.outcome === 'sidecar_missing'
+    ) {
+      return false;
+    }
   }
   return undefined;
 }

@@ -3200,6 +3200,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         timestamp: now,
       });
     } else if (event.name === 'tool_output') {
+      const rawOutput = (event.item as any)?.output ?? rawItem?.output;
       const taskIds = [rawItem?.callId, rawItem?.call_id, rawItem?.id]
         .filter((id): id is string => typeof id === 'string' && id.length > 0);
       const cached = taskIds
@@ -3207,7 +3208,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         .find(Boolean);
       const toolName = cached?.toolName || rawItem?.name || 'unknown';
       const resultText = summarizeToolOutput(
-        projectToolResultForExternalSurface(toolName, rawItem?.output),
+        projectToolResultForExternalSurface(toolName, rawOutput),
       );
       if (cached) {
         recordPlanOrPrePlanToolCall(this.sessionPlans.get(streamContext.sessionId), {
@@ -3216,7 +3217,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           resultText,
           returnedCodeReferences: sourceLookupResultHasCodeReferences(
             cached.toolName,
-            rawItem?.output,
+            rawOutput,
           ),
         });
         for (const taskId of taskIds) {

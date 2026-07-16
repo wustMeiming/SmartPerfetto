@@ -1580,32 +1580,37 @@ describe('OpenAIRuntime plan completion guard', () => {
         arguments: JSON.stringify({ query: 'StartupHooks' }),
       } },
     }, 'zh-CN', context);
+    const rawSourceResult = JSON.stringify({ result: {
+      query: 'StartupHooks',
+      hits: [{
+        chunkId: 'source-1',
+        score: 1,
+        metadata: {
+          kind: 'app_source',
+          codebaseId: 'codebase-a',
+          filePath: 'app/src/main/java/com/example/StartupHooks.kt',
+          lineRange: { start: 10, end: 20 },
+        },
+        snippet: 'OPENAI_PRIVATE_SOURCE_CANARY',
+      }],
+    } });
     runtime.handleStreamEvent({
       type: 'run_item_stream_event',
       name: 'tool_output',
-      item: { rawItem: {
-        callId: 'source-call',
-        output: JSON.stringify({ result: {
-          query: 'StartupHooks',
-          hits: [{
-            chunkId: 'source-1',
-            score: 1,
-            metadata: {
-              kind: 'app_source',
-              codebaseId: 'codebase-a',
-              filePath: 'app/src/main/java/com/example/StartupHooks.kt',
-              lineRange: { start: 10, end: 20 },
-            },
-            snippet: 'OPENAI_PRIVATE_SOURCE_CANARY',
-          }],
-        } }),
-      } },
+      item: {
+        output: { type: 'text', text: rawSourceResult },
+        rawItem: {
+          callId: 'source-call',
+          output: [{ type: 'input_text', text: rawSourceResult }],
+        },
+      },
     }, 'zh-CN', context);
 
     expect(runtime.sessionPlans.get('s-private-source')!.current!.toolCallLog)
       .toContainEqual(expect.objectContaining({
         toolName: 'lookup_app_source',
         matchedPhaseId: 'p-source',
+        success: true,
         returnedCodeReferences: true,
       }));
     const serialized = JSON.stringify(updates.filter(update => update.type === 'agent_response'));

@@ -102,17 +102,37 @@ function parseJson(value: unknown): unknown {
   }
 }
 
+function parseTextPayload(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return undefined;
+  const block = value as {type?: unknown; text?: unknown};
+  if (
+    (block.type === 'text' || block.type === 'input_text') &&
+    typeof block.text === 'string'
+  ) {
+    return parseJson(block.text);
+  }
+  return undefined;
+}
+
 function unwrapMcpPayload(raw: unknown): unknown {
   const direct = parseJson(raw);
+  if (Array.isArray(direct)) {
+    for (const block of direct) {
+      const parsed = parseTextPayload(block);
+      if (parsed !== undefined) return parsed;
+    }
+    return direct;
+  }
   if (!direct || typeof direct !== 'object') return direct;
   const content = (direct as {content?: unknown}).content;
   if (Array.isArray(content)) {
-    const text = content.find(block =>
-      block && typeof block === 'object' && (block as {type?: unknown}).type === 'text') as
-      {text?: unknown} | undefined;
-    if (text) return parseJson(text.text);
+    for (const block of content) {
+      const parsed = parseTextPayload(block);
+      if (parsed !== undefined) return parsed;
+    }
   }
-  return direct;
+  const parsedDirect = parseTextPayload(direct);
+  return parsedDirect === undefined ? direct : parsedDirect;
 }
 
 function projectRawRetrievalResult(toolName: string, candidate: Record<string, unknown>): ProjectedPayload | undefined {
