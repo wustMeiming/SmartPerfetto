@@ -13,6 +13,50 @@ Detailed commit-level history is available via `git log`.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-17
+
+### Added
+- Smart Profile can now compose user-authorized source repositories and
+  external RAG knowledge independently or together, with pinned generations,
+  consent modes, provenance, and fail-closed authorization.
+- Provider-neutral run specifications align OpenAI Agents SDK, Pi Agent Core,
+  OpenCode, and Claude-compatible runtimes across analysis, comparison,
+  evidence verification, reports, snapshots, CLI output, and frontend chat.
+- Evidence-first Android 17 rendering, camera, managed-heap, GPU-compute,
+  kernel-wait, startup, and scrolling knowledge is backed by an expanded,
+  deterministic real/constructed trace corpus.
+- Cross-platform contracts cover Linux, macOS, Windows, Docker, the npm CLI,
+  portable launchers, and the public Perfetto Agent Skill projection.
+
+### Changed
+- Smart scene selection, presentation, recovery, and prompt methodology are
+  registry/template-driven, with final conclusions kept separate from
+  evidence, reports, snapshots, and readable chat projections.
+- The Perfetto UI uses unified analysis context and trace workspaces, with the
+  committed frontend prebuild regenerated from the matching submodule commit.
+- Trace listing, processor queues, report caching, source ingestion, RAG
+  accounting, and registry reads now use bounded, cursor-based, lease-aware,
+  or aggregate paths suitable for larger deployments.
+- Public `/health` exposes only liveness and version; authenticated runtime and
+  provider diagnostics are served by `/api/runtime-health`.
+- The public Perfetto-Skills export now classifies all 101 Strategy/registry
+  sources explicitly, exporting portable behavior while keeping product-only
+  orchestration behind the SmartPerfetto boundary.
+
+### Fixed
+- Private source/RAG context now preserves tenant, workspace, user, consent,
+  license, and provider-send boundaries through persistence, replay, SSE,
+  reports, and snapshots without leaking intermediate model content.
+- Provider endpoints enforce exact-origin allowlists, DNS/IP pinning, redirect
+  revalidation, deadlines, and credential reconfirmation after origin changes.
+- Cross-process trace-processor cleanup and port allocation no longer terminate
+  another live instance or claim a port already held by the operating system.
+- Chinese/English source and RAG controls, dual-trace language inheritance,
+  narrow layouts, keyboard focus, and ARIA semantics remain consistent across
+  partial-capability and error states.
+- Machine-readable CLI commands preserve parseable stdout, while bootstrap,
+  health, lifecycle, and cleanup diagnostics are routed to stderr.
+
 ## [1.0.21] - 2026-05-25
 
 ### Added
@@ -84,6 +128,7 @@ Detailed commit-level history is available via `git log`.
 - HTML report generation and CSV / JSON export.
 - AGPL v3.0 licensing throughout.
 
-[Unreleased]: https://github.com/Gracker/SmartPerfetto/compare/v1.0.21...HEAD
+[Unreleased]: https://github.com/Gracker/SmartPerfetto/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Gracker/SmartPerfetto/compare/v1.0.39...v1.1.0
 [1.0.21]: https://github.com/Gracker/SmartPerfetto/compare/v1.0.20...v1.0.21
 [0.1.0]: https://github.com/Gracker/SmartPerfetto/releases/tag/v0.1.0
