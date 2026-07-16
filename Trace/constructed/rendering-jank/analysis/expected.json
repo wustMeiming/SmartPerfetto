@@ -7,7 +7,7 @@
       "id": "execute-app_frame_production",
       "type": "skill",
       "target": "app_frame_production",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/app_frame_production.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -20,7 +20,7 @@
       "id": "execute-buffer_transaction_lifecycle",
       "type": "skill",
       "target": "buffer_transaction_lifecycle",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/buffer_transaction_lifecycle.skill.yaml",
       "parameters": {
         "start_ts": "${trace_start}",
@@ -36,7 +36,7 @@
       "id": "execute-choreographer_module",
       "type": "skill",
       "target": "choreographer_module",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/modules/framework/choreographer_module.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -49,7 +49,7 @@
       "id": "execute-chrome_scroll_jank_frame_timeline",
       "type": "skill",
       "target": "chrome_scroll_jank_frame_timeline",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/chrome_scroll_jank_frame_timeline.skill.yaml",
       "parameters": {
         "min_janky_frames": 1
@@ -64,7 +64,7 @@
       "id": "execute-consumer_jank_detection",
       "type": "skill",
       "target": "consumer_jank_detection",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/consumer_jank_detection.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -78,7 +78,7 @@
       "id": "execute-flutter_scrolling_analysis",
       "type": "skill",
       "target": "flutter_scrolling_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/flutter_scrolling_analysis.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -107,7 +107,7 @@
       "id": "execute-frame_overrun_summary",
       "type": "skill",
       "target": "frame_overrun_summary",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/frame_overrun_summary.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -128,7 +128,7 @@
       "id": "execute-frame_production_gap",
       "type": "skill",
       "target": "frame_production_gap",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/frame_production_gap.skill.yaml",
       "parameters": {
         "process_name": "com.smartperfetto.fixture"
@@ -143,7 +143,7 @@
       "id": "execute-frame_ui_time_breakdown",
       "type": "skill",
       "target": "frame_ui_time_breakdown",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/frame_ui_time_breakdown.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -156,7 +156,7 @@
       "id": "execute-game_fps_analysis",
       "type": "skill",
       "target": "game_fps_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/game_fps_analysis.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -169,7 +169,7 @@
       "id": "execute-game_main_loop_jank",
       "type": "skill",
       "target": "game_main_loop_jank",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/game_main_loop_jank.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -182,7 +182,7 @@
       "id": "execute-gl_standalone_swap_jank",
       "type": "skill",
       "target": "gl_standalone_swap_jank",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/gl_standalone_swap_jank.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -203,7 +203,7 @@
       "id": "execute-input_to_frame_latency",
       "type": "skill",
       "target": "input_to_frame_latency",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/input_to_frame_latency.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -216,7 +216,7 @@
       "id": "execute-jank_frame_detail",
       "type": "skill",
       "target": "jank_frame_detail",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/jank_frame_detail.skill.yaml",
       "parameters": {
         "package": "com.smartperfetto.fixture",
@@ -271,7 +271,7 @@
       "id": "execute-present_fence_timing",
       "type": "skill",
       "target": "present_fence_timing",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/present_fence_timing.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -292,7 +292,7 @@
       "id": "execute-render_thread_slices",
       "type": "skill",
       "target": "render_thread_slices",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/render_thread_slices.skill.yaml",
       "parameters": {
         "start_ts": "${trace_start}",
@@ -308,7 +308,7 @@
       "id": "execute-rendering_pipeline_detection",
       "type": "skill",
       "target": "rendering_pipeline_detection",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/rendering_pipeline_detection.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -321,7 +321,7 @@
       "id": "execute-rn_bridge_to_frame_jank",
       "type": "skill",
       "target": "rn_bridge_to_frame_jank",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/rn_bridge_to_frame_jank.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -334,7 +334,7 @@
       "id": "execute-rn_fabric_render_jank",
       "type": "skill",
       "target": "rn_fabric_render_jank",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/rn_fabric_render_jank.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -374,7 +374,7 @@
       "id": "execute-scrolling_analysis",
       "type": "skill",
       "target": "scrolling_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/scrolling_analysis.skill.yaml",
       "parameters": {
         "enable_expert_probes": true,
@@ -403,7 +403,7 @@
       "id": "execute-sf_frame_consumption",
       "type": "skill",
       "target": "sf_frame_consumption",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/sf_frame_consumption.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -416,7 +416,7 @@
       "id": "execute-sf_layer_count_in_range",
       "type": "skill",
       "target": "sf_layer_count_in_range",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/sf_layer_count_in_range.skill.yaml",
       "parameters": {
         "start_ts": "${trace_start}",
@@ -432,7 +432,7 @@
       "id": "execute-surfaceflinger_analysis",
       "type": "skill",
       "target": "surfaceflinger_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/surfaceflinger_analysis.skill.yaml",
       "parameters": {
         "slow_composition_multiplier": 1.5,
@@ -456,7 +456,7 @@
       "id": "execute-surfaceflinger_module",
       "type": "skill",
       "target": "surfaceflinger_module",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/modules/framework/surfaceflinger_module.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -469,7 +469,7 @@
       "id": "execute-textureview_producer_frame_timing",
       "type": "skill",
       "target": "textureview_producer_frame_timing",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/textureview_producer_frame_timing.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -482,7 +482,7 @@
       "id": "execute-vrr_detection",
       "type": "skill",
       "target": "vrr_detection",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/vrr_detection.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -503,7 +503,7 @@
       "id": "execute-vsync_config",
       "type": "skill",
       "target": "vsync_config",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/vsync_config.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -516,7 +516,7 @@
       "id": "execute-vsync_period_detection",
       "type": "skill",
       "target": "vsync_period_detection",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/vsync_period_detection.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -529,7 +529,7 @@
       "id": "execute-vsync_phase_alignment",
       "type": "skill",
       "target": "vsync_phase_alignment",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/vsync_phase_alignment.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -542,7 +542,7 @@
       "id": "execute-webview_drawfunctor_jank_chain",
       "type": "skill",
       "target": "webview_drawfunctor_jank_chain",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/webview_drawfunctor_jank_chain.skill.yaml",
       "parameters": {},
       "required_steps": [

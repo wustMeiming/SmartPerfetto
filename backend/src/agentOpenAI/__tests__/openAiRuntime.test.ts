@@ -2296,9 +2296,62 @@ describe('OpenAIRuntime plan completion guard', () => {
     expect(saveFull).not.toHaveBeenCalled();
     expect(promote).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['codebase only', {codeAwareMode: 'metadata_only' as const, codebaseIds: ['app']}],
+    ['private RAG only', {knowledgeSourceIds: ['wiki']}],
+    ['source and private RAG', {
+      codeAwareMode: 'provider_send' as const,
+      codebaseIds: ['app'],
+      knowledgeSourceIds: ['wiki'],
+    }],
+  ])('does not write cross-session pattern memory for %s', (_label, options) => {
+    const runtime = createOpenAiRuntimeForTest();
+    const saveQuick = jest.spyOn(patternMemory, 'saveQuickPathPattern').mockResolvedValue(undefined);
+    const saveFull = jest.spyOn(patternMemory, 'saveAnalysisPattern').mockResolvedValue(undefined);
+    const promote = jest.spyOn(patternMemory, 'promoteQuickPatternIfMatching').mockResolvedValue(false);
+
+    runtime.recordPatternMemory({
+      sessionId: 's-private-memory',
+      result: {
+        sessionId: 's-private-memory',
+        success: true,
+        findings: [{
+          title: 'PRIVATE_PATTERN_CANARY',
+          severity: 'high',
+          description: 'Private source result.',
+        }],
+        hypotheses: [],
+        conclusion: 'PRIVATE_PATTERN_CONCLUSION_CANARY',
+        confidence: 0.8,
+        rounds: 2,
+        totalDurationMs: 1000,
+      },
+      previousTurnCount: 0,
+      quickMode: false,
+      sceneType: 'scrolling',
+      architecture: {type: 'Standard'},
+      packageName: 'com.example.app',
+      options,
+    });
+
+    expect(saveQuick).not.toHaveBeenCalled();
+    expect(saveFull).not.toHaveBeenCalled();
+    expect(promote).not.toHaveBeenCalled();
+  });
 });
 
 describe('OpenAIRuntime previous response recovery', () => {
+  it('disables provider response storage for private model calls', () => {
+    const config = createOpenAiConfigForTest();
+    expect(__testing.buildOpenAIModelSettings(config, false)).toEqual(expect.objectContaining({
+      store: false,
+      maxTokens: config.maxOutputTokens,
+      parallelToolCalls: false,
+    }));
+    expect(__testing.buildOpenAIModelSettings(config, true).store).toBe(true);
+  });
+
   it('keeps quick mode off the remote OpenAI response chain', () => {
     const resolved = __testing.resolveOpenAIRunInput({
       quickMode: true,
@@ -2353,6 +2406,39 @@ describe('OpenAIRuntime previous response recovery', () => {
     expect(resolved.input).toBe('continue');
     expect(resolved.previousResponseId).toBe('resp_fresh');
     expect(resolved.shouldPersistRemoteSession).toBe(true);
+  });
+
+  it('does not join or persist a remote response chain for private analyses', () => {
+    const resolved = __testing.resolveOpenAIRunInput({
+      quickMode: false,
+      config: {
+        ...createOpenAiConfigForTest(),
+        outputLanguage: 'en',
+      },
+      sessionEntry: {
+        history: [{role: 'user', content: 'PRIVATE_REMOTE_HISTORY_CANARY'}],
+        lastResponseId: 'resp_private',
+        updatedAt: Date.now(),
+      },
+      effectivePrompt: 'analyze selected source',
+      previousTurns: [{
+        id: 'private-turn',
+        timestamp: Date.now(),
+        query: 'previous private question',
+        intent: {},
+        result: {message: 'PRIVATE_LOCAL_OPENAI_CONTINUITY_CANARY'},
+        findings: [],
+        turnIndex: 0,
+        completed: true,
+      }],
+      allowRemotePersistence: false,
+    });
+
+    expect(resolved.input).toEqual(expect.stringContaining('analyze selected source'));
+    expect(resolved.input).toEqual(expect.stringContaining('PRIVATE_LOCAL_OPENAI_CONTINUITY_CANARY'));
+    expect(resolved.previousResponseId).toBeUndefined();
+    expect(resolved.shouldPersistRemoteSession).toBe(false);
+    expect(JSON.stringify(resolved)).not.toContain('PRIVATE_REMOTE_HISTORY_CANARY');
   });
 
   it('recognizes stale previous response errors from OpenAI Responses', () => {

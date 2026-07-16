@@ -257,6 +257,10 @@ describe('strategyLoader tolerates leading SPDX HTML comments', () => {
       'lookup_knowledge',
     ]));
 
+    const startupDetailHint = startupHints.find(hint => hint.id === 'detail_breakdown');
+    expect(startupDetailHint?.constraints).toMatch(/start_ts.*end_ts.*dur_ms.*startup_type/);
+    expect(startupDetailHint?.constraints).not.toMatch(/ttid_ts|ttfd_ts/);
+
     const anrHints = getPhaseHints('anr');
     expect(anrHints.map(hint => hint.id)).toContain('anr_diagnostic_api_boundary');
     expect(anrHints.find(hint => hint.id === 'anr_diagnostic_api_boundary')?.criticalTools).toEqual(expect.arrayContaining([

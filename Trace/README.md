@@ -8,7 +8,7 @@ This directory is the source-controlled trace test and reference corpus.
 - [Machine-readable catalog](./catalog.json)
 - [Skill and Strategy coverage](./coverage.json)
 
-Skill execution quality: 136 semantic, 8 explicit graceful-empty, 3 explicit unavailable prerequisite, 87 definition-only.
+Skill execution quality: 3 assertion-backed semantic, 133 execution-only, 8 explicit graceful-empty, 3 explicit unavailable prerequisite, 87 definition-only.
 
 ## Commands
 

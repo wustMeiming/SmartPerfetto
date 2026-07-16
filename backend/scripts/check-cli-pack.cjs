@@ -42,6 +42,12 @@ const requiredFiles = [
   'prebuilts/perfetto-recording-tools/README.md',
   'skills/composite/scrolling_analysis.skill.yaml',
   'strategies/scrolling.strategy.md',
+  'knowledge/android-internals-capability-map.yaml',
+  'public/assistant-shell/index.html',
+  'public/assistant-shell/app.js',
+  'public/admin-control-plane/index.html',
+  'public/admin-control-plane/app.js',
+  'public/admin-control-plane/style.css',
 ];
 
 for (const file of requiredFiles) {

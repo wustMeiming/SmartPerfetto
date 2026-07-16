@@ -18,7 +18,6 @@ import {
   AnalysisSession,
   CollectedResult,
   QueryResult,
-  AnalysisCompletedEvent,
 } from '../types/analysis';
 import { OrchestratorResult, MasterOrchestratorResult, Finding, Diagnostic, ExpertResult, StageResult } from '../agent/types';
 import {
@@ -90,6 +89,8 @@ export interface MasterAgentReportData {
 export interface AgentDrivenReportData {
   traceId: string;
   query: string;
+  /** Language pinned to the analysis session; process configuration is only a fallback. */
+  outputLanguage?: OutputLanguage;
   /** Trace start timestamp in ns (string to preserve precision) */
   traceStartNs?: string;
   result: {
@@ -4075,7 +4076,9 @@ export class HTMLReportGenerator {
             Object.entries(v).map(([nk, nv]) => `
                             <div class="property-item">
                               <span class="property-label">${this.formatMetricLabel(nk)}</span>
-                              <span class="property-value">${typeof nv === 'object' ? JSON.stringify(nv) : this.escapeHtml(String(nv))}</span>
+                              <span class="property-value">${this.escapeHtml(
+                                typeof nv === 'object' ? JSON.stringify(nv) : String(nv),
+                              )}</span>
                             </div>
                           `).join('')
           }
@@ -4101,12 +4104,12 @@ export class HTMLReportGenerator {
    */
   private formatMetricLabel(key: string): string {
     // Convert snake_case or camelCase to readable label
-    return key
+    return this.escapeHtml(key
       .replace(/_/g, ' ')
       .replace(/([a-z])([A-Z])/g, '$1 $2')
       .replace(/^./, str => str.toUpperCase())
       .replace(/\b(id|ms|fps|ui|gpu|cpu|sql)\b/gi, match => match.toUpperCase())
-      .trim();
+      .trim());
   }
 
   /**
@@ -4114,7 +4117,7 @@ export class HTMLReportGenerator {
    */
   generateAgentDrivenHTML(data: AgentDrivenReportData): string {
     const { traceId, query, result, hypotheses, dialogue, conversationTimeline, timestamp, queryHistory, conclusionHistory } = data;
-    const outputLanguage = this.getOutputLanguage();
+    const outputLanguage = data.outputLanguage ?? this.getOutputLanguage();
     const htmlLang = outputLanguage === 'en' ? 'en' : 'zh-CN';
     const locale = this.getReportLocale(outputLanguage);
     const dataEnvelopes = this.prepareAgentDrivenEnvelopes(data.dataEnvelopes || []);

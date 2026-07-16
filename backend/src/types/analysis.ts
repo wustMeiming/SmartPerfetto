@@ -322,7 +322,8 @@ export interface StepCompletedEvent extends SSEEvent {
 /**
  * Analysis completed event
  */
-export interface AnalysisCompletedEvent extends SSEEvent {
+/** @deprecated Legacy orchestrator event; HTTP Agent SSE uses dataContract.AnalysisCompletedEvent. */
+export interface LegacyAnalysisCompletedEvent extends SSEEvent {
   type: 'analysis_completed';
   data: {
     sessionId: string;
@@ -452,7 +453,7 @@ export type AnalysisSSEEvent =
   | SQLGeneratedEvent
   | SQLExecutedEvent
   | StepCompletedEvent
-  | AnalysisCompletedEvent
+  | LegacyAnalysisCompletedEvent
   | ErrorEvent
   | ProgressEvent
   | SkillSectionEvent

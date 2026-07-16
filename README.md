@@ -96,7 +96,7 @@ Step 3 (optional): Set the output language. SmartPerfetto defaults to Simplified
 SMARTPERFETTO_OUTPUT_LANGUAGE=en
 ```
 
-Step 4: Start or restart services. For Docker, run `docker compose -f docker-compose.hub.yml up -d` or `docker compose -f docker-compose.hub.yml restart`. For local source runs, use `./start.sh`; if you only changed `.env` while the backend is already running, use `./scripts/restart-backend.sh`. Verify the active source with [http://localhost:3000/health](http://localhost:3000/health): `aiEngine.credentialSource=provider-manager` means the UI provider overrides env, while `env-or-default` means SmartPerfetto is using `.env` or local Claude Code fallback. For the local Claude Code path, verify by running a normal `claude` request in the same terminal.
+Step 4: Start or restart services. For Docker, run `docker compose -f docker-compose.hub.yml up -d` or `docker compose -f docker-compose.hub.yml restart`. For local source runs, use `./start.sh`; if you only changed `.env` while the backend is already running, use `./scripts/restart-backend.sh`. Use authenticated `GET /api/runtime-health` (or the Provider settings status) to verify the active source: `aiEngine.credentialSource=provider-manager` means the UI provider overrides env, while `env-or-default` means SmartPerfetto is using `.env` or local Claude Code fallback. Public `GET /health` is liveness-only. For the local Claude Code path, also verify by running a normal `claude` request in the same terminal.
 
 ## Perfetto Resources
 
@@ -159,7 +159,7 @@ The container starts without a local `.env` file for health/UI smoke checks. Rea
 
 Provider profiles created in the UI are stored in the `provider-data` Docker volume. They survive container restarts and normal `docker compose down`; they are removed by `docker compose down -v`.
 
-An active Provider Manager profile has priority over Docker `.env` credentials. The container startup log and [http://localhost:3000/health](http://localhost:3000/health) show whether the current credential source is `provider-manager` or `env-or-default`. To force Docker `.env` fallback, deactivate the active provider in AI Assistant settings.
+An active Provider Manager profile has priority over Docker `.env` credentials. The container startup log and authenticated `GET /api/runtime-health` show whether the current credential source is `provider-manager` or `env-or-default`. To force Docker `.env` fallback, deactivate the active provider in AI Assistant settings.
 
 Windows users should use Docker Desktop with the WSL2 backend. The published image is a Linux container image and runs through Docker Desktop; no separate Windows build is required.
 
@@ -262,7 +262,7 @@ After verifying your changes in the browser, Step 1: run `./scripts/update-front
 
 ## Runtime Settings
 
-The quick setup above covers where credentials live. Detailed provider setup, model IDs, regional Base URL variants, OpenAI-compatible runtime fields, Anthropic-compatible presets, Pi Agent Core/OpenCode custom runtime fields, proxy guidance, and troubleshooting live in [docs/getting-started/configuration.en.md](docs/getting-started/configuration.en.md). Use `GET /health` to confirm `aiEngine.runtime`, `aiEngine.credentialSource`, `aiEngine.providerMode`, and `aiEngine.diagnostics` after changing provider settings.
+The quick setup above covers where credentials live. Detailed provider setup, model IDs, regional Base URL variants, OpenAI-compatible runtime fields, Anthropic-compatible presets, Pi Agent Core/OpenCode custom runtime fields, proxy guidance, and troubleshooting live in [docs/getting-started/configuration.en.md](docs/getting-started/configuration.en.md). Use authenticated `GET /api/runtime-health` to confirm `aiEngine.runtime`, `aiEngine.credentialSource`, `aiEngine.providerMode`, and `aiEngine.diagnostics` after changing provider settings.
 
 Claude Code local auth/config is only available to local source runs, not Docker. Separate tools such as Codex CLI, Gemini CLI, and OpenCode manage their own configuration files and login state; SmartPerfetto does not automatically read those credentials. Even the `opencode` runtime uses explicit Provider Manager/env model configuration and an isolated server/project boundary. The frontend settings dialog's `Connection` tab stores the backend URL and an optional advanced `SMARTPERFETTO_API_KEY` access token only when the backend is protected; the `Providers` tab can write model-provider profiles to the backend Provider Manager.
 
@@ -360,7 +360,9 @@ The browser UI talks to the backend through REST and SSE. If you want to build y
 | `POST` | `/api/agent/v1/scene-reconstruct` | Start scene reconstruction |
 | `GET` | `/api/agent/v1/:sessionId/report` | Fetch the generated report |
 
-Leave `SMARTPERFETTO_API_KEY` unset for local single-user runs. Set it in `backend/.env` only if you expose the backend beyond your local machine. Protected APIs then require `Authorization: Bearer <token>`.
+Leave `SMARTPERFETTO_API_KEY` unset for local single-user runs. Set it in `backend/.env` only if you expose the backend beyond your local machine. Protected APIs then require `Authorization: Bearer <token>`. This static key is the deployment-operator credential with local administration authority; do not distribute it to ordinary users.
+
+For enterprise or shared deployments, also set a dedicated 32-byte-or-longer `SMARTPERFETTO_TP_PROXY_CAPABILITY_SECRET`. It signs only the short-lived browser WebSocket capability used by the trace-processor proxy, so the long-lived backend API key is never placed in a URL. Rotating this secret invalidates outstanding capabilities. Docker Compose passes it through the project `.env` file.
 
 ## Architecture
 

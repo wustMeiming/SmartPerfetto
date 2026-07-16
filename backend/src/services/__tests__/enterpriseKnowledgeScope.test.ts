@@ -14,6 +14,7 @@ import {BaselineStore, deriveBaselineId} from '../baselineStore';
 import {CaseGraph} from '../caseGraph';
 import {CaseLibrary} from '../caseLibrary';
 import {ENTERPRISE_DB_PATH_ENV, openEnterpriseDb} from '../enterpriseDb';
+import {ENTERPRISE_MIGRATION_PHASE_ENV} from '../enterpriseMigration';
 import {RagStore} from '../ragStore';
 import type {KnowledgeScope} from '../scopedKnowledgeStore';
 import {
@@ -29,6 +30,7 @@ import {
 const originalEnv = {
   enterprise: process.env[ENTERPRISE_FEATURE_FLAG_ENV],
   enterpriseDbPath: process.env[ENTERPRISE_DB_PATH_ENV],
+  migrationPhase: process.env[ENTERPRISE_MIGRATION_PHASE_ENV],
 };
 
 const scopeA: KnowledgeScope = {
@@ -140,11 +142,13 @@ beforeEach(() => {
   dbPath = path.join(tmpDir, 'enterprise.sqlite');
   process.env[ENTERPRISE_FEATURE_FLAG_ENV] = 'true';
   process.env[ENTERPRISE_DB_PATH_ENV] = dbPath;
+  process.env[ENTERPRISE_MIGRATION_PHASE_ENV] = 'retired';
 });
 
 afterEach(() => {
   restoreEnvValue(ENTERPRISE_FEATURE_FLAG_ENV, originalEnv.enterprise);
   restoreEnvValue(ENTERPRISE_DB_PATH_ENV, originalEnv.enterpriseDbPath);
+  restoreEnvValue(ENTERPRISE_MIGRATION_PHASE_ENV, originalEnv.migrationPhase);
   fs.rmSync(tmpDir, {recursive: true, force: true});
 });
 

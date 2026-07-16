@@ -121,6 +121,26 @@ describe('heap path normalization and clustering', () => {
     expect(bounded.limitations).toContain('row_limit_applied:3/4');
   });
 
+  it('rejects oversized paths before feature expansion and reports the resource limit', () => {
+    const oversizedPath = `Root -> ${'VeryLongSegment -> '.repeat(100_000)}Leaf`;
+    const result = clusterHeapPaths([
+      ...clusteredRows,
+      row({
+        traceId: 'oversized',
+        traceOrdinal: 99,
+        path: oversizedPath,
+        evidenceRefId: 'oversized-evidence',
+      }),
+    ]);
+
+    expect(normalizeHeapPath(oversizedPath)).toBe('');
+    expect(result.status).toBe('partial');
+    expect(result.input.rejectedRowCount).toBe(1);
+    expect(result.limitations).toContain('oversized_rows:1');
+    expect(result.clusters.flatMap(cluster => cluster.evidenceRefIds))
+      .not.toContain('oversized-evidence');
+  });
+
   it('bounds rows when even a one-feature vocabulary would exceed the matrix limit', () => {
     const bounded = clusterHeapPaths(clusteredRows, [], {maxMatrixCells: 2});
 

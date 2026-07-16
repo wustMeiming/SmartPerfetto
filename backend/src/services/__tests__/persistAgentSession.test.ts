@@ -7,6 +7,7 @@ import { EnhancedSessionContext, sessionContextManager } from '../../agent/conte
 import { SessionPersistenceService } from '../sessionPersistenceService';
 import { persistAgentTurn } from '../persistAgentSession';
 import { createDataEnvelope } from '../../types/dataContract';
+import {clearCodeAwareOutputGuards, registerCodeAwareCanary} from '../security/codeAwareOutputRegistry';
 
 describe('persistAgentTurn', () => {
   afterEach(() => {
@@ -16,6 +17,8 @@ describe('persistAgentTurn', () => {
     sessionContextManager.remove('session-frontend-trace-context-message');
     sessionContextManager.remove('session-sql-result-truncated');
     sessionContextManager.remove('session-continuity-breaks');
+    sessionContextManager.remove('session-private-durable');
+    clearCodeAwareOutputGuards('session-private-durable');
   });
 
   it('persists partial assistant messages with a visible integrity warning', () => {
@@ -390,6 +393,94 @@ describe('persistAgentTurn', () => {
     expect(savedCall[0]).toBe(sessionId);
     expect(savedCall[1]).toEqual(expect.objectContaining({ continuityBreaks }));
     expect(savedCall[2]).toEqual(expect.any(Object));
+  });
+
+  it('persists a private-safe snapshot and messages while retaining deterministic envelopes', () => {
+    const appendMessages = jest.fn();
+    const saveSessionStateSnapshot = jest.fn(() => true);
+    jest.spyOn(SessionPersistenceService, 'getInstance').mockReturnValue({
+      saveSessionStateSnapshot,
+      appendMessages,
+    } as any);
+
+    const sessionId = 'session-private-durable';
+    const traceId = 'trace-private-durable';
+    const canary = 'PRIVATE_DURABLE_CANARY';
+    const envelope = {
+      ...createDataEnvelope({columns: ['dur_ms', 'leak'], rows: [[42, canary]]}, {
+        type: 'sql_result',
+        source: 'execute_sql',
+        title: `Deterministic trace metric ${canary}`,
+        layer: 'list',
+        format: 'table',
+        evidenceRefId: 'data:sql:private-durable',
+        queryReview: {observedExecution: {executableSql: `SELECT '${canary}'`}} as any,
+        intent: canary,
+      }),
+      sql: `SELECT '${canary}'`,
+    };
+    registerCodeAwareCanary(sessionId, canary);
+    sessionContextManager.set(sessionId, traceId, new EnhancedSessionContext(sessionId, traceId));
+
+    persistAgentTurn({
+      sessionId,
+      traceId,
+      query: `inspect ${canary}`,
+      result: {conclusion: `conclusion ${canary}`, totalDurationMs: 10},
+      session: {
+        createdAt: Date.now(),
+        codeAwareMode: 'provider_send',
+        codebaseIds: ['private-codebase'],
+        dataEnvelopes: [envelope],
+        result: {success: true},
+        orchestrator: {
+          takeSnapshot: jest.fn(() => ({
+            version: 1,
+            snapshotTimestamp: 123,
+            sessionId,
+            traceId,
+            conversationSteps: [{content: canary}],
+            queryHistory: [{query: canary}],
+            conclusionHistory: [{conclusion: canary}],
+            agentDialogue: [{content: canary}],
+            agentResponses: [{content: canary}],
+            dataEnvelopes: [envelope],
+            hypotheses: [{description: canary}],
+            analysisNotes: [{content: canary}],
+            analysisPlan: {goal: canary},
+            planHistory: [{goal: canary}],
+            uncertaintyFlags: [{description: canary}],
+            claudeHypotheses: [{statement: canary}],
+            engineState: {kind: 'openai-agents-sdk', history: [canary]},
+            codeAwareMode: 'provider_send',
+            codebaseIds: ['private-codebase'],
+            runSequence: 1,
+            conversationOrdinal: 1,
+          })),
+        },
+      } as any,
+    });
+
+    const persistedSnapshot = (saveSessionStateSnapshot.mock.calls[0] as unknown[])[1] as {
+      dataEnvelopes: Array<Record<string, unknown>>;
+      [key: string]: unknown;
+    };
+    expect(JSON.stringify(persistedSnapshot)).not.toContain(canary);
+    expect(persistedSnapshot).toEqual(expect.objectContaining({
+      conversationSteps: [],
+      queryHistory: [],
+      conclusionHistory: [],
+      analysisNotes: [],
+      analysisPlan: null,
+      dataEnvelopes: [expect.objectContaining({
+        meta: expect.not.objectContaining({queryReview: expect.anything(), intent: expect.anything()}),
+        data: expect.objectContaining({rows: [[42, expect.any(String)]]}),
+      })],
+    }));
+    expect(persistedSnapshot.dataEnvelopes[0]).not.toHaveProperty('sql');
+    expect((saveSessionStateSnapshot.mock.calls[0] as unknown[])[2])
+      .toEqual(expect.objectContaining({clearPrivateContext: true}));
+    expect(JSON.stringify(appendMessages.mock.calls[0]?.[1])).not.toContain(canary);
   });
 
   it('passes CLI degraded lineage into the atomic session snapshot', () => {

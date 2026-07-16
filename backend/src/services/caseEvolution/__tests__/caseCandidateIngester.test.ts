@@ -41,7 +41,7 @@ afterEach(() => {
 function candidate(candidateId = 'cand-ingest-1'): CaseCandidate {
   return {
     candidateId,
-    schemaVersion: 'case_candidate@1',
+    schemaVersion: 'case_candidate@2',
     provenance: {
       sourceSessionId: 'session-1',
       sourceAnalysisRunId: 'run-1',
@@ -51,6 +51,7 @@ function candidate(candidateId = 'cand-ingest-1'): CaseCandidate {
       engine: 'claude',
       sceneType: 'scrolling',
       architectureType: 'FLUTTER',
+      originScope: {tenantId: 'default-dev-tenant', workspaceId: 'default-workspace'},
     },
     cluster: {
       scene: 'scrolling',

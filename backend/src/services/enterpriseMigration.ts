@@ -12,6 +12,7 @@ import { ENTERPRISE_MINIMAL_SCHEMA_TABLES } from './enterpriseSchema';
 
 export const ENTERPRISE_MIGRATION_PHASE_ENV = 'SMARTPERFETTO_ENTERPRISE_MIGRATION_PHASE';
 export const ENTERPRISE_MIGRATION_SNAPSHOT_DIR_ENV = 'SMARTPERFETTO_ENTERPRISE_MIGRATION_SNAPSHOT_DIR';
+export const ENTERPRISE_MIGRATION_CUTOVER_CONFIRMED_ENV = 'SMARTPERFETTO_ENTERPRISE_CUTOVER_CONFIRMED';
 
 export type EnterpriseMigrationPhase = 'legacy' | 'dual-write' | 'cutover' | 'retired';
 export type EnterpriseReadAuthority = 'filesystem' | 'db';
@@ -23,7 +24,7 @@ export interface EnterpriseMigrationPlan {
   writeFilesystem: boolean;
   writeDb: boolean;
   legacyReadOnly: boolean;
-  rollback: 'disable-enterprise' | 'delete-db' | 'return-to-dual-write' | 'restore-snapshots';
+  rollback: 'disable-enterprise' | 'delete-db' | 'restore-snapshots';
 }
 
 export interface MigrationFilesystemFingerprint {
@@ -110,7 +111,7 @@ function parseEnterpriseMigrationPhase(
   enterpriseEnabled: boolean,
 ): EnterpriseMigrationPhase {
   if (!enterpriseEnabled) return 'legacy';
-  if (!value || value.trim().length === 0) return 'cutover';
+  if (!value || value.trim().length === 0) return 'dual-write';
   const normalized = value.trim().toLowerCase().replace(/_/g, '-');
   if (['legacy', 'off', 'filesystem'].includes(normalized)) return 'legacy';
   if (['p-a', 'pa', 'dual', 'dualwrite', 'dual-write'].includes(normalized)) return 'dual-write';
@@ -129,6 +130,16 @@ export function resolveEnterpriseMigrationPlan(
     env[ENTERPRISE_MIGRATION_PHASE_ENV],
     enterpriseEnabled,
   );
+  if (
+    phase === 'cutover' &&
+    !['1', 'true', 'yes', 'on'].includes(
+      (env[ENTERPRISE_MIGRATION_CUTOVER_CONFIRMED_ENV] ?? '').trim().toLowerCase(),
+    )
+  ) {
+    throw new Error(
+      `${ENTERPRISE_MIGRATION_PHASE_ENV}=cutover requires ${ENTERPRISE_MIGRATION_CUTOVER_CONFIRMED_ENV}=true after filesystem-to-DB reconciliation and snapshot verification`,
+    );
+  }
 
   if (!enterpriseEnabled || phase === 'legacy') {
     return {
@@ -162,7 +173,7 @@ export function resolveEnterpriseMigrationPlan(
       writeFilesystem: false,
       writeDb: true,
       legacyReadOnly: true,
-      rollback: 'return-to-dual-write',
+      rollback: 'restore-snapshots',
     };
   }
 
@@ -619,7 +630,7 @@ export function describeEnterpriseMigrationRollback(
     return 'P-A rollback: stop enterprise mode or delete the SQLite DB; legacy filesystem data remains authoritative.';
   }
   if (plan.phase === 'cutover') {
-    return `P-B rollback: set ${ENTERPRISE_MIGRATION_PHASE_ENV}=dual-write; keep the DB snapshot for investigation.`;
+    return 'P-B rollback: restore the verified pre-cutover filesystem and SQLite snapshots; dual-write is not a reverse importer.';
   }
   return 'P-C rollback: restore the pre-retirement filesystem snapshot and SQLite DB snapshot; reverse conversion is not promised.';
 }
@@ -628,6 +639,7 @@ export const ENTERPRISE_MIGRATION_ENV_KEYS = [
   ENTERPRISE_FEATURE_FLAG_ENV,
   ENTERPRISE_MIGRATION_PHASE_ENV,
   ENTERPRISE_MIGRATION_SNAPSHOT_DIR_ENV,
+  ENTERPRISE_MIGRATION_CUTOVER_CONFIRMED_ENV,
   ENTERPRISE_DB_PATH_ENV,
   DATA_DIR_ENV,
   LOGS_DIR_ENV,

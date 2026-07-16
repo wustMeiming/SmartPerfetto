@@ -147,6 +147,48 @@ describe('recordPlanToolCall', () => {
     expect(findCompletedPhaseEvidenceGaps(plan)).toEqual([]);
   });
 
+  it('records failed evidence calls for audit without letting them satisfy expectedCalls', () => {
+    const plan: AnalysisPlanV3 = {
+      phases: [{
+        id: 'p1',
+        name: '启动对比',
+        goal: '对比左右两个 Trace 的启动指标',
+        expectedTools: ['compare_skill'],
+        expectedCalls: [{ tool: 'compare_skill', skillId: 'startup_analysis' }],
+        status: 'completed',
+        completedAt: 100,
+        summary: '已尝试执行启动对比，但参考 Trace 缺少必要参数。',
+      }],
+      successCriteria: '解释左右 Trace 启动速度差异',
+      submittedAt: 1,
+      toolCallLog: [],
+    };
+
+    const record = recordPlanToolCall(plan, {
+      toolName: 'compare_skill',
+      input: { skillId: 'startup_analysis' },
+      resultText: JSON.stringify({
+        success: false,
+        failedSides: ['reference'],
+      }),
+      timestamp: 10,
+    });
+
+    expect(record).toMatchObject({
+      toolName: 'compare_skill',
+      skillId: 'startup_analysis',
+      success: false,
+    });
+    expect(record?.matchedPhaseId).toBeUndefined();
+    expect(findCompletedPhaseEvidenceGaps(plan)).toEqual([
+      expect.objectContaining({
+        phase: plan.phases[0],
+        matchedCalls: [],
+        missingExpectedCalls: [{ tool: 'compare_skill', skillId: 'startup_analysis' }],
+      }),
+    ]);
+  });
+
   it('replays pre-plan comparison context calls into the accepted raw trace pair plan', () => {
     const tracker: { current: AnalysisPlanV3 | null; prePlanToolCallLog?: AnalysisPlanV3['toolCallLog'] } = {
       current: null,

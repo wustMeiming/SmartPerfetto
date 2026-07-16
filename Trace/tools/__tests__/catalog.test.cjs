@@ -29,6 +29,12 @@ function createFixture() {
   const trace = Buffer.from([0x0a, 0x00]);
   const overlay = Buffer.from([0x0a, 0x00]);
 
+  fs.cpSync(
+    path.resolve(__dirname, '../../schema'),
+    path.join(repoRoot, 'Trace/schema'),
+    {recursive: true},
+  );
+
   fs.mkdirSync(path.join(repoRoot, 'backend/skills/atomic'), {recursive: true});
   fs.mkdirSync(path.join(repoRoot, 'backend/skills/_template'), {recursive: true});
   fs.mkdirSync(path.join(repoRoot, 'backend/skills/pipelines'), {recursive: true});
@@ -99,7 +105,12 @@ function createFixture() {
   const constructedDir = path.join(repoRoot, 'Trace/constructed/cpu-contention');
   fs.mkdirSync(path.join(constructedDir, 'analysis'), {recursive: true});
   fs.writeFileSync(path.join(constructedDir, 'trace.overlay.pftrace'), overlay);
-  fs.writeFileSync(path.join(constructedDir, 'scenario.json'), '{}\n');
+  writeJson(path.join(constructedDir, 'scenario.json'), {
+    schema_version: 1,
+    clock: {anchor: 'trace-start', duration_ns: '1'},
+    actors: {processes: [], threads: []},
+    signals: [],
+  });
   fs.writeFileSync(path.join(constructedDir, 'analysis/expected.json'), '{}\n');
   writeJson(path.join(constructedDir, 'case.json'), {
     schema_version: 1,
@@ -152,6 +163,7 @@ function createFixture() {
           mode: 'semantic',
           required_steps: ['summary'],
           semantic_step: 'summary',
+          assertions: [{column: 'status', operator: 'eq', value: 'ok'}],
         },
       ],
     },
@@ -196,6 +208,11 @@ test('rejects duplicate ids, unsafe paths, hash drift, and tracked private cases
     path.join(fixture.repoRoot, 'backend/test-output/ignored-runtime-result.json'),
     '{"trace":"test-traces/runtime-only.pftrace"}\n',
   );
+  fs.mkdirSync(path.join(fixture.repoRoot, 'backend/uploads/traces'), {recursive: true});
+  fs.writeFileSync(
+    path.join(fixture.repoRoot, 'backend/uploads/traces/runtime-upload.json'),
+    '{"trace":"test-traces/runtime-upload.pftrace"}\n',
+  );
   fs.mkdirSync(path.join(fixture.repoRoot, '.claude'), {recursive: true});
   fs.writeFileSync(
     path.join(fixture.repoRoot, '.claude/settings.local.json'),
@@ -216,6 +233,58 @@ test('rejects duplicate ids, unsafe paths, hash drift, and tracked private cases
   assert.equal(legacyIssues[0].file, path.join(fixture.repoRoot, 'backend/legacy-path.ts'));
 });
 
+test('requires bounded governance for legacy-tracked publication exceptions', () => {
+  const fixture = createFixture();
+  const manifestPath = path.join(fixture.realDir, 'case.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  manifest.source.publication = 'legacy-tracked';
+  manifest.source.license = null;
+  manifest.source.consent = null;
+  manifest.source.privacy_review = 'pending';
+  manifest.source.sanitization_review = 'pending';
+  writeJson(manifestPath, manifest);
+
+  let validation = validateCatalog(fixture.repoRoot);
+  assert.ok(validation.issues.some((item) => item.code === 'missing-publication-exception'));
+
+  const ledgerPath = path.join(
+    fixture.repoRoot,
+    'Trace/governance/legacy-publication-exceptions.json',
+  );
+  writeJson(ledgerPath, {
+    schema_version: 1,
+    exceptions: [{
+      case_id: 'real-startup',
+      owner: 'fixture owner',
+      reason: 'Legacy fixture pending provenance review.',
+      review_by: '2999-01-01',
+      disposition: 'quarantine',
+    }],
+  });
+  validation = validateCatalog(fixture.repoRoot);
+  assert.equal(validation.ok, true, JSON.stringify(validation.issues, null, 2));
+
+  const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+  ledger.exceptions[0].review_by = '2000-01-01';
+  writeJson(ledgerPath, ledger);
+  validation = validateCatalog(fixture.repoRoot);
+  assert.ok(validation.issues.some((item) => item.code === 'expired-publication-exception'));
+});
+
+test('reports an invalid publication exception ledger without throwing', () => {
+  const fixture = createFixture();
+  writeJson(
+    path.join(fixture.repoRoot, 'Trace/governance/legacy-publication-exceptions.json'),
+    {schema_version: 2, exceptions: []},
+  );
+
+  const validation = validateCatalog(fixture.repoRoot);
+
+  assert.ok(validation.issues.some(
+    (item) => item.code === 'publication-exception-ledger-invalid',
+  ));
+});
+
 test('reports missing, stale, and expectation-free coverage targets', () => {
   const fixture = createFixture();
   const manifestPath = path.join(fixture.constructedDir, 'case.json');
@@ -230,6 +299,22 @@ test('reports missing, stale, and expectation-free coverage targets', () => {
   assert.deepEqual(validation.coverage.missing.skills, ['cpu_probe']);
   assert.deepEqual(validation.coverage.stale.skills, ['removed_skill']);
   assert.ok(validation.issues.some((issue) => issue.code === 'coverage-without-expectation'));
+});
+
+test('does not count row-only execution as semantic coverage', () => {
+  const fixture = createFixture();
+  const manifestPath = path.join(fixture.constructedDir, 'case.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const expectation = manifest.coverage.expectations[0];
+  delete expectation.assertions;
+  writeJson(manifestPath, manifest);
+
+  const validation = validateCatalog(fixture.repoRoot);
+
+  assert.equal(validation.ok, false);
+  assert.ok(validation.issues.some((issue) =>
+    issue.code === 'semantic-expectation-without-assertions',
+  ));
 });
 
 test('repository catalog preserves all six legacy trace fixtures and FPS reports', () => {

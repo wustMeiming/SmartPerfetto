@@ -174,8 +174,8 @@ describe('authenticate RequestContext', () => {
       workspaceId: 'workspace-a',
       userId: res.body.user.id,
       authType: 'api_key',
-      roles: ['analyst'],
-      scopes: ['trace:read', 'trace:write', 'agent:run', 'report:read'],
+      roles: ['org_admin'],
+      scopes: ['*'],
     });
   });
 

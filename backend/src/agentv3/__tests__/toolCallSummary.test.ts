@@ -13,18 +13,18 @@ describe('summarizeToolCallInput', () => {
   });
 
   describe('execute_sql', () => {
-    it('summarises the SQL string and produces a paramsHash', () => {
+    it('records only a structural SQL marker and a paramsHash', () => {
       const result = summarizeToolCallInput('execute_sql', { sql: 'SELECT * FROM frame' });
-      expect(result.inputSummary).toBe('SELECT * FROM frame');
+      expect(result.inputSummary).toBe('sql');
       expect(result.paramsHash).toMatch(/^[a-f0-9]{8}$/);
       expect(result.skillId).toBeUndefined();
     });
 
-    it('flattens whitespace and truncates long SQL', () => {
-      const longSql = 'SELECT *\n   FROM   frame  WHERE  ' + 'foo OR '.repeat(40);
+    it('never persists SQL literals in the summary', () => {
+      const longSql = 'SELECT * FROM frame WHERE secret = "PRIVATE_PLAN_CANARY"';
       const result = summarizeToolCallInput('execute_sql', { sql: longSql });
-      expect(result.inputSummary?.length).toBeLessThanOrEqual(120);
-      expect(result.inputSummary).toContain('SELECT * FROM frame');
+      expect(result.inputSummary).toBe('sql');
+      expect(JSON.stringify(result)).not.toContain('PRIVATE_PLAN_CANARY');
     });
   });
 
@@ -88,9 +88,10 @@ describe('summarizeToolCallInput', () => {
   });
 
   describe('unknown tools', () => {
-    it('falls back to a truncated JSON dump', () => {
-      const result = summarizeToolCallInput('some_other_tool', { foo: 'bar', n: 42 });
-      expect(result.inputSummary).toContain('foo');
+    it('falls back to sorted field names without persisting values', () => {
+      const result = summarizeToolCallInput('some_other_tool', { foo: 'PRIVATE_PLAN_CANARY', n: 42 });
+      expect(result.inputSummary).toBe('some_other_tool(foo,n)');
+      expect(JSON.stringify(result)).not.toContain('PRIVATE_PLAN_CANARY');
       expect(result.paramsHash).toMatch(/^[a-f0-9]{8}$/);
     });
   });

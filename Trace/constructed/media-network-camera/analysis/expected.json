@@ -13,16 +13,26 @@
         "max_rows": 20
       },
       "required_steps": [
-        "evidence_coverage"
+        "evidence_coverage",
+        "camera_process_candidates",
+        "camera_slice_candidates"
       ],
-      "semantic_step": "evidence_coverage",
+      "semantic_step": "camera_slice_candidates",
+      "min_rows": 2,
+      "assertions": [
+        {
+          "column": "slice_name",
+          "operator": "contains",
+          "value": "Camera3-Device"
+        }
+      ],
       "required_marker": "SmartPerfetto::CASE::media-network-camera"
     },
     {
       "id": "execute-media_codec_activity",
       "type": "skill",
       "target": "media_codec_activity",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/media_codec_activity.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -35,7 +45,7 @@
       "id": "execute-modem_network_correlation_summary",
       "type": "skill",
       "target": "modem_network_correlation_summary",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/modem_network_correlation_summary.skill.yaml",
       "parameters": {
         "top_n": 20
@@ -50,7 +60,7 @@
       "id": "execute-network_analysis",
       "type": "skill",
       "target": "network_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/network_analysis.skill.yaml",
       "parameters": {
         "heavy_traffic_critical_mb": 100,
@@ -86,7 +96,7 @@
       "id": "execute-webview_v8_analysis",
       "type": "skill",
       "target": "webview_v8_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/webview_v8_analysis.skill.yaml",
       "parameters": {},
       "required_steps": [

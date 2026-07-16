@@ -4,6 +4,7 @@
 // This file is part of SmartPerfetto. See LICENSE for details.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -19,6 +20,7 @@ const DEEPSEEK_RUNTIME_KINDS = [
   'pi-agent-core',
   'opencode',
 ];
+const CONTEXT_SUITE_NAMES = ['context-source', 'context-rag', 'context-combined'];
 
 const suites = {
   startup: {
@@ -128,6 +130,67 @@ const suites = {
       'current',
     ],
   },
+  'context-source': {
+    label: 'request-scoped source-only analysis gate',
+    output: 'test-output/e2e-deepseek-context-source-real.json',
+    args: [
+      '--mode', 'full',
+      '--provider-id', 'env',
+      '--trace', '../Trace/real/android-startup-heavy/trace.pftrace',
+      '--query',
+      '分析启动性能。必须先用 lookup_app_source 查询 StartupHooks，并在最终报告引用 StartupHooks.kt；源码只能解释候选机制，Trace 证据才可证明本次发生。',
+      '--setup-codebase-root', 'tests/e2e/context-fixtures/app',
+      '--code-aware', 'provider_send',
+      '--output', 'test-output/e2e-deepseek-context-source-real.json',
+      '--require-tool', 'lookup_app_source',
+      '--require-successful-lookup', 'lookup_app_source',
+      '--require-code-ref',
+      '--require-text', 'StartupHooks.kt',
+      '--require-non-partial',
+      '--forbid-degraded-fallback', 'verification_failed',
+    ],
+  },
+  'context-rag': {
+    label: 'request-scoped external-RAG-only analysis gate',
+    output: 'test-output/e2e-deepseek-context-rag-real.json',
+    args: [
+      '--mode', 'full',
+      '--provider-id', 'env',
+      '--trace', '../Trace/real/android-startup-heavy/trace.pftrace',
+      '--query',
+      '分析启动性能。必须用 lookup_blog_knowledge，将 source 设为 android_internals_wiki，并以 "Startup first-frame knowledge fixture" 为 query 检索；综合其中关于首帧前同步主线程工作的背景知识，但不要复述私有 Wiki 原文。知识库只能作为背景知识，不能替代 Trace 证据。',
+      '--setup-knowledge-root', 'tests/e2e/context-fixtures/wiki',
+      '--code-aware', 'off',
+      '--output', 'test-output/e2e-deepseek-context-rag-real.json',
+      '--require-tool', 'lookup_blog_knowledge',
+      '--require-successful-lookup', 'lookup_blog_knowledge',
+      '--require-non-partial',
+      '--forbid-degraded-fallback', 'verification_failed',
+    ],
+  },
+  'context-combined': {
+    label: 'request-scoped source plus external-RAG analysis gate',
+    output: 'test-output/e2e-deepseek-context-combined-real.json',
+    args: [
+      '--mode', 'full',
+      '--provider-id', 'env',
+      '--trace', '../Trace/real/android-startup-heavy/trace.pftrace',
+      '--query',
+      '分析启动性能。必须分别调用 lookup_app_source 查询 StartupHooks；调用 lookup_blog_knowledge 时将 source 设为 android_internals_wiki，并以 "Startup first-frame knowledge fixture" 为 query 检索。在结论引用 StartupHooks.kt，并综合 Wiki 中关于首帧前同步主线程工作的背景知识，但不要复述私有 Wiki 原文；两类上下文都不能替代 Trace 证据。',
+      '--setup-codebase-root', 'tests/e2e/context-fixtures/app',
+      '--setup-knowledge-root', 'tests/e2e/context-fixtures/wiki',
+      '--code-aware', 'provider_send',
+      '--output', 'test-output/e2e-deepseek-context-combined-real.json',
+      '--require-tool', 'lookup_app_source',
+      '--require-tool', 'lookup_blog_knowledge',
+      '--require-successful-lookup', 'lookup_app_source',
+      '--require-successful-lookup', 'lookup_blog_knowledge',
+      '--require-code-ref',
+      '--require-text', 'StartupHooks.kt',
+      '--require-non-partial',
+      '--forbid-degraded-fallback', 'verification_failed',
+    ],
+  },
 };
 
 main();
@@ -143,7 +206,11 @@ function main() {
   assertFile(verifierPath, 'Agent SSE verifier');
 
   const credential = resolveDeepseekCredential();
-  const suiteNames = options.suite === 'all' ? ['startup', 'scrolling', 'dual-trace'] : [options.suite];
+  const suiteNames = options.suite === 'all'
+    ? ['startup', 'scrolling', 'dual-trace', ...CONTEXT_SUITE_NAMES]
+    : options.suite === 'context'
+      ? CONTEXT_SUITE_NAMES
+      : [options.suite];
   const runtimeKinds = resolveRuntimeKinds(options.runtime);
 
   for (const runtimeKind of runtimeKinds) {
@@ -166,7 +233,7 @@ function parseArgs(argv) {
     }
     if (arg === '--suite') {
       const value = argv[i + 1];
-      if (!value) throw new Error('--suite requires a value: all, startup, scrolling, or dual-trace');
+      if (!value) throw new Error('--suite requires a value');
       suite = parseSuite(value);
       i += 1;
       continue;
@@ -191,8 +258,8 @@ function parseArgs(argv) {
 }
 
 function parseSuite(value) {
-  if (value === 'all' || value === 'startup' || value === 'scrolling' || value === 'dual-trace') return value;
-  throw new Error(`Invalid suite: ${value}. Expected all, startup, scrolling, or dual-trace.`);
+  if (value === 'all' || value === 'context' || Object.hasOwn(suites, value)) return value;
+  throw new Error(`Invalid suite: ${value}. Expected all, context, or one of: ${Object.keys(suites).join(', ')}.`);
 }
 
 function parseRuntime(value) {
@@ -220,7 +287,7 @@ function resolveRuntimeKinds(value) {
 }
 
 function printUsage() {
-  console.log('Usage: node scripts/run-deepseek-agent-e2e.cjs [--suite all|startup|scrolling|dual-trace] [--runtime openai-agents-sdk|pi-agent-core|opencode|all-deepseek]');
+  console.log('Usage: node scripts/run-deepseek-agent-e2e.cjs [--suite all|context|startup|scrolling|dual-trace|context-source|context-rag|context-combined] [--runtime openai-agents-sdk|pi-agent-core|opencode|all-deepseek]');
   console.log('');
   console.log('Runs SmartPerfetto Agent SSE E2E with Deepseek-backed SmartPerfetto runtimes.');
   console.log('');
@@ -256,17 +323,22 @@ function runSuite(suiteName, credential, runtimeKind, runtimeSpecificOutput) {
   console.log(`[deepseek-e2e] output=${getOutputPathFromArgs(args) || suite.output}`);
   console.log(`[deepseek-e2e] credential=${credential.source}`);
 
-  const result = spawnSync(process.execPath, [tsxCliPath, verifierPath, ...args], {
-    cwd: backendRoot,
-    env: buildChildEnv(credential.apiKey, runtimeKind),
-    stdio: 'inherit',
-  });
+  const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'smartperfetto-deepseek-e2e-'));
+  try {
+    const result = spawnSync(process.execPath, [tsxCliPath, verifierPath, ...args], {
+      cwd: backendRoot,
+      env: buildChildEnv(credential.apiKey, runtimeKind, isolatedRoot),
+      stdio: 'inherit',
+    });
 
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      process.exit(result.status ?? 1);
+    }
+  } finally {
+    fs.rmSync(isolatedRoot, {recursive: true, force: true});
   }
 }
 
@@ -287,7 +359,7 @@ function getOutputPathFromArgs(args) {
   return index >= 0 ? args[index + 1] : undefined;
 }
 
-function buildChildEnv(apiKey, runtimeKind) {
+function buildChildEnv(apiKey, runtimeKind, isolatedRoot) {
   const deepseekBaseUrl = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1';
   const deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro';
   const deepseekLightModel = process.env.DEEPSEEK_LIGHT_MODEL || 'deepseek-v4-flash';
@@ -300,6 +372,11 @@ function buildChildEnv(apiKey, runtimeKind) {
     OPENAI_LIGHT_MODEL: deepseekLightModel,
     OPENAI_MAX_OUTPUT_TOKENS: '8192',
     DOTENV_CONFIG_QUIET: 'true',
+    SMARTPERFETTO_BACKEND_DATA_DIR: path.join(isolatedRoot, 'data'),
+    SMARTPERFETTO_BACKEND_LOG_DIR: path.join(isolatedRoot, 'logs'),
+    SMARTPERFETTO_TRACE_UPLOAD_DIR: path.join(isolatedRoot, 'uploads', 'traces'),
+    SMARTPERFETTO_CODEBASE_ROOTS: path.join(backendRoot, 'tests/e2e/context-fixtures/app'),
+    SMARTPERFETTO_KNOWLEDGE_ROOTS: path.join(backendRoot, 'tests/e2e/context-fixtures/wiki'),
   };
 
   if (runtimeKind === 'openai-agents-sdk') {

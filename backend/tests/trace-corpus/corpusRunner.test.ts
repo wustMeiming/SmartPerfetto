@@ -4,6 +4,7 @@
 import path from 'path';
 
 import {
+  assertExpectationRows,
   loadCorpus,
   resolveParameterTokens,
   runCorpusRegression,
@@ -19,6 +20,35 @@ describe('Trace corpus regression runner', () => {
     expect(corpus.coverage.missing).toEqual({skills: [], strategies: []});
     expect(corpus.coverage.covered.skills.length).toBeGreaterThan(200);
     expect(corpus.coverage.covered.strategies.length).toBeGreaterThan(20);
+  });
+
+  it('requires declared value-level semantic evidence', () => {
+    expect(() => assertExpectationRows(
+      [{kernel: 'SyntheticComputeKernelA(float*)', dur_ns: 12_000_000}],
+      {
+        target: 'gpu_compute_kernel_analysis',
+        semantic_step: 'kernel_summary',
+        min_rows: 1,
+        assertions: [
+          {column: 'kernel', operator: 'contains', value: 'SyntheticComputeKernelA'},
+          {column: 'dur_ns', operator: 'gte', value: 12_000_000},
+        ],
+      },
+    )).not.toThrow();
+    expect(() => assertExpectationRows(
+      [
+        {kernel: 'SyntheticComputeKernelA(float*)', dur_ns: 1},
+        {kernel: 'wrong', dur_ns: 12_000_000},
+      ],
+      {
+        target: 'gpu_compute_kernel_analysis',
+        semantic_step: 'kernel_summary',
+        assertions: [
+          {column: 'kernel', operator: 'contains', value: 'SyntheticComputeKernelA'},
+          {column: 'dur_ns', operator: 'gte', value: 12_000_000},
+        ],
+      },
+    )).toThrow('no single result row satisfies');
   });
 
   it('resolves trace and fixture identity tokens without changing literals', () => {

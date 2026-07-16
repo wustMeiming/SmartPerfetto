@@ -2,7 +2,11 @@
 // Copyright (C) 2024-2026 Gracker (Chris)
 // This file is part of SmartPerfetto. See LICENSE for details.
 
-import type { CodeAwareMode } from '../../services/codebase/codeAwareFeature';
+import {
+  MAX_CODEBASE_IDS_PER_ANALYSIS,
+  MAX_KNOWLEDGE_SOURCE_IDS_PER_ANALYSIS,
+  type CodeAwareMode,
+} from '../../services/codebase/codeAwareFeature';
 import type {
   SelectionContext,
   TracePairContext,
@@ -14,6 +18,8 @@ import type {
   SceneAnalysisSelection,
   SceneAnalysisSelectionScope,
 } from '../../agent/scene/types';
+import type {OutputLanguage} from '../../agentv3/outputLanguage';
+import {resolveEffectiveAnalysisMode} from '../../services/effectiveAnalysisMode';
 
 export type AnalyzeEndpointKind = '/analyze' | '/sessions/:id/runs';
 export type AnalyzePreset = 'smart';
@@ -22,6 +28,8 @@ export type SmartAnalyzeAction = 'preview' | 'analyze';
 
 export interface NormalizedAnalyzeOptions {
   analysisMode: AnalyzeMode;
+  /** Per-request presentation language. Pinned to the session on first use. */
+  outputLanguage?: OutputLanguage;
   preset?: AnalyzePreset;
   codeAwareMode?: CodeAwareMode;
   codebaseIds?: string[];
@@ -31,11 +39,6 @@ export interface NormalizedAnalyzeOptions {
   selectionContext?: SelectionContext;
   tracePairContext?: TracePairContext;
   blockedStrategyIds?: string[];
-  maxRounds?: number;
-  confidenceThreshold?: number;
-  maxNoProgressRounds?: number;
-  maxFailureRounds?: number;
-  maxConcurrentTasks?: number;
   taskTimeoutMs?: number;
   packageName?: string;
   timeRange?: unknown;
@@ -53,6 +56,7 @@ export class AnalyzeOptionsError extends Error {
     message: string,
     readonly code: string,
     readonly httpStatus = 400,
+    readonly details?: Readonly<Record<string, string | number>>,
   ) {
     super(message);
     this.name = 'AnalyzeOptionsError';
@@ -70,9 +74,18 @@ export function normalizeAnalyzeOptions(
   rawOptions: unknown,
   ctx: NormalizeAnalyzeOptionsContext,
 ): NormalizedAnalyzeOptions {
-  const raw = rawOptions && typeof rawOptions === 'object' && !Array.isArray(rawOptions)
-    ? rawOptions as Record<string, unknown>
-    : {};
+  if (
+    rawOptions !== undefined &&
+    (!rawOptions || typeof rawOptions !== 'object' || Array.isArray(rawOptions))
+  ) {
+    throw new AnalyzeOptionsError(
+      'options must be an object',
+      'INVALID_ANALYZE_OPTIONS',
+    );
+  }
+  const raw = (rawOptions ?? {}) as Record<string, unknown>;
+
+  rejectUnsupportedRuntimeControls(raw);
 
   const analysisMode = normalizeAnalysisMode(raw.analysisMode);
   const preset = normalizePreset(raw.preset);
@@ -90,6 +103,8 @@ export function normalizeAnalyzeOptions(
   }
 
   const normalized: NormalizedAnalyzeOptions = { analysisMode };
+  const outputLanguage = normalizeOutputLanguage(raw.outputLanguage);
+  if (outputLanguage) normalized.outputLanguage = outputLanguage;
   if (preset) normalized.preset = preset;
   const smartAction = normalizeSmartAction(raw.smartAction, preset);
   if (smartAction) {
@@ -104,14 +119,38 @@ export function normalizeAnalyzeOptions(
     );
   }
 
-  const codeAwareMode = normalizeCodeAwareMode(raw.codeAwareMode);
-  if (codeAwareMode) normalized.codeAwareMode = codeAwareMode;
-
-  const codebaseIds = normalizeStringArray(raw.codebaseIds);
+  const codebaseIds = normalizeBoundedAuthorizationIds(
+    raw.codebaseIds,
+    'codebaseIds',
+    MAX_CODEBASE_IDS_PER_ANALYSIS,
+  );
   if (codebaseIds.length > 0) normalized.codebaseIds = codebaseIds;
 
-  const knowledgeSourceIds = normalizeStringArray(raw.knowledgeSourceIds);
+  const knowledgeSourceIds = normalizeBoundedAuthorizationIds(
+    raw.knowledgeSourceIds,
+    'knowledgeSourceIds',
+    MAX_KNOWLEDGE_SOURCE_IDS_PER_ANALYSIS,
+  );
   if (knowledgeSourceIds.length > 0) normalized.knowledgeSourceIds = knowledgeSourceIds;
+
+  const codeAwareMode = normalizeCodeAwareMode(raw.codeAwareMode, codebaseIds.length > 0);
+  if (codeAwareMode === 'off' && codebaseIds.length > 0) {
+    throw new AnalyzeOptionsError(
+      'codebaseIds require codeAwareMode=metadata_only or provider_send',
+      'CODEBASE_IDS_REQUIRE_CODE_AWARE_MODE',
+    );
+  }
+  if (codeAwareMode) normalized.codeAwareMode = codeAwareMode;
+
+  // Source-backed context and comparison are full-analysis capabilities. The
+  // lightweight registry does not expose the necessary source/comparison
+  // tools, so both explicit fast and auto must resolve to full here.
+  normalized.analysisMode = resolveEffectiveAnalysisMode(normalized.analysisMode, {
+    referenceTraceId: ctx.hasReferenceTraceId ? ctx.referenceTraceId ?? 'reference' : undefined,
+    codeAwareMode,
+    codebaseIds,
+    knowledgeSourceIds,
+  });
 
   const blockedStrategyIds = normalizeStringArray(raw.blockedStrategyIds);
   if (blockedStrategyIds.length > 0) normalized.blockedStrategyIds = blockedStrategyIds;
@@ -120,19 +159,13 @@ export function normalizeAnalyzeOptions(
   copyBoolean(raw, normalized, 'forceRefresh');
   copyBoolean(raw, normalized, 'heavySkill');
   copyBoolean(raw, normalized, 'longTask');
-  copyNumber(raw, normalized, 'maxRounds');
-  copyNumber(raw, normalized, 'confidenceThreshold');
-  copyNumber(raw, normalized, 'maxNoProgressRounds');
-  copyNumber(raw, normalized, 'maxFailureRounds');
-  copyNumber(raw, normalized, 'maxConcurrentTasks');
   copyNumber(raw, normalized, 'taskTimeoutMs');
   copyNumber(raw, normalized, 'estimatedSqlMs');
   copyNumber(raw, normalized, 'traceSizeBytes');
   copyString(raw, normalized, 'packageName');
 
-  if (raw.selectionContext && typeof raw.selectionContext === 'object') {
-    normalized.selectionContext = raw.selectionContext as SelectionContext;
-  }
+  const selectionContext = normalizeSelectionContext(raw.selectionContext);
+  if (selectionContext) normalized.selectionContext = selectionContext;
   if (ctx.hasReferenceTraceId) {
     const tracePairContext = normalizeTracePairContext(
       raw.tracePairContext,
@@ -150,10 +183,42 @@ export function normalizeAnalyzeOptions(
   return normalized;
 }
 
+function normalizeOutputLanguage(value: unknown): OutputLanguage | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value === 'en' || value === 'zh-CN') return value;
+  throw new AnalyzeOptionsError(
+    'outputLanguage must be en or zh-CN',
+    'UNSUPPORTED_OUTPUT_LANGUAGE',
+  );
+}
+
 function normalizeAnalysisMode(value: unknown): AnalyzeMode {
-  return value === 'fast' || value === 'full' || value === 'auto'
-    ? value
-    : 'auto';
+  if (value === undefined || value === null || value === '') return 'auto';
+  if (value === 'fast' || value === 'full' || value === 'auto') return value;
+  throw new AnalyzeOptionsError(
+    'analysisMode must be fast, full, or auto',
+    'UNSUPPORTED_ANALYSIS_MODE',
+  );
+}
+
+const UNSUPPORTED_RUNTIME_CONTROLS = [
+  'maxRounds',
+  'confidenceThreshold',
+  'maxNoProgressRounds',
+  'maxFailureRounds',
+  'maxConcurrentTasks',
+] as const;
+
+function rejectUnsupportedRuntimeControls(raw: Record<string, unknown>): void {
+  const field = UNSUPPORTED_RUNTIME_CONTROLS.find(key =>
+    Object.prototype.hasOwnProperty.call(raw, key));
+  if (!field) return;
+  throw new AnalyzeOptionsError(
+    `${field} is not a provider-neutral runtime control`,
+    'UNSUPPORTED_RUNTIME_CONTROL',
+    400,
+    {field},
+  );
 }
 
 function normalizePreset(value: unknown): AnalyzePreset | undefined {
@@ -201,6 +266,12 @@ function normalizeSmartSelection(value: unknown): SceneAnalysisSelection {
   const label = normalizeOptionalString(raw.label, 80);
   const reportId = normalizeOptionalString(raw.reportId, 128);
   const sceneSnapshotId = normalizeOptionalString(raw.sceneSnapshotId, 128);
+  if (reportId && sceneSnapshotId && reportId !== sceneSnapshotId) {
+    throw new AnalyzeOptionsError(
+      'smartSelection.reportId and sceneSnapshotId must identify the same preview report',
+      'INVALID_SMART_SELECTION',
+    );
+  }
   const common = {
     ...(label ? { label } : {}),
     ...(reportId ? { reportId } : {}),
@@ -241,11 +312,146 @@ function normalizeSmartSelectionScope(value: unknown): SceneAnalysisSelectionSco
   );
 }
 
-function normalizeCodeAwareMode(value: unknown): CodeAwareMode | undefined {
+function normalizeCodeAwareMode(value: unknown, hasCodebases: boolean): CodeAwareMode | undefined {
   if (value === 'off' || value === 'metadata_only' || value === 'provider_send') {
     return value;
   }
-  return undefined;
+  if (value === undefined || value === null || value === '') {
+    return hasCodebases ? 'metadata_only' : undefined;
+  }
+  throw new AnalyzeOptionsError(
+    `Unsupported codeAwareMode: ${String(value)}`,
+    'UNSUPPORTED_CODE_AWARE_MODE',
+  );
+}
+
+function normalizeBoundedAuthorizationIds(
+  value: unknown,
+  field: 'codebaseIds' | 'knowledgeSourceIds',
+  maxItems: number,
+): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some(
+    item => typeof item !== 'string' || item.trim().length === 0,
+  )) {
+    throw new AnalyzeOptionsError(
+      `${field} must be an array of non-empty strings`,
+      'INVALID_ANALYSIS_SOURCE_ALLOWLIST',
+      400,
+      {field},
+    );
+  }
+  const normalized = normalizeStringArray(value);
+  if (normalized.length > maxItems) {
+    throw new AnalyzeOptionsError(
+      `${field} exceeds the maximum of ${maxItems} unique ids`,
+      'ANALYSIS_SOURCE_ALLOWLIST_TOO_LARGE',
+      400,
+      {field, maxItems},
+    );
+  }
+  return normalized;
+}
+
+function safeNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** Strict shared parser for every HTTP surface that accepts a UI selection. */
+export function normalizeSelectionContext(value: unknown): SelectionContext | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new AnalyzeOptionsError(
+      'selectionContext must be an object',
+      'INVALID_SELECTION_CONTEXT',
+    );
+  }
+  const raw = value as Record<string, unknown>;
+  if (raw.kind === 'area') {
+    if (
+      !safeNonNegativeInteger(raw.startNs) ||
+      !safeNonNegativeInteger(raw.endNs) ||
+      raw.endNs <= raw.startNs
+    ) {
+      throw new AnalyzeOptionsError(
+        'area selectionContext requires safe integer startNs < endNs',
+        'INVALID_SELECTION_CONTEXT',
+      );
+    }
+    if (
+      raw.durationNs !== undefined &&
+      (!safeNonNegativeInteger(raw.durationNs) || raw.durationNs > raw.endNs - raw.startNs)
+    ) {
+      throw new AnalyzeOptionsError(
+        'area selectionContext.durationNs must fit the selected range',
+        'INVALID_SELECTION_CONTEXT',
+      );
+    }
+    if (
+      raw.source !== undefined &&
+      raw.source !== 'area_selection' &&
+      raw.source !== 'visible_window'
+    ) {
+      throw new AnalyzeOptionsError(
+        'area selectionContext.source is unsupported',
+        'INVALID_SELECTION_CONTEXT',
+      );
+    }
+    if (raw.tracks !== undefined && (!Array.isArray(raw.tracks) || raw.tracks.length > 256)) {
+      throw new AnalyzeOptionsError(
+        'area selectionContext.tracks must be a bounded array',
+        'INVALID_SELECTION_CONTEXT',
+      );
+    }
+    return {
+      kind: 'area',
+      ...(raw.source ? {source: raw.source as 'area_selection' | 'visible_window'} : {}),
+      startNs: raw.startNs,
+      endNs: raw.endNs,
+      ...(raw.durationNs !== undefined ? {durationNs: raw.durationNs as number} : {}),
+      ...(Array.isArray(raw.tracks) ? {tracks: raw.tracks as never} : {}),
+      ...(safeNonNegativeInteger(raw.trackCount) ? {trackCount: raw.trackCount} : {}),
+    };
+  }
+  if (raw.kind === 'track_event') {
+    if (!safeNonNegativeInteger(raw.eventId) || !safeNonNegativeInteger(raw.ts)) {
+      throw new AnalyzeOptionsError(
+        'track_event selectionContext requires safe integer eventId and ts',
+        'INVALID_SELECTION_CONTEXT',
+      );
+    }
+    if (raw.dur !== undefined && !safeNonNegativeInteger(raw.dur)) {
+      throw new AnalyzeOptionsError(
+        'track_event selectionContext.dur must be a non-negative safe integer',
+        'INVALID_SELECTION_CONTEXT',
+      );
+    }
+    if (raw.source !== undefined && raw.source !== 'track_event_selection') {
+      throw new AnalyzeOptionsError(
+        'track_event selectionContext.source is unsupported',
+        'INVALID_SELECTION_CONTEXT',
+      );
+    }
+    const optionalText = (key: 'trackUri' | 'name' | 'threadName' | 'processName') =>
+      normalizeOptionalString(raw[key], 512);
+    return {
+      kind: 'track_event',
+      ...(raw.source ? {source: 'track_event_selection' as const} : {}),
+      eventId: raw.eventId,
+      ts: raw.ts,
+      ...(raw.dur !== undefined ? {dur: raw.dur as number} : {}),
+      ...(optionalText('trackUri') ? {trackUri: optionalText('trackUri')} : {}),
+      ...(optionalText('name') ? {name: optionalText('name')} : {}),
+      ...(optionalText('threadName') ? {threadName: optionalText('threadName')} : {}),
+      ...(optionalText('processName') ? {processName: optionalText('processName')} : {}),
+      ...(safeNonNegativeInteger(raw.depth) ? {depth: raw.depth} : {}),
+      ...(safeNonNegativeInteger(raw.childCount) ? {childCount: raw.childCount} : {}),
+    };
+  }
+  throw new AnalyzeOptionsError(
+    `Unsupported selectionContext.kind: ${String(raw.kind)}`,
+    'INVALID_SELECTION_CONTEXT',
+  );
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -421,11 +627,6 @@ function normalizeTracePairAliases(value: unknown): { aliases?: Record<string, T
 
 type BooleanAnalyzeOptionKey = 'generateTracks' | 'forceRefresh' | 'heavySkill' | 'longTask';
 type NumberAnalyzeOptionKey =
-  | 'maxRounds'
-  | 'confidenceThreshold'
-  | 'maxNoProgressRounds'
-  | 'maxFailureRounds'
-  | 'maxConcurrentTasks'
   | 'taskTimeoutMs'
   | 'estimatedSqlMs'
   | 'traceSizeBytes';
@@ -488,21 +689,6 @@ function assignNumberOption(
   value: number,
 ): void {
   switch (key) {
-    case 'maxRounds':
-      out.maxRounds = value;
-      return;
-    case 'confidenceThreshold':
-      out.confidenceThreshold = value;
-      return;
-    case 'maxNoProgressRounds':
-      out.maxNoProgressRounds = value;
-      return;
-    case 'maxFailureRounds':
-      out.maxFailureRounds = value;
-      return;
-    case 'maxConcurrentTasks':
-      out.maxConcurrentTasks = value;
-      return;
     case 'taskTimeoutMs':
       out.taskTimeoutMs = value;
       return;

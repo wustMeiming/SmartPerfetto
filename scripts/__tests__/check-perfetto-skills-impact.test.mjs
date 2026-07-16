@@ -196,8 +196,11 @@ test('public Skill verification checks the pinned imported snapshot', () => {
   assert.match(script, /tools\/validate_catalog\.py/);
   assert.match(script, /--check/);
   assert.doesNotMatch(script, /tools\/export_from_smartperfetto\.py/);
+  assert.match(script, /PYTHON_BIN/);
+  assert.match(script, /\/usr\/bin\/python3/);
+  assert.match(script, /import json,sys,yaml/);
   assert.ok(
-    script.indexOf('python3 "$SYNC_CHECKER"') <
-      script.indexOf('python3 "$VALIDATOR"'),
+    script.indexOf('"$PYTHON_BIN" "$SYNC_CHECKER"') <
+      script.indexOf('"$PYTHON_BIN" "$VALIDATOR"'),
   );
 });

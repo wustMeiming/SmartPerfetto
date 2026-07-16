@@ -3,6 +3,10 @@
 // This file is part of SmartPerfetto. See LICENSE for details.
 
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import Database from 'better-sqlite3';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import type { CaseCandidate, CaseCandidateReview } from '../../../types/caseEvolution';
 import {
   openCaseCandidateOutbox,
@@ -13,7 +17,7 @@ import {
 function candidate(overrides: Partial<CaseCandidate> = {}): CaseCandidate {
   return {
     candidateId: overrides.candidateId || `cand-${Math.random().toString(36).slice(2)}`,
-    schemaVersion: 'case_candidate@1',
+    schemaVersion: 'case_candidate@2',
     provenance: {
       sourceSessionId: 'session-1',
       sourceAnalysisRunId: 'run-1',
@@ -23,6 +27,7 @@ function candidate(overrides: Partial<CaseCandidate> = {}): CaseCandidate {
       engine: 'claude',
       sceneType: 'scrolling',
       architectureType: 'unknown',
+      originScope: {tenantId: 'default-dev-tenant', workspaceId: 'default-workspace'},
     },
     cluster: {
       scene: 'scrolling',
@@ -95,6 +100,42 @@ describe('caseCandidateOutbox', () => {
   it('applies migration v1 and enables foreign keys', () => {
     expect(outbox.schemaVersion()).toBe(__testing.SCHEMA_VERSION_LATEST);
     expect(outbox.foreignKeysEnabled()).toBe(true);
+  });
+
+  it('migrates legacy unscoped candidates without rejecting pending work', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'smartperfetto-case-outbox-'));
+    const dbPath = path.join(dir, 'case-evolution.db');
+    const initial = openCaseCandidateOutbox({dbPath});
+    const legacy = candidate({candidateId: 'legacy-candidate'}) as any;
+    delete legacy.provenance.originScope;
+    legacy.schemaVersion = 'case_candidate@1';
+    expect(initial.enqueue(legacy, {dedupeKey: 'legacy::dedupe'}).enqueued).toBe(true);
+    initial.close();
+
+    const raw = new Database(dbPath);
+    raw.prepare('DELETE FROM schema_migrations WHERE version = 2').run();
+    raw.prepare(`
+      UPDATE case_candidates SET payload_json = ?, dedupe_key = ? WHERE candidate_id = ?
+    `).run(JSON.stringify(legacy), 'legacy::dedupe', legacy.candidateId);
+    raw.close();
+
+    const migrated = openCaseCandidateOutbox({dbPath});
+    try {
+      const row = migrated.getCandidate(legacy.candidateId)!;
+      expect(migrated.schemaVersion()).toBe(2);
+      expect(row.state).toBe('pending_review');
+      expect(row.candidate.schemaVersion).toBe('case_candidate@2');
+      expect(row.candidate.provenance.originScope).toEqual({
+        tenantId: 'default-dev-tenant',
+        workspaceId: 'default-workspace',
+      });
+      expect(row.dedupeKey).toBe(
+        'default-dev-tenant::default-workspace::trace-hash::scrolling::shader_compile',
+      );
+    } finally {
+      migrated.close();
+      fs.rmSync(dir, {recursive: true, force: true});
+    }
   });
 
   it('computes supported as a generated column', () => {

@@ -324,7 +324,7 @@
             "id": "execute-anr_analysis",
             "type": "skill",
             "target": "anr_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/anr_analysis.skill.yaml",
             "parameters": {
               "multi_anr_threshold": 3,
@@ -356,7 +356,7 @@
             "id": "execute-anr_detail",
             "type": "skill",
             "target": "anr_detail",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/anr_detail.skill.yaml",
             "parameters": {
               "anr_ts": 1,
@@ -377,7 +377,7 @@
             "id": "execute-anr_main_thread_blocking",
             "type": "skill",
             "target": "anr_main_thread_blocking",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/anr_main_thread_blocking.skill.yaml",
             "parameters": {
               "process_name": "com.smartperfetto.fixture"
@@ -392,7 +392,7 @@
             "id": "execute-binder_analysis",
             "type": "skill",
             "target": "binder_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/binder_analysis.skill.yaml",
             "parameters": {
               "slow_binder_critical_ms": 50,
@@ -418,7 +418,7 @@
             "id": "execute-binder_detail",
             "type": "skill",
             "target": "binder_detail",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/binder_detail.skill.yaml",
             "parameters": {
               "binder_ts": 1,
@@ -446,7 +446,7 @@
             "id": "execute-binder_module",
             "type": "skill",
             "target": "binder_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/kernel/binder_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -477,7 +477,7 @@
             "id": "execute-binder_storm_detection",
             "type": "skill",
             "target": "binder_storm_detection",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/binder_storm_detection.skill.yaml",
             "parameters": {
               "threshold": 50
@@ -509,7 +509,7 @@
             "id": "execute-blocking_chain_analysis",
             "type": "skill",
             "target": "blocking_chain_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/blocking_chain_analysis.skill.yaml",
             "parameters": {
               "process_name": "com.smartperfetto.fixture",
@@ -526,7 +526,7 @@
             "id": "execute-filesystem_module",
             "type": "skill",
             "target": "filesystem_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/kernel/filesystem_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -560,7 +560,7 @@
             "id": "execute-lock_binder_wait",
             "type": "skill",
             "target": "lock_binder_wait",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/lock_binder_wait.skill.yaml",
             "parameters": {
               "process_name": "com.smartperfetto.fixture",
@@ -577,7 +577,7 @@
             "id": "execute-lock_contention_analysis",
             "type": "skill",
             "target": "lock_contention_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/lock_contention_analysis.skill.yaml",
             "parameters": {
               "min_duration_ms": 10
@@ -593,7 +593,7 @@
             "id": "execute-lock_contention_in_range",
             "type": "skill",
             "target": "lock_contention_in_range",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/lock_contention_in_range.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -609,7 +609,7 @@
             "id": "execute-lock_contention_module",
             "type": "skill",
             "target": "lock_contention_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/kernel/lock_contention_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -638,7 +638,7 @@
             "id": "execute-wakelock_tracking",
             "type": "skill",
             "target": "wakelock_tracking",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/wakelock_tracking.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -881,7 +881,7 @@
             "id": "execute-ams_module",
             "type": "skill",
             "target": "ams_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/framework/ams_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -894,7 +894,7 @@
             "id": "execute-art_module",
             "type": "skill",
             "target": "art_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/framework/art_module.skill.yaml",
             "parameters": {
               "package": "com.smartperfetto.fixture"
@@ -909,7 +909,7 @@
             "id": "execute-code_pinpoint",
             "type": "skill",
             "target": "code_pinpoint",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/code_pinpoint.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -922,7 +922,7 @@
             "id": "execute-compose_recomposition_hotspot",
             "type": "skill",
             "target": "compose_recomposition_hotspot",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/compose_recomposition_hotspot.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -936,7 +936,7 @@
             "id": "execute-pipeline_4feature_scoring",
             "type": "skill",
             "target": "pipeline_4feature_scoring",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/pipeline_4feature_scoring.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -1045,7 +1045,7 @@
             "id": "execute-pipeline_key_slices_overlay",
             "type": "skill",
             "target": "pipeline_key_slices_overlay",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/pipeline_key_slices_overlay.skill.yaml",
             "parameters": {
               "slice_names": "'Choreographer#doFrame','DrawFrame','queueBuffer','latchBuffer'"
@@ -1148,7 +1148,7 @@
             "id": "execute-systemui_module",
             "type": "skill",
             "target": "systemui_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/app/systemui_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -1161,7 +1161,7 @@
             "id": "execute-third_party_module",
             "type": "skill",
             "target": "third_party_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/app/third_party_module.skill.yaml",
             "parameters": {
               "package": "com.smartperfetto.fixture"
@@ -1176,7 +1176,7 @@
             "id": "execute-wms_module",
             "type": "skill",
             "target": "wms_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/framework/wms_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -1291,7 +1291,7 @@
             "id": "execute-fence_wait_decomposition",
             "type": "skill",
             "target": "fence_wait_decomposition",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/fence_wait_decomposition.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -1307,7 +1307,7 @@
             "id": "execute-global_trace_sanity_check",
             "type": "skill",
             "target": "global_trace_sanity_check",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/global_trace_sanity_check.skill.yaml",
             "parameters": {
               "max_rows": 20
@@ -1490,7 +1490,7 @@
             "id": "execute-android_gpu_work_period_track",
             "type": "skill",
             "target": "android_gpu_work_period_track",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/android_gpu_work_period_track.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -1503,7 +1503,7 @@
             "id": "execute-gpu_analysis",
             "type": "skill",
             "target": "gpu_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/gpu_analysis.skill.yaml",
             "parameters": {
               "high_freq_threshold_pct": 70,
@@ -1535,6 +1535,19 @@
               "launch_configuration"
             ],
             "semantic_step": "kernel_summary",
+            "min_rows": 2,
+            "assertions": [
+              {
+                "column": "kernel",
+                "operator": "contains",
+                "value": "SyntheticComputeKernelA"
+              },
+              {
+                "column": "dur_ns",
+                "operator": "gte",
+                "value": 12000000
+              }
+            ],
             "required_marker": "SmartPerfetto::CASE::gpu-workload"
           },
           {
@@ -1557,7 +1570,7 @@
             "id": "execute-gpu_metrics",
             "type": "skill",
             "target": "gpu_metrics",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/gpu_metrics.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -1570,7 +1583,7 @@
             "id": "execute-gpu_module",
             "type": "skill",
             "target": "gpu_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/hardware/gpu_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -1583,7 +1596,7 @@
             "id": "execute-gpu_v57_ai_diagnostics",
             "type": "skill",
             "target": "gpu_v57_ai_diagnostics",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/gpu_v57_ai_diagnostics.skill.yaml",
             "parameters": {
               "target_freq_ratio": 0.9,
@@ -1710,7 +1723,7 @@
             "id": "execute-battery_doze_state_timeline",
             "type": "skill",
             "target": "battery_doze_state_timeline",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/battery_doze_state_timeline.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -1723,7 +1736,7 @@
             "id": "execute-click_response_analysis",
             "type": "skill",
             "target": "click_response_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/click_response_analysis.skill.yaml",
             "parameters": {
               "slow_event_threshold_ms": 100,
@@ -1745,7 +1758,7 @@
             "id": "execute-click_response_detail",
             "type": "skill",
             "target": "click_response_detail",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/click_response_detail.skill.yaml",
             "parameters": {
               "event_ts": "${trace_start}",
@@ -1764,7 +1777,7 @@
             "id": "execute-device_state_timeline",
             "type": "skill",
             "target": "device_state_timeline",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/device_state_timeline.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -1785,7 +1798,7 @@
             "id": "execute-input_module",
             "type": "skill",
             "target": "input_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/framework/input_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -1798,7 +1811,7 @@
             "id": "execute-main_thread_handler_callback_slices",
             "type": "skill",
             "target": "main_thread_handler_callback_slices",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/main_thread_handler_callback_slices.skill.yaml",
             "parameters": {
               "package": "",
@@ -1817,7 +1830,7 @@
             "id": "execute-navigation_analysis",
             "type": "skill",
             "target": "navigation_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/navigation_analysis.skill.yaml",
             "parameters": {
               "slow_navigation_ms": 400,
@@ -1841,7 +1854,7 @@
             "id": "execute-scene_reconstruction",
             "type": "skill",
             "target": "scene_reconstruction",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/scene_reconstruction.skill.yaml",
             "parameters": {
               "trace_id": 1
@@ -1856,7 +1869,7 @@
             "id": "execute-state_timeline",
             "type": "skill",
             "target": "state_timeline",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/state_timeline.skill.yaml",
             "parameters": {
               "trace_id": 1
@@ -1966,7 +1979,7 @@
             "id": "execute-device_state_snapshot",
             "type": "skill",
             "target": "device_state_snapshot",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/device_state_snapshot.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2095,16 +2108,26 @@
               "max_rows": 20
             },
             "required_steps": [
-              "evidence_coverage"
+              "evidence_coverage",
+              "camera_process_candidates",
+              "camera_slice_candidates"
             ],
-            "semantic_step": "evidence_coverage",
+            "semantic_step": "camera_slice_candidates",
+            "min_rows": 2,
+            "assertions": [
+              {
+                "column": "slice_name",
+                "operator": "contains",
+                "value": "Camera3-Device"
+              }
+            ],
             "required_marker": "SmartPerfetto::CASE::media-network-camera"
           },
           {
             "id": "execute-media_codec_activity",
             "type": "skill",
             "target": "media_codec_activity",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/media_codec_activity.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2117,7 +2140,7 @@
             "id": "execute-modem_network_correlation_summary",
             "type": "skill",
             "target": "modem_network_correlation_summary",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/modem_network_correlation_summary.skill.yaml",
             "parameters": {
               "top_n": 20
@@ -2132,7 +2155,7 @@
             "id": "execute-network_analysis",
             "type": "skill",
             "target": "network_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/network_analysis.skill.yaml",
             "parameters": {
               "heavy_traffic_critical_mb": 100,
@@ -2168,7 +2191,7 @@
             "id": "execute-webview_v8_analysis",
             "type": "skill",
             "target": "webview_v8_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/webview_v8_analysis.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2282,7 +2305,7 @@
             "id": "execute-android_bitmap_memory_per_process",
             "type": "skill",
             "target": "android_bitmap_memory_per_process",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/android_bitmap_memory_per_process.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2305,13 +2328,26 @@
               "dominator_paths"
             ],
             "semantic_step": "dominator_paths",
+            "min_rows": 1,
+            "assertions": [
+              {
+                "column": "path",
+                "operator": "contains",
+                "value": "LeakContainer"
+              },
+              {
+                "column": "retained_size_bytes",
+                "operator": "gte",
+                "value": 12582912
+              }
+            ],
             "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
           },
           {
             "id": "execute-android_heap_graph_leak_candidates",
             "type": "skill",
             "target": "android_heap_graph_leak_candidates",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/android_heap_graph_leak_candidates.skill.yaml",
             "parameters": {
               "lifecycle_slice_prefix": "SI$",
@@ -2328,7 +2364,7 @@
             "id": "execute-android_heap_graph_summary",
             "type": "skill",
             "target": "android_heap_graph_summary",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/android_heap_graph_summary.skill.yaml",
             "parameters": {
               "max_rows": 30
@@ -2343,7 +2379,7 @@
             "id": "execute-android_memory_v57_ai_diagnostics",
             "type": "skill",
             "target": "android_memory_v57_ai_diagnostics",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/android_memory_v57_ai_diagnostics.skill.yaml",
             "parameters": {
               "min_size_mb": 1,
@@ -2404,7 +2440,7 @@
             "id": "execute-linux_process_rss_swap_timeline",
             "type": "skill",
             "target": "linux_process_rss_swap_timeline",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/linux_process_rss_swap_timeline.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2417,7 +2453,7 @@
             "id": "execute-lmk_analysis",
             "type": "skill",
             "target": "lmk_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/lmk_analysis.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2431,7 +2467,7 @@
             "id": "execute-lmk_kill_attribution",
             "type": "skill",
             "target": "lmk_kill_attribution",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/lmk_kill_attribution.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2452,7 +2488,7 @@
             "id": "execute-memory_analysis",
             "type": "skill",
             "target": "memory_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/memory_analysis.skill.yaml",
             "parameters": {
               "gc_count_critical": 100,
@@ -2471,7 +2507,7 @@
             "id": "execute-memory_growth_detector",
             "type": "skill",
             "target": "memory_growth_detector",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/memory_growth_detector.skill.yaml",
             "parameters": {
               "growth_warning_mb": 50,
@@ -2491,7 +2527,7 @@
             "id": "execute-memory_module",
             "type": "skill",
             "target": "memory_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/hardware/memory_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2504,7 +2540,7 @@
             "id": "execute-memory_pressure_in_range",
             "type": "skill",
             "target": "memory_pressure_in_range",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/memory_pressure_in_range.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -2520,7 +2556,7 @@
             "id": "execute-memory_rss_high_watermark",
             "type": "skill",
             "target": "memory_rss_high_watermark",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/memory_rss_high_watermark.skill.yaml",
             "parameters": {
               "top_n": 30
@@ -2549,7 +2585,7 @@
             "id": "execute-oom_adjuster_score_timeline",
             "type": "skill",
             "target": "oom_adjuster_score_timeline",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/oom_adjuster_score_timeline.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2653,7 +2689,7 @@
             "id": "execute-android_dvfs_counter_stats",
             "type": "skill",
             "target": "android_dvfs_counter_stats",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/android_dvfs_counter_stats.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2666,7 +2702,7 @@
             "id": "execute-battery_charge_timeline",
             "type": "skill",
             "target": "battery_charge_timeline",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/battery_charge_timeline.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2679,7 +2715,7 @@
             "id": "execute-battery_drain_attribution",
             "type": "skill",
             "target": "battery_drain_attribution",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/battery_drain_attribution.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2692,7 +2728,7 @@
             "id": "execute-battery_drain_rate_summary",
             "type": "skill",
             "target": "battery_drain_rate_summary",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/battery_drain_rate_summary.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2713,7 +2749,7 @@
             "id": "execute-mali_gpu_power_state",
             "type": "skill",
             "target": "mali_gpu_power_state",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/mali_gpu_power_state.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2726,7 +2762,7 @@
             "id": "execute-power_consumption_overview",
             "type": "skill",
             "target": "power_consumption_overview",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/power_consumption_overview.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2739,7 +2775,7 @@
             "id": "execute-power_module",
             "type": "skill",
             "target": "power_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/hardware/power_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2752,7 +2788,7 @@
             "id": "execute-power_rails_energy_breakdown",
             "type": "skill",
             "target": "power_rails_energy_breakdown",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/power_rails_energy_breakdown.skill.yaml",
             "parameters": {
               "top_n": 30
@@ -2767,7 +2803,7 @@
             "id": "execute-suspend_wakeup_analysis",
             "type": "skill",
             "target": "suspend_wakeup_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/suspend_wakeup_analysis.skill.yaml",
             "parameters": {
               "frequent_wakeup_critical": 50,
@@ -2789,7 +2825,7 @@
             "id": "execute-thermal_module",
             "type": "skill",
             "target": "thermal_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/hardware/thermal_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2810,7 +2846,7 @@
             "id": "execute-thermal_throttling",
             "type": "skill",
             "target": "thermal_throttling",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/thermal_throttling.skill.yaml",
             "parameters": {
               "enable_expert_probes": true,
@@ -2835,7 +2871,7 @@
             "id": "execute-thermal_throttling_chain",
             "type": "skill",
             "target": "thermal_throttling_chain",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/thermal_throttling_chain.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2848,7 +2884,7 @@
             "id": "execute-wakeup_frequency_summary",
             "type": "skill",
             "target": "wakeup_frequency_summary",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/wakeup_frequency_summary.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -2875,7 +2911,7 @@
             "id": "execute-wattson_rails_power_breakdown",
             "type": "skill",
             "target": "wattson_rails_power_breakdown",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/wattson_rails_power_breakdown.skill.yaml",
             "parameters": {
               "top_n": 20
@@ -2890,7 +2926,7 @@
             "id": "execute-wattson_thread_power_attribution",
             "type": "skill",
             "target": "wattson_thread_power_attribution",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/wattson_thread_power_attribution.skill.yaml",
             "parameters": {
               "top_n": 30
@@ -3023,7 +3059,7 @@
             "id": "execute-app_frame_production",
             "type": "skill",
             "target": "app_frame_production",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/app_frame_production.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3036,7 +3072,7 @@
             "id": "execute-buffer_transaction_lifecycle",
             "type": "skill",
             "target": "buffer_transaction_lifecycle",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/buffer_transaction_lifecycle.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -3052,7 +3088,7 @@
             "id": "execute-choreographer_module",
             "type": "skill",
             "target": "choreographer_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/framework/choreographer_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3065,7 +3101,7 @@
             "id": "execute-chrome_scroll_jank_frame_timeline",
             "type": "skill",
             "target": "chrome_scroll_jank_frame_timeline",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/chrome_scroll_jank_frame_timeline.skill.yaml",
             "parameters": {
               "min_janky_frames": 1
@@ -3080,7 +3116,7 @@
             "id": "execute-consumer_jank_detection",
             "type": "skill",
             "target": "consumer_jank_detection",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/consumer_jank_detection.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3094,7 +3130,7 @@
             "id": "execute-flutter_scrolling_analysis",
             "type": "skill",
             "target": "flutter_scrolling_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/flutter_scrolling_analysis.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3123,7 +3159,7 @@
             "id": "execute-frame_overrun_summary",
             "type": "skill",
             "target": "frame_overrun_summary",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/frame_overrun_summary.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3144,7 +3180,7 @@
             "id": "execute-frame_production_gap",
             "type": "skill",
             "target": "frame_production_gap",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/frame_production_gap.skill.yaml",
             "parameters": {
               "process_name": "com.smartperfetto.fixture"
@@ -3159,7 +3195,7 @@
             "id": "execute-frame_ui_time_breakdown",
             "type": "skill",
             "target": "frame_ui_time_breakdown",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/frame_ui_time_breakdown.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3172,7 +3208,7 @@
             "id": "execute-game_fps_analysis",
             "type": "skill",
             "target": "game_fps_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/game_fps_analysis.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3185,7 +3221,7 @@
             "id": "execute-game_main_loop_jank",
             "type": "skill",
             "target": "game_main_loop_jank",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/game_main_loop_jank.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3198,7 +3234,7 @@
             "id": "execute-gl_standalone_swap_jank",
             "type": "skill",
             "target": "gl_standalone_swap_jank",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/gl_standalone_swap_jank.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3219,7 +3255,7 @@
             "id": "execute-input_to_frame_latency",
             "type": "skill",
             "target": "input_to_frame_latency",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/input_to_frame_latency.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3232,7 +3268,7 @@
             "id": "execute-jank_frame_detail",
             "type": "skill",
             "target": "jank_frame_detail",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/jank_frame_detail.skill.yaml",
             "parameters": {
               "package": "com.smartperfetto.fixture",
@@ -3287,7 +3323,7 @@
             "id": "execute-present_fence_timing",
             "type": "skill",
             "target": "present_fence_timing",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/present_fence_timing.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3308,7 +3344,7 @@
             "id": "execute-render_thread_slices",
             "type": "skill",
             "target": "render_thread_slices",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/render_thread_slices.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -3324,7 +3360,7 @@
             "id": "execute-rendering_pipeline_detection",
             "type": "skill",
             "target": "rendering_pipeline_detection",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/rendering_pipeline_detection.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3337,7 +3373,7 @@
             "id": "execute-rn_bridge_to_frame_jank",
             "type": "skill",
             "target": "rn_bridge_to_frame_jank",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/rn_bridge_to_frame_jank.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3350,7 +3386,7 @@
             "id": "execute-rn_fabric_render_jank",
             "type": "skill",
             "target": "rn_fabric_render_jank",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/rn_fabric_render_jank.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3390,7 +3426,7 @@
             "id": "execute-scrolling_analysis",
             "type": "skill",
             "target": "scrolling_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/scrolling_analysis.skill.yaml",
             "parameters": {
               "enable_expert_probes": true,
@@ -3419,7 +3455,7 @@
             "id": "execute-sf_frame_consumption",
             "type": "skill",
             "target": "sf_frame_consumption",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/sf_frame_consumption.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3432,7 +3468,7 @@
             "id": "execute-sf_layer_count_in_range",
             "type": "skill",
             "target": "sf_layer_count_in_range",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/sf_layer_count_in_range.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -3448,7 +3484,7 @@
             "id": "execute-surfaceflinger_analysis",
             "type": "skill",
             "target": "surfaceflinger_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/surfaceflinger_analysis.skill.yaml",
             "parameters": {
               "slow_composition_multiplier": 1.5,
@@ -3472,7 +3508,7 @@
             "id": "execute-surfaceflinger_module",
             "type": "skill",
             "target": "surfaceflinger_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/framework/surfaceflinger_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3485,7 +3521,7 @@
             "id": "execute-textureview_producer_frame_timing",
             "type": "skill",
             "target": "textureview_producer_frame_timing",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/textureview_producer_frame_timing.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3498,7 +3534,7 @@
             "id": "execute-vrr_detection",
             "type": "skill",
             "target": "vrr_detection",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/vrr_detection.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3519,7 +3555,7 @@
             "id": "execute-vsync_config",
             "type": "skill",
             "target": "vsync_config",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/vsync_config.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3532,7 +3568,7 @@
             "id": "execute-vsync_period_detection",
             "type": "skill",
             "target": "vsync_period_detection",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/vsync_period_detection.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3545,7 +3581,7 @@
             "id": "execute-vsync_phase_alignment",
             "type": "skill",
             "target": "vsync_phase_alignment",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/vsync_phase_alignment.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3558,7 +3594,7 @@
             "id": "execute-webview_drawfunctor_jank_chain",
             "type": "skill",
             "target": "webview_drawfunctor_jank_chain",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/webview_drawfunctor_jank_chain.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3696,7 +3732,7 @@
             "id": "execute-android_job_scheduler_events",
             "type": "skill",
             "target": "android_job_scheduler_events",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/android_job_scheduler_events.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3717,7 +3753,7 @@
             "id": "execute-cpu_analysis",
             "type": "skill",
             "target": "cpu_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/cpu_analysis.skill.yaml",
             "parameters": {
               "big_core_threshold_pct": 30,
@@ -3741,7 +3777,7 @@
             "id": "execute-cpu_cluster_load_in_range",
             "type": "skill",
             "target": "cpu_cluster_load_in_range",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_cluster_load_in_range.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -3758,7 +3794,7 @@
             "id": "execute-cpu_cluster_mapping_view",
             "type": "skill",
             "target": "cpu_cluster_mapping_view",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_cluster_mapping_view.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3771,7 +3807,7 @@
             "id": "execute-cpu_freq_residency_summary",
             "type": "skill",
             "target": "cpu_freq_residency_summary",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_freq_residency_summary.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3784,7 +3820,7 @@
             "id": "execute-cpu_freq_timeline",
             "type": "skill",
             "target": "cpu_freq_timeline",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_freq_timeline.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -3810,7 +3846,7 @@
             "id": "execute-cpu_idle_state_residency",
             "type": "skill",
             "target": "cpu_idle_state_residency",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_idle_state_residency.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3823,7 +3859,7 @@
             "id": "execute-cpu_load_in_range",
             "type": "skill",
             "target": "cpu_load_in_range",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_load_in_range.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -3840,7 +3876,7 @@
             "id": "execute-cpu_module",
             "type": "skill",
             "target": "cpu_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/hardware/cpu_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3854,7 +3890,7 @@
             "id": "execute-cpu_process_utilization_period",
             "type": "skill",
             "target": "cpu_process_utilization_period",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_process_utilization_period.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3867,7 +3903,7 @@
             "id": "execute-cpu_profiling",
             "type": "skill",
             "target": "cpu_profiling",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/deep/cpu_profiling.skill.yaml",
             "parameters": {
               "min_runtime_ms": 1
@@ -3883,7 +3919,7 @@
             "id": "execute-cpu_slice_analysis",
             "type": "skill",
             "target": "cpu_slice_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_slice_analysis.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3897,7 +3933,7 @@
             "id": "execute-cpu_thread_utilization_period",
             "type": "skill",
             "target": "cpu_thread_utilization_period",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_thread_utilization_period.skill.yaml",
             "parameters": {
               "top_n": 30
@@ -3912,7 +3948,7 @@
             "id": "execute-cpu_throttling_in_range",
             "type": "skill",
             "target": "cpu_throttling_in_range",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_throttling_in_range.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -3929,7 +3965,7 @@
             "id": "execute-cpu_time_per_frame",
             "type": "skill",
             "target": "cpu_time_per_frame",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_time_per_frame.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3942,7 +3978,7 @@
             "id": "execute-cpu_topology_detection",
             "type": "skill",
             "target": "cpu_topology_detection",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_topology_detection.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3956,7 +3992,7 @@
             "id": "execute-cpu_topology_view",
             "type": "skill",
             "target": "cpu_topology_view",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_topology_view.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3973,7 +4009,7 @@
             "id": "execute-cpu_utilization_per_period",
             "type": "skill",
             "target": "cpu_utilization_per_period",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/cpu_utilization_per_period.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -3994,7 +4030,7 @@
             "id": "execute-irq_analysis",
             "type": "skill",
             "target": "irq_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/irq_analysis.skill.yaml",
             "parameters": {
               "hard_irq_long_threshold_us": 1000,
@@ -4013,7 +4049,7 @@
             "id": "execute-linux_irq_summary",
             "type": "skill",
             "target": "linux_irq_summary",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/linux_irq_summary.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -4026,7 +4062,7 @@
             "id": "execute-linux_runqueue_depth_timeline",
             "type": "skill",
             "target": "linux_runqueue_depth_timeline",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/linux_runqueue_depth_timeline.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -4039,7 +4075,7 @@
             "id": "execute-linux_sched_latency_distribution",
             "type": "skill",
             "target": "linux_sched_latency_distribution",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/linux_sched_latency_distribution.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -4076,7 +4112,7 @@
             "id": "execute-scheduler_module",
             "type": "skill",
             "target": "scheduler_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/kernel/scheduler_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -4098,7 +4134,7 @@
             "id": "execute-screen_off_background_cpu_attribution",
             "type": "skill",
             "target": "screen_off_background_cpu_attribution",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/screen_off_background_cpu_attribution.skill.yaml",
             "parameters": {
               "top_n": 30
@@ -4113,7 +4149,7 @@
             "id": "execute-selection_range_cpu_sched_summary",
             "type": "skill",
             "target": "selection_range_cpu_sched_summary",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/selection_range_cpu_sched_summary.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -4138,7 +4174,7 @@
             "id": "execute-task_migration_in_range",
             "type": "skill",
             "target": "task_migration_in_range",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/task_migration_in_range.skill.yaml",
             "parameters": {
               "start_ts": "${trace_start}",
@@ -4258,7 +4294,7 @@
             "id": "execute-app_process_starts_summary",
             "type": "skill",
             "target": "app_process_starts_summary",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/app_process_starts_summary.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -4271,7 +4307,7 @@
             "id": "execute-launcher_module",
             "type": "skill",
             "target": "launcher_module",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/modules/app/launcher_module.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -4284,7 +4320,7 @@
             "id": "execute-startup_analysis",
             "type": "skill",
             "target": "startup_analysis",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/startup_analysis.skill.yaml",
             "parameters": {},
             "required_steps": [
@@ -4346,7 +4382,7 @@
             "id": "execute-startup_detail",
             "type": "skill",
             "target": "startup_detail",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/composite/startup_detail.skill.yaml",
             "parameters": {
               "startup_id": 1,
@@ -4455,7 +4491,7 @@
             "id": "execute-startup_slow_reasons",
             "type": "skill",
             "target": "startup_slow_reasons",
-            "mode": "semantic",
+            "mode": "execution",
             "source_file": "backend/skills/atomic/startup_slow_reasons.skill.yaml",
             "parameters": {},
             "required_steps": [

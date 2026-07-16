@@ -58,7 +58,10 @@ describe('provider runtime snapshot hash', () => {
 
     svc.update(provider.id, {
       models: { primary: 'gpt-5.2-pro' },
-      connection: { openaiBaseUrl: 'https://api.changed.example/v1' },
+      connection: {
+        openaiBaseUrl: 'https://api.changed.example/v1',
+        openaiApiKey: 'sk-openai-secret-value',
+      },
     });
 
     expect(resolveProviderRuntimeSnapshot(svc, provider.id).snapshotHash).not.toBe(before);
@@ -143,7 +146,7 @@ describe('provider runtime snapshot hash', () => {
     expect(after.snapshot.environment.OPENAI_ENABLE_VERIFICATION).toBeUndefined();
   });
 
-  it('ignores Pi and OpenCode overrides that the OpenAI runtime does not consume', () => {
+  it('ignores Pi and OpenCode connection fields that the OpenAI runtime does not consume', () => {
     const provider = svc.create({
       name: 'Custom OpenAI Provider',
       category: 'custom',
@@ -156,14 +159,6 @@ describe('provider runtime snapshot hash', () => {
         openCodeModelJson: '{"modelID":"ignored-opencode"}',
         piAgentCoreModelJson: '{"id":"ignored-pi"}',
       },
-      custom: {
-        envOverrides: {
-          SMARTPERFETTO_OPENCODE_PROJECT_DIR: '/tmp/opencode-before',
-          SMARTPERFETTO_OPENCODE_MCP_COMMAND_JSON: '["node","ignored-before.js"]',
-          SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH: '/tmp/pi-before.mjs',
-          SMARTPERFETTO_PI_AGENT_CORE_SYSTEM_PROMPT: 'ignored pi prompt before',
-        },
-      },
     });
     const before = resolveProviderRuntimeSnapshot(svc, provider.id);
 
@@ -171,14 +166,6 @@ describe('provider runtime snapshot hash', () => {
       connection: {
         openCodeModelJson: '{"modelID":"ignored-opencode-v2"}',
         piAgentCoreModelJson: '{"id":"ignored-pi-v2"}',
-      },
-      custom: {
-        envOverrides: {
-          SMARTPERFETTO_OPENCODE_PROJECT_DIR: '/tmp/opencode-after',
-          SMARTPERFETTO_OPENCODE_MCP_COMMAND_JSON: '["node","ignored-after.js"]',
-          SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH: '/tmp/pi-after.mjs',
-          SMARTPERFETTO_PI_AGENT_CORE_SYSTEM_PROMPT: 'ignored pi prompt after',
-        },
       },
     });
 
@@ -202,16 +189,6 @@ describe('provider runtime snapshot hash', () => {
         openCodeModelJson: '{"providerID":"smartperfetto","modelID":"opencode-test","apiKey":"sk-opencode-json-secret"}',
         openCodeSystemPrompt: 'secret opencode system prompt',
       },
-      custom: {
-        envOverrides: {
-          SMARTPERFETTO_OPENCODE_PROJECT_DIR: '/work/opencode',
-          SMARTPERFETTO_OPENCODE_SERVER_TIMEOUT_MS: '20000',
-          SMARTPERFETTO_OPENCODE_PROMPT_TIMEOUT_MS: '30000',
-          SMARTPERFETTO_OPENCODE_ENABLE_STANDALONE_MCP: '1',
-          SMARTPERFETTO_OPENCODE_MCP_COMMAND_JSON: '["node","opencode-secret-mcp.js"]',
-          SMARTPERFETTO_OPENCODE_MCP_TIMEOUT_MS: '7000',
-        },
-      },
     });
 
     const before = resolveProviderRuntimeSnapshot(svc, provider.id);
@@ -232,22 +209,15 @@ describe('provider runtime snapshot hash', () => {
     expect(JSON.stringify(before.snapshot)).not.toContain('sk-opencode-openai-secret');
     expect(JSON.stringify(before.snapshot)).not.toContain('sk-opencode-json-secret');
     expect(JSON.stringify(before.snapshot)).not.toContain('secret opencode system prompt');
-    expect(JSON.stringify(before.snapshot)).not.toContain('opencode-secret-mcp.js');
     expect(before.snapshot.environment.SMARTPERFETTO_OPENCODE_SDK_MODULE_PATH)
       .toBe('/opt/smartperfetto/opencode-sdk.mjs');
-    expect(before.snapshot.environment.SMARTPERFETTO_OPENCODE_PROJECT_DIR)
-      .toBe('/work/opencode');
-    expect(before.snapshot.environment.SMARTPERFETTO_OPENCODE_SERVER_TIMEOUT_MS)
-      .toBe('20000');
-    expect(before.snapshot.environment.SMARTPERFETTO_OPENCODE_MCP_TIMEOUT_MS)
-      .toBe('7000');
     expect(before.snapshot.environment.SMARTPERFETTO_OPENCODE_MODEL_JSON).toBeUndefined();
     expect(before.snapshot.environment.SMARTPERFETTO_OPENCODE_SYSTEM_PROMPT).toBeUndefined();
     expect(before.snapshot.environment.SMARTPERFETTO_OPENCODE_MCP_COMMAND_JSON).toBeUndefined();
     expect(before.snapshot.environment.OPENAI_API_KEY).toBeUndefined();
   });
 
-  it('changes when OpenCode module, system prompt, or MCP config changes', () => {
+  it('changes when OpenCode module or system prompt changes', () => {
     const provider = svc.create({
       name: 'OpenCode Config Provider',
       category: 'custom',
@@ -259,12 +229,6 @@ describe('provider runtime snapshot hash', () => {
         openaiApiKey: 'sk-opencode-openai-secret',
         openCodeSdkModulePath: '/opt/opencode-sdk-v1.mjs',
         openCodeSystemPrompt: 'opencode system prompt v1',
-      },
-      custom: {
-        envOverrides: {
-          SMARTPERFETTO_OPENCODE_PROJECT_DIR: '/work/opencode-v1',
-          SMARTPERFETTO_OPENCODE_MCP_COMMAND_JSON: '["node","mcp-v1.js"]',
-        },
       },
     });
 
@@ -279,17 +243,6 @@ describe('provider runtime snapshot hash', () => {
       connection: { openCodeSystemPrompt: 'opencode system prompt v2' },
     });
     expect(resolveProviderRuntimeSnapshot(svc, provider.id).snapshotHash).not.toBe(beforeSystemPrompt);
-
-    const beforeMcpCommand = resolveProviderRuntimeSnapshot(svc, provider.id).snapshotHash;
-    svc.update(provider.id, {
-      custom: {
-        envOverrides: {
-          SMARTPERFETTO_OPENCODE_PROJECT_DIR: '/work/opencode-v1',
-          SMARTPERFETTO_OPENCODE_MCP_COMMAND_JSON: '["node","mcp-v2.js"]',
-        },
-      },
-    });
-    expect(resolveProviderRuntimeSnapshot(svc, provider.id).snapshotHash).not.toBe(beforeMcpCommand);
   });
 
   it('captures Pi runtime snapshots without storing model JSON secrets', () => {
@@ -303,11 +256,6 @@ describe('provider runtime snapshot hash', () => {
         piAgentCoreModulePath: '/opt/smartperfetto/pi-agent-core.mjs',
         piAgentCoreModelJson: '{"id":"pi-test","provider":"test","apiKey":"sk-pi-json-secret"}',
         piAgentCoreSystemPrompt: 'secret pi system prompt',
-      },
-      custom: {
-        envOverrides: {
-          SMARTPERFETTO_PI_AGENT_CORE_FAKE_STREAM: '1',
-        },
       },
     });
 
@@ -329,7 +277,6 @@ describe('provider runtime snapshot hash', () => {
     expect(JSON.stringify(before.snapshot)).not.toContain('secret pi system prompt');
     expect(before.snapshot.environment.SMARTPERFETTO_PI_AGENT_CORE_MODULE_PATH)
       .toBe('/opt/smartperfetto/pi-agent-core.mjs');
-    expect(before.snapshot.environment.SMARTPERFETTO_PI_AGENT_CORE_FAKE_STREAM).toBe('1');
     expect(before.snapshot.environment.SMARTPERFETTO_PI_AGENT_CORE_MODEL_JSON).toBeUndefined();
     expect(before.snapshot.environment.SMARTPERFETTO_PI_AGENT_CORE_SYSTEM_PROMPT).toBeUndefined();
   });

@@ -28,7 +28,7 @@ For beginners, the UI path is the least ambiguous:
 3. Choose the provider type, paste the **Provider API Key**, then check the preset Base URLs and SDK Runtime.
 4. Click **Create Provider**. This only saves the profile.
 5. Back in the provider list, click the plug icon to test the connection, then click the provider row or choose it in the provider switcher to activate it.
-6. Verify with `/health`. `aiEngine.credentialSource=provider-manager` means the UI provider is active; `env-or-default` means SmartPerfetto is using env or local Claude Code fallback.
+6. Verify with authenticated `/api/runtime-health`. `aiEngine.credentialSource=provider-manager` means the UI provider is active; `env-or-default` means SmartPerfetto is using env or local Claude Code fallback. Public `/health` is liveness-only.
 
 An active Provider Manager profile overrides `.env`. To make `.env` changes take effect again, choose `System Default` in the provider switcher or deactivate the active provider.
 
@@ -65,9 +65,16 @@ SmartPerfetto has these runtime paths:
 
 These runtimes are mutually selected backend orchestration paths. OpenAI runtime setup does not require installing or logging in to Claude Code; local Claude Code setup does not require an OpenAI key. Pi Agent Core and OpenCode setup are separate from both. Real-model analysis quality should be verified with startup/scrolling E2E; fake-stream is smoke/test-only and does not represent parity.
 
-Runtime selection priority is: request/session `providerId`, active Provider Manager profile, `SMARTPERFETTO_AGENT_RUNTIME`, then the default `claude-agent-sdk`. Do not enable both `ANTHROPIC_*` and `OPENAI_*` for first setup; if an advanced deployment does contain both without `SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk`, analysis still uses Claude Agent SDK. An active Provider Manager profile overrides `.env` fallback; confirm the current source with `aiEngine.credentialSource` and `aiEngine.providerOverridesEnv` from `/health`.
+Runtime selection priority is: request/session `providerId`, active Provider Manager profile, `SMARTPERFETTO_AGENT_RUNTIME`, then the default `claude-agent-sdk`. Do not enable both `ANTHROPIC_*` and `OPENAI_*` for first setup; if an advanced deployment does contain both without `SMARTPERFETTO_AGENT_RUNTIME=openai-agents-sdk`, analysis still uses Claude Agent SDK. An active Provider Manager profile overrides `.env` fallback; confirm the current source with `aiEngine.credentialSource` and `aiEngine.providerOverridesEnv` from authenticated `/api/runtime-health`.
 
 Perfetto UI Provider Management can store both endpoint families for the same provider: `claudeBaseUrl` / `claudeApiKey` / `claudeAuthToken` for Claude Code SDK, and `openaiBaseUrl` / `openaiApiKey` / `openaiProtocol` for OpenAI SDK. Custom providers can also select `pi-agent-core` with `piAgentCoreModelJson` and an optional module path/system prompt, or `opencode` with `openCodeModelJson` / `openCodeSdkModulePath` / `openCodeSystemPrompt`. The provider switcher beside the AI input shows the active runtime.
+
+In enterprise mode, remote Provider Manager endpoints must use public HTTPS by
+default, including DNS-result validation, and redirects must remain same-origin.
+For an audited private Ollama instance or gateway, set
+`SMARTPERFETTO_PROVIDER_PRIVATE_ENDPOINT_ALLOWLIST` to exact origins (scheme,
+host, and port), separated by commas. Wildcards, URL paths, and broad private
+network ranges are intentionally unsupported.
 
 For dual-surface providers such as DeepSeek, Qwen, Kimi, MiMo, TokenHub, MiniMax, StepFun, SiliconFlow, and custom gateways, the UI shows a shared Provider API Key plus optional runtime-specific key overrides. If the provider uses one key for both endpoint families, fill only the shared key. Change the runtime selector only when you intentionally want to switch between the Claude-compatible URL and the OpenAI-compatible URL.
 
@@ -229,10 +236,10 @@ SmartPerfetto does not read Codex CLI, Gemini CLI, or personal OpenCode login st
 Restart the backend after changing `.env`. Saving or activating a Provider Manager profile in the UI usually does not require a backend restart, but existing analysis sessions keep the provider source they were created with. Verify explicit env/proxy credentials with:
 
 ```bash
-curl http://localhost:3000/health
+curl -H "Authorization: Bearer <backend-token>" http://localhost:3000/api/runtime-health
 ```
 
-Read these `/health` fields before debugging provider complaints:
+Read these `/api/runtime-health` fields before debugging provider complaints:
 
 | Field | What to check |
 |---|---|
@@ -267,7 +274,7 @@ SMARTPERFETTO_AI_ENABLED=false
 
 When the variable is absent, AI is enabled by default. Explicit values accept
 `1/0`, `true/false`, `yes/no`, `on/off`, and `enabled/disabled`; invalid values
-fail closed and are reported through `/health.aiPolicy.env.valid=false` and
+fail closed and are reported through authenticated `/api/runtime-health` as `aiPolicy.env.valid=false` and
 `smp doctor`.
 
 Still available while disabled: trace upload/read, SQL queries, capture config
@@ -332,6 +339,10 @@ If the backend is exposed to multiple users or a network, set:
 # Leave unset for local single-user runs.
 SMARTPERFETTO_API_KEY=replace_with_a_strong_random_secret
 ```
+
+This is the deployment-operator credential and has administration authority in
+local/non-enterprise mode. Do not distribute it to ordinary users; enterprise
+deployments should issue durable API keys with explicit roles and scopes.
 
 Protected APIs then require:
 

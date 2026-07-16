@@ -13,15 +13,13 @@ const {
   encodeScenarioOverlay,
   materializeTrace,
   probeTrace,
+  resolveTraceProcessor,
 } = require('../lib/generator.cjs');
 const {resolveCaseTrace} = require('../lib/catalog.cjs');
 const {buildCatalogCases} = require('../lib/builder.cjs');
 
 const repoRoot = path.resolve(__dirname, '../../..');
-const traceProcessor = path.join(
-  repoRoot,
-  'backend/prebuilts/trace_processor/darwin-arm64/trace_processor_shell',
-);
+const traceProcessor = resolveTraceProcessor(repoRoot);
 
 function fixtureScenario() {
   return {

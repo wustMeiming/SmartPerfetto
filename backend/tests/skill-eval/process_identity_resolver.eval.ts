@@ -24,7 +24,6 @@ const IDX_CONFIDENCE = 1;
 const IDX_STATUS = 2;
 const IDX_CANONICAL = 3;
 const IDX_PROCESS_PARAM = 4;
-const IDX_WARNING = 20;
 
 function getRows(result: any): any[][] {
   return result.displayResults?.[0]?.data?.rows || [];
@@ -93,7 +92,10 @@ describe('process_identity_resolver skill', () => {
       expect(first[IDX_STATUS]).toBe('confirmed');
       expect(first[IDX_CANONICAL]).toBe('com.example.wechatfriendforcustomscroller');
       expect(first[IDX_PROCESS_PARAM]).toBe('com.example.wechatfriendforcustomscroller');
-      expect(first[IDX_WARNING]).toBe('ok');
+      const columns = result.displayResults?.[0]?.data?.columns || [];
+      const warningIndex = columns.indexOf('identity_warning');
+      expect(warningIndex).toBeGreaterThanOrEqual(0);
+      expect(first[warningIndex]).toBe('ok');
     });
   }, 60000);
 

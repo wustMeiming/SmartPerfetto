@@ -3,10 +3,43 @@
 // This file is part of SmartPerfetto. See LICENSE for details.
 
 import type Database from 'better-sqlite3';
+import {buildRagSearchTokenText} from './rag/searchTokens';
 
 interface MigrationStep {
   version: number;
   up: (db: Database.Database) => void;
+  /** Large data backfills must manage short, recoverable transactions themselves. */
+  transactional?: boolean;
+}
+
+const AUTOMATIC_INDEX_MIGRATION_ROW_LIMIT_ENV =
+  'SMARTPERFETTO_SCHEMA_MIGRATION_MAX_AUTOMATIC_ROWS';
+const ALLOW_BLOCKING_INDEX_MIGRATION_ENV =
+  'SMARTPERFETTO_ALLOW_BLOCKING_SCHEMA_MIGRATION';
+const DEFAULT_AUTOMATIC_INDEX_MIGRATION_ROW_LIMIT = 50_000;
+
+function automaticIndexMigrationRowLimit(env: NodeJS.ProcessEnv = process.env): number {
+  const configured = env[AUTOMATIC_INDEX_MIGRATION_ROW_LIMIT_ENV]?.trim();
+  if (!configured) return DEFAULT_AUTOMATIC_INDEX_MIGRATION_ROW_LIMIT;
+  const parsed = Number(configured);
+  return Number.isSafeInteger(parsed) && parsed >= 0
+    ? parsed
+    : DEFAULT_AUTOMATIC_INDEX_MIGRATION_ROW_LIMIT;
+}
+
+function assertBlockingIndexMigrationAllowed(db: Database.Database): void {
+  const rowCount = db.prepare<unknown[], {count: number}>(
+    'SELECT COUNT(*) AS count FROM memory_entries',
+  ).get()?.count ?? 0;
+  const automaticLimit = automaticIndexMigrationRowLimit();
+  if (rowCount <= automaticLimit) return;
+  if (process.env[ALLOW_BLOCKING_INDEX_MIGRATION_ENV] === '1') return;
+  throw new Error(
+    `Enterprise schema migration 14 must build RAG indexes over ${rowCount} rows. ` +
+    `Drain older writers and set ${ALLOW_BLOCKING_INDEX_MIGRATION_ENV}=1 for the ` +
+    `maintenance restart, or raise ${AUTOMATIC_INDEX_MIGRATION_ROW_LIMIT_ENV} after ` +
+    'validating the database lock window.',
+  );
 }
 
 function tableHasColumn(db: Database.Database, table: string, column: string): boolean {
@@ -460,6 +493,19 @@ const MIGRATIONS: MigrationStep[] = [
           source_run_id TEXT,
           content_json TEXT NOT NULL,
           embedding_ref TEXT,
+          rag_registry_origin TEXT,
+          rag_codebase_id TEXT,
+          rag_knowledge_source_id TEXT,
+          rag_source_generation TEXT,
+          rag_scope_fingerprint TEXT,
+          rag_unsupported_reason TEXT,
+          rag_vendor TEXT,
+          rag_build_id TEXT,
+          rag_language TEXT,
+          rag_symbol TEXT,
+          rag_lookup_path TEXT,
+          rag_index_state TEXT,
+          rag_indexed_updated_at INTEGER,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL,
           FOREIGN KEY (tenant_id) REFERENCES organizations(id) ON DELETE CASCADE,
@@ -786,6 +832,243 @@ const MIGRATIONS: MigrationStep[] = [
       `);
     },
   },
+  {
+    version: 14,
+    transactional: false,
+    up: (db) => {
+      for (const [column, definition] of [
+        ['rag_registry_origin', 'TEXT'],
+        ['rag_codebase_id', 'TEXT'],
+        ['rag_knowledge_source_id', 'TEXT'],
+        ['rag_source_generation', 'TEXT'],
+        ['rag_scope_fingerprint', 'TEXT'],
+        ['rag_unsupported_reason', 'TEXT'],
+        ['rag_vendor', 'TEXT'],
+        ['rag_build_id', 'TEXT'],
+        ['rag_language', 'TEXT'],
+        ['rag_symbol', 'TEXT'],
+        ['rag_lookup_path', 'TEXT'],
+        ['rag_index_state', 'TEXT'],
+        ['rag_indexed_updated_at', 'INTEGER'],
+      ] as const) {
+        addColumnIfMissing(db, 'memory_entries', column, definition);
+      }
+      db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS rag_knowledge_fts USING fts5(
+          entry_id UNINDEXED,
+          tenant_id UNINDEXED,
+          workspace_id UNINDEXED,
+          scope UNINDEXED,
+          search_tokens,
+          tokenize = 'unicode61'
+        );
+        CREATE TABLE IF NOT EXISTS enterprise_schema_backfill_progress (
+          migration_version INTEGER PRIMARY KEY,
+          cursor INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        -- Rolling-deploy compatibility: an older writer only updates
+        -- content_json. Triggers keep authorization/materialized columns
+        -- coherent, mark rows for the bounded JavaScript-tokenized fallback,
+        -- and remove any stale FTS row. A new writer repairs the canonical FTS
+        -- entry and marks token_v1 after its application-side tokenizer runs.
+        CREATE TRIGGER IF NOT EXISTS trg_memory_entries_rag_legacy_insert
+        AFTER INSERT ON memory_entries
+        WHEN NEW.scope LIKE 'rag:%'
+          AND json_valid(NEW.content_json) = 1
+          AND json_extract(NEW.content_json, '$.kind') = 'rag_chunk'
+          AND NEW.rag_index_state IS NULL
+        BEGIN
+          UPDATE memory_entries
+          SET rag_registry_origin = json_extract(NEW.content_json, '$.record.registryOrigin'),
+              rag_codebase_id = json_extract(NEW.content_json, '$.record.codebaseId'),
+              rag_knowledge_source_id = json_extract(NEW.content_json, '$.record.knowledgeSourceId'),
+              rag_source_generation = json_extract(NEW.content_json, '$.record.sourceGeneration'),
+              rag_scope_fingerprint = json_extract(NEW.content_json, '$.record.knowledgeScopeFingerprint'),
+              rag_unsupported_reason = json_extract(NEW.content_json, '$.record.unsupportedReason'),
+              rag_vendor = json_extract(NEW.content_json, '$.record.vendor'),
+              rag_build_id = json_extract(NEW.content_json, '$.record.buildId'),
+              rag_language = json_extract(NEW.content_json, '$.record.language'),
+              rag_symbol = json_extract(NEW.content_json, '$.record.symbol'),
+              rag_lookup_path = COALESCE(
+                json_extract(NEW.content_json, '$.record.filePath'),
+                json_extract(NEW.content_json, '$.record.uri')
+              ),
+              rag_index_state = 'legacy_pending',
+              rag_indexed_updated_at = NEW.updated_at
+          WHERE id = NEW.id;
+          DELETE FROM rag_knowledge_fts WHERE entry_id = NEW.id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_memory_entries_rag_legacy_update
+        AFTER UPDATE OF content_json, scope, tenant_id, workspace_id ON memory_entries
+        WHEN NEW.scope LIKE 'rag:%'
+          AND json_valid(NEW.content_json) = 1
+          AND json_extract(NEW.content_json, '$.kind') = 'rag_chunk'
+          AND NEW.content_json IS NOT OLD.content_json
+          AND NEW.rag_indexed_updated_at IS OLD.rag_indexed_updated_at
+        BEGIN
+          UPDATE memory_entries
+          SET rag_registry_origin = json_extract(NEW.content_json, '$.record.registryOrigin'),
+              rag_codebase_id = json_extract(NEW.content_json, '$.record.codebaseId'),
+              rag_knowledge_source_id = json_extract(NEW.content_json, '$.record.knowledgeSourceId'),
+              rag_source_generation = json_extract(NEW.content_json, '$.record.sourceGeneration'),
+              rag_scope_fingerprint = json_extract(NEW.content_json, '$.record.knowledgeScopeFingerprint'),
+              rag_unsupported_reason = json_extract(NEW.content_json, '$.record.unsupportedReason'),
+              rag_vendor = json_extract(NEW.content_json, '$.record.vendor'),
+              rag_build_id = json_extract(NEW.content_json, '$.record.buildId'),
+              rag_language = json_extract(NEW.content_json, '$.record.language'),
+              rag_symbol = json_extract(NEW.content_json, '$.record.symbol'),
+              rag_lookup_path = COALESCE(
+                json_extract(NEW.content_json, '$.record.filePath'),
+                json_extract(NEW.content_json, '$.record.uri')
+              ),
+              rag_index_state = 'legacy_pending',
+              rag_indexed_updated_at = NEW.updated_at
+          WHERE id = NEW.id;
+          DELETE FROM rag_knowledge_fts WHERE entry_id = NEW.id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_memory_entries_rag_legacy_delete
+        AFTER DELETE ON memory_entries
+        BEGIN
+          DELETE FROM rag_knowledge_fts WHERE entry_id = OLD.id;
+        END;
+      `);
+
+      type LegacyRagRow = {
+        row_number: number;
+        id: string;
+        tenant_id: string;
+        workspace_id: string;
+        scope: string;
+        content_json: string;
+        updated_at: number;
+      };
+      type MaterializedRagRow = LegacyRagRow & {
+        values: Array<string | number | null>;
+        searchTokens: string;
+      };
+      const selectBatch = db.prepare<[number, number], LegacyRagRow>(`
+        SELECT rowid AS row_number, id, tenant_id, workspace_id, scope, content_json, updated_at
+        FROM memory_entries
+        WHERE rowid > ? AND scope LIKE 'rag:%'
+        ORDER BY rowid
+        LIMIT ?
+      `);
+      const update = db.prepare(`
+        UPDATE memory_entries
+        SET rag_registry_origin = ?,
+            rag_codebase_id = ?,
+            rag_knowledge_source_id = ?,
+            rag_source_generation = ?,
+            rag_scope_fingerprint = ?,
+            rag_unsupported_reason = ?,
+            rag_vendor = ?,
+            rag_build_id = ?,
+            rag_language = ?,
+            rag_symbol = ?,
+            rag_lookup_path = ?,
+            rag_index_state = ?,
+            rag_indexed_updated_at = ?
+        WHERE id = ? AND content_json = ?
+      `);
+      const insertFts = db.prepare(`
+        INSERT INTO rag_knowledge_fts(entry_id, tenant_id, workspace_id, scope, search_tokens)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      const deleteFts = db.prepare('DELETE FROM rag_knowledge_fts WHERE entry_id = ?');
+      const saveProgress = db.prepare(`
+        INSERT INTO enterprise_schema_backfill_progress(migration_version, cursor, updated_at)
+        VALUES (14, ?, ?)
+        ON CONFLICT(migration_version) DO UPDATE SET
+          cursor = excluded.cursor,
+          updated_at = excluded.updated_at
+      `);
+      const commitBatch = db.transaction((rows: MaterializedRagRow[], nextCursor: number) => {
+        for (const row of rows) {
+          const result = update.run(...row.values, row.id, row.content_json);
+          if (result.changes !== 1) continue;
+          deleteFts.run(row.id);
+          insertFts.run(
+            row.id,
+            row.tenant_id,
+            row.workspace_id,
+            row.scope,
+            row.searchTokens,
+          );
+        }
+        saveProgress.run(nextCursor, Date.now());
+      });
+      const progress = db.prepare<[], {cursor: number}>(`
+        SELECT cursor
+        FROM enterprise_schema_backfill_progress
+        WHERE migration_version = 14
+      `).get();
+      // Keep each WAL write lock short; JSON parsing/tokenization happens before
+      // the transaction, and the cursor is committed atomically with the batch.
+      const backfillBatchSize = 250;
+      let lastRowNumber = progress?.cursor ?? 0;
+      while (true) {
+        const rows = selectBatch.all(lastRowNumber, backfillBatchSize);
+        if (rows.length === 0) break;
+        const materializedRows: MaterializedRagRow[] = [];
+        for (const row of rows) {
+          try {
+            const envelope = JSON.parse(row.content_json) as {kind?: unknown; record?: Record<string, unknown>};
+            if (envelope.kind !== 'rag_chunk' || !envelope.record) continue;
+            const record = envelope.record;
+            materializedRows.push({
+              ...row,
+              values: [
+                typeof record.registryOrigin === 'string' ? record.registryOrigin : null,
+                typeof record.codebaseId === 'string' ? record.codebaseId : null,
+                typeof record.knowledgeSourceId === 'string' ? record.knowledgeSourceId : null,
+                typeof record.sourceGeneration === 'string' ? record.sourceGeneration : null,
+                typeof record.knowledgeScopeFingerprint === 'string' ? record.knowledgeScopeFingerprint : null,
+                typeof record.unsupportedReason === 'string' ? record.unsupportedReason : null,
+                typeof record.vendor === 'string' ? record.vendor : null,
+                typeof record.buildId === 'string' ? record.buildId : null,
+                typeof record.language === 'string' ? record.language : null,
+                typeof record.symbol === 'string' ? record.symbol : null,
+                typeof record.filePath === 'string'
+                  ? record.filePath
+                  : typeof record.uri === 'string' ? record.uri : null,
+                'token_v1',
+                row.updated_at,
+              ],
+              searchTokens: buildRagSearchTokenText(record),
+            });
+          } catch {
+            // Invalid envelopes remain readable to the generic audit/export path,
+            // but are intentionally absent from the retrieval index.
+          }
+        }
+        lastRowNumber = rows[rows.length - 1].row_number;
+        commitBatch(materializedRows, lastRowNumber);
+      }
+
+      // SQLite cannot build indexes concurrently. Small stores are safe to
+      // migrate during startup; larger stores require an explicit maintenance
+      // restart so rolling-deploy writers are drained before the lock window.
+      assertBlockingIndexMigrationAllowed(db);
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_memory_entries_rag_codebase_generation
+          ON memory_entries(
+            tenant_id, workspace_id, rag_codebase_id, rag_source_generation, scope
+          );
+        CREATE INDEX IF NOT EXISTS idx_memory_entries_rag_source_generation
+          ON memory_entries(
+            tenant_id, workspace_id, rag_knowledge_source_id, rag_source_generation, scope
+          );
+        CREATE INDEX IF NOT EXISTS idx_memory_entries_rag_symbol
+          ON memory_entries(tenant_id, workspace_id, scope, rag_symbol);
+        CREATE INDEX IF NOT EXISTS idx_memory_entries_rag_path
+          ON memory_entries(tenant_id, workspace_id, scope, rag_lookup_path);
+      `);
+    },
+  },
 ];
 
 export function applyEnterpriseMinimalSchema(db: Database.Database): void {
@@ -803,6 +1086,19 @@ export function applyEnterpriseMinimalSchema(db: Database.Database): void {
   );
   for (const step of MIGRATIONS) {
     if (applied.has(step.version)) continue;
+    if (step.transactional === false) {
+      step.up(db);
+      const finalize = db.transaction(() => {
+        db.prepare(
+          'INSERT OR IGNORE INTO enterprise_schema_migrations (version, applied_at) VALUES (?, ?)',
+        ).run(step.version, Date.now());
+        db.prepare(
+          'DELETE FROM enterprise_schema_backfill_progress WHERE migration_version = ?',
+        ).run(step.version);
+      });
+      finalize();
+      continue;
+    }
     const tx = db.transaction(() => {
       step.up(db);
       db.prepare(

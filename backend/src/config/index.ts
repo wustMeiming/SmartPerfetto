@@ -61,6 +61,7 @@ export const SMARTPERFETTO_BACKEND_PORT_ENV = 'SMARTPERFETTO_BACKEND_PORT';
 export const SMARTPERFETTO_FRONTEND_PORT_ENV = 'SMARTPERFETTO_FRONTEND_PORT';
 export const SMARTPERFETTO_BACKEND_PUBLIC_PORT_ENV = 'SMARTPERFETTO_BACKEND_PUBLIC_PORT';
 export const SMARTPERFETTO_BACKEND_PUBLIC_URL_ENV = 'SMARTPERFETTO_BACKEND_PUBLIC_URL';
+export const SMARTPERFETTO_BIND_HOST_ENV = 'SMARTPERFETTO_BIND_HOST';
 export const DEFAULT_BACKEND_PORT = 3000;
 export const DEFAULT_FRONTEND_PORT = 10000;
 
@@ -136,6 +137,9 @@ export function resolveServerConfig(env: NodeJS.ProcessEnv = process.env) {
       [SMARTPERFETTO_BACKEND_PORT_ENV, 'PORT'],
       DEFAULT_BACKEND_PORT,
     ),
+
+    /** Listen on loopback unless a deployment explicitly opts into a wider interface. */
+    bindHost: env[SMARTPERFETTO_BIND_HOST_ENV]?.trim() || '127.0.0.1',
 
     /** Perfetto UI/static frontend port */
     frontendPort,
@@ -522,6 +526,12 @@ export const sceneStoryConfig = {
 
   /** Process-memory LRU size for external RPC trace reports where no content hash is available */
   memoryCacheMaxSize: parseIntEnv('SCENE_REPORT_MEMORY_CACHE_MAX', 50),
+
+  /** Process-memory bound for legacy quick-scene extraction results */
+  quickSceneCacheMaxSize: parseIntEnv('SCENE_QUICK_CACHE_MAX', 100),
+
+  /** Expiry for legacy quick-scene extraction results */
+  quickSceneCacheTtlMs: parseIntEnv('SCENE_QUICK_CACHE_TTL_MS', 10 * 60 * 1000),
 
   /** Optional lightweight LLM double-check for ambiguous Smart scene reconstruction */
   llmVerify: parseBoolEnv('SCENE_RECONSTRUCTION_LLM_VERIFY', false),

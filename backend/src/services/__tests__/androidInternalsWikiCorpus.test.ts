@@ -43,6 +43,19 @@ describe('Android Internals Wiki corpus', () => {
     await expect(import(modulePath)).resolves.toHaveProperty('scanAndroidInternalsWiki');
   });
 
+  it('caps actual article bytes even when accepted files grow after preview', () => {
+    write('src/first.md', 'a');
+    write('src/second.md', 'b');
+    const acceptedPaths = ['src/first.md', 'src/second.md'];
+    write('src/first.md', 'aaaa');
+    write('src/second.md', 'bbbb');
+
+    expect(() => scanAndroidInternalsWiki(tmpDir, acceptedPaths, {
+      maxFileBytes: 16,
+      maxTotalBytes: 5,
+    })).toThrow('source_total_bytes_exceeded:5');
+  });
+
   it('provides a dedicated article-by-article capability auditor', async () => {
     const modulePath = '../androidInternalsWiki/androidInternalsWikiAudit';
 

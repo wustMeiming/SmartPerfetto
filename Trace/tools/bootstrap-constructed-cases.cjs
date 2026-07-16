@@ -147,10 +147,35 @@ const SEMANTIC_STEP_OVERRIDES = new Map([
   ['network_analysis', 'network_slice_overview'],
   ['android_heap_dominator_path_extract', 'dominator_paths'],
   ['gpu_compute_kernel_analysis', 'kernel_summary'],
+  ['camera_trace_evidence', 'camera_slice_candidates'],
 ]);
 
 const REQUIRED_STEP_OVERRIDES = new Map([
   ['gpu_compute_kernel_analysis', 'launch_configuration'],
+  ['camera_trace_evidence', 'camera_slice_candidates'],
+]);
+
+const SEMANTIC_ASSERTION_OVERRIDES = new Map([
+  ['camera_trace_evidence', {
+    min_rows: 2,
+    assertions: [
+      {column: 'slice_name', operator: 'contains', value: 'Camera3-Device'},
+    ],
+  }],
+  ['gpu_compute_kernel_analysis', {
+    min_rows: 2,
+    assertions: [
+      {column: 'kernel', operator: 'contains', value: 'SyntheticComputeKernelA'},
+      {column: 'dur_ns', operator: 'gte', value: 12000000},
+    ],
+  }],
+  ['android_heap_dominator_path_extract', {
+    min_rows: 1,
+    assertions: [
+      {column: 'path', operator: 'contains', value: 'LeakContainer'},
+      {column: 'retained_size_bytes', operator: 'gte', value: 12582912},
+    ],
+  }],
 ]);
 
 const EXPECTED_LIMITATIONS = new Map([
@@ -295,15 +320,21 @@ function skillExpectation(skill, family, identities) {
     ? steps.slice(0, Math.max(selectedStepIndex, requiredStepIndex) + 1).map((step) => step.id).filter(Boolean)
     : [];
   const limitation = EXPECTED_LIMITATIONS.get(definition.name);
+  const semanticAssertions = SEMANTIC_ASSERTION_OVERRIDES.get(definition.name);
   return {
     id: `execute-${definition.name}`,
     type: 'skill',
     target: definition.name,
-    mode: limitation?.mode ?? 'semantic',
+    // Executing a step and observing rows proves runtime compatibility, but it
+    // does not prove that the returned values are semantically correct. Keep
+    // that weaker contract explicit so the corpus cannot over-report semantic
+    // coverage when no value assertion exists yet.
+    mode: limitation?.mode ?? (semanticAssertions ? 'semantic' : 'execution'),
     source_file: path.relative(repoRoot, skill.filePath).split(path.sep).join('/'),
     parameters,
     required_steps: requiredSteps,
     semantic_step: selectedStepIndex >= 0 ? steps[selectedStepIndex].id : null,
+    ...(semanticAssertions ?? {}),
     ...(limitation ? {limitation_reason: limitation.reason} : {}),
     ...(limitation?.expected_error ? {expected_error: limitation.expected_error} : {}),
     required_marker: `SmartPerfetto::CASE::${family.id}`,

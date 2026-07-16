@@ -102,6 +102,25 @@ describe('HTMLReportGenerator', () => {
     expect(html).not.toContain('1,435,508');
   });
 
+  test('escapes nested report keys and object values', () => {
+    const generator = new HTMLReportGenerator();
+    const renderDeepAnalysisCard = (
+      generator as unknown as {
+        renderDeepAnalysisCard(item: unknown, index: number): string;
+      }
+    ).renderDeepAnalysisCard.bind(generator);
+    const payload = '</span><img src=x onerror="fetch(\'/api/v1/providers\')">';
+
+    const html = renderDeepAnalysisCard({
+      title: 'safe',
+      [`metric_${payload}`]: {nested: {payload}},
+    }, 0);
+
+    expect(html).not.toContain('<img');
+    expect(html).not.toContain('</span><img');
+    expect(html).toContain('&lt;/span&gt;&lt;img');
+  });
+
   test('renders partial warning for degraded agent results', () => {
     const generator = new HTMLReportGenerator();
     const message = '最终结果质量闸门发现 provider 没有产出可独立交付的完整结论';

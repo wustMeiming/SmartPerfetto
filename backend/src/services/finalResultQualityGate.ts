@@ -18,11 +18,17 @@ export type FinalResultQualityIssueCode =
   | 'quick_full_report_shape'
   | 'quick_verifier_failed'
   | 'scene_contract_incomplete'
+  | 'comparison_identity_incomplete'
   | 'kernel_blocking_claim_boundary';
 
 export interface FinalResultQualityIssue {
   code: FinalResultQualityIssueCode;
   message: string;
+}
+
+export interface FinalResultComparisonIdentity {
+  currentPackageName?: string;
+  referencePackageName?: string;
 }
 
 const FINAL_RESULT_QUALITY_GATE_MESSAGE =
@@ -173,6 +179,18 @@ function hasReportStructureMarker(text: string): boolean {
 
 export function hasDeliverableFinalReportHeading(text: string): boolean {
   return /(^|\n)\s{0,3}(?:#{1,3}\s*)?(?:(?:[^\n#]{0,40})?分析报告|综合结论|关键结论|最终结论|最终报告|根因分析|Final Conclusion|Final Report|Analysis Report|Root Cause)(?=\s|[：:。.!！?\n]|$)/i.test(text);
+}
+
+export function stripLeadingProcessNarrationFromFinalReport(text: string): string {
+  const conclusion = text.trim();
+  if (!looksLikeProcessNarrationConclusion(conclusion)) return conclusion;
+
+  const heading = conclusion.match(
+    /(^|\n)\s{0,3}(?:#{1,3}\s*)?(?:(?:[^\n#]{0,40})?分析报告|综合结论|关键结论|最终结论|最终报告|根因分析|Final Conclusion|Final Report|Analysis Report|Root Cause)(?=\s|[：:。.!！?\n]|$)/i,
+  );
+  if (heading?.index === undefined) return conclusion;
+  const headingStart = heading.index + (heading[1]?.length ?? 0);
+  return conclusion.slice(headingStart).trim();
 }
 
 export function looksLikeProcessNarrationConclusion(conclusion: string): boolean {
@@ -378,8 +396,9 @@ export function assessFinalResultQuality(input: {
   result: AgentRuntimeAnalysisResult;
   query?: string;
   sceneType?: string;
+  comparisonIdentity?: FinalResultComparisonIdentity;
 }): FinalResultQualityIssue | undefined {
-  const { result, query, sceneType } = input;
+  const { result, query, sceneType, comparisonIdentity } = input;
   if (!result.success) return undefined;
 
   const conclusion = result.conclusion.trim();
@@ -456,6 +475,12 @@ export function assessFinalResultQuality(input: {
     if (kernelBlockingIssue) return kernelBlockingIssue;
   }
 
+  const comparisonIdentityIssue = assessFinalResultComparisonIdentity(
+    conclusion,
+    comparisonIdentity,
+  );
+  if (comparisonIdentityIssue) return comparisonIdentityIssue;
+
   if (!isQuickRunResult(result) && looksLikeAnalysisQuery(query)) {
     const contractIssue = assessFinalReportContractCompleteness({
       conclusion,
@@ -477,10 +502,31 @@ export function assessFinalResultQuality(input: {
   return undefined;
 }
 
+export function assessFinalResultComparisonIdentity(
+  conclusion: string,
+  identity: FinalResultComparisonIdentity | undefined,
+): FinalResultQualityIssue | undefined {
+  if (!identity) return undefined;
+
+  const packageNames = [...new Set([
+    identity.currentPackageName?.trim(),
+    identity.referencePackageName?.trim(),
+  ].filter((packageName): packageName is string => Boolean(packageName)))];
+  const missingPackageNames = packageNames.filter(packageName => !conclusion.includes(packageName));
+  if (missingPackageNames.length === 0) return undefined;
+
+  return {
+    code: 'comparison_identity_incomplete',
+    message: `${FINAL_RESULT_QUALITY_GATE_MESSAGE} ` +
+      `双 Trace 对比结论必须显式写出两侧完整包名，不能只使用左侧/右侧或业务别名；缺失：${missingPackageNames.join('、')}。`,
+  };
+}
+
 export function applyFinalResultQualityGate(input: {
   result: AgentRuntimeAnalysisResult;
   query?: string;
   sceneType?: string;
+  comparisonIdentity?: FinalResultComparisonIdentity;
 }): FinalResultQualityIssue | undefined {
   const issue = assessFinalResultQuality(input);
   if (!issue) return undefined;

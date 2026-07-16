@@ -42,6 +42,7 @@ interface AdaptedHeapRows {
   clusterRows: HeapPathClusterInputRow[];
   failures: HeapPathClusterFailure[];
   truncatedRowCount: number;
+  eligibleTraceCount: number;
 }
 
 type BatchPostProcessor = (input: RunBatchPostProcessorInput) => BatchTraceDomainAnalysisV1;
@@ -117,6 +118,7 @@ function adaptTraceRows(input: RunBatchPostProcessorInput): AdaptedHeapRows {
   }> = [];
   let sourceRowCount = 0;
   let preTruncatedRowCount = 0;
+  let eligibleTraceCount = 0;
 
   for (const trace of [...input.traces].sort((a, b) => a.ordinal - b.ordinal)) {
     preTruncatedRowCount += trace.preTruncatedRowCount ?? 0;
@@ -138,12 +140,16 @@ function adaptTraceRows(input: RunBatchPostProcessorInput): AdaptedHeapRows {
     const malformedRowCount = sourceRecords.filter(row => row === null).length;
     if (malformedRowCount > 0) {
       failures.push(traceFailure(trace, `malformed_source_rows:${malformedRowCount}`));
+      continue;
     }
     const rows = sourceRecords
       .filter((row): row is Record<string, unknown> => row !== null)
       .map(row => canonicalValues(row, input.config.required_columns))
       .sort(compareSourceRows);
     sourceRowCount += rows.length;
+    // A valid zero-row source step still belongs in the support denominator:
+    // it proves that the Skill executed and found no matching heap path.
+    eligibleTraceCount += 1;
     boundedByTrace.push({trace, rows: rows.slice(0, input.config.per_trace_row_limit)});
   }
 
@@ -205,6 +211,7 @@ function adaptTraceRows(input: RunBatchPostProcessorInput): AdaptedHeapRows {
     clusterRows,
     failures,
     truncatedRowCount: preTruncatedRowCount + sourceRowCount - selected.length,
+    eligibleTraceCount,
   };
 }
 
@@ -212,6 +219,7 @@ function heapPathClusterProcessor(input: RunBatchPostProcessorInput): BatchTrace
   const adapted = adaptTraceRows(input);
   const result = clusterHeapPaths(adapted.clusterRows, adapted.failures, {
     maxRows: input.config.total_row_limit,
+    traceUniverseSize: adapted.eligibleTraceCount,
   });
   if (adapted.truncatedRowCount > 0) {
     result.limitations = [...result.limitations, `batch_source_rows_truncated:${adapted.truncatedRowCount}`];

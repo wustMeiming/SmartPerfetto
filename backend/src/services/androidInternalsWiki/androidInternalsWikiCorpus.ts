@@ -9,6 +9,12 @@ import * as path from 'path';
 
 import yaml from 'js-yaml';
 
+import {
+  DEFAULT_SOURCE_MAX_FILE_BYTES,
+  DEFAULT_SOURCE_MAX_TOTAL_BYTES,
+  readAcceptedTextFileSync,
+} from '../codebase/pathSecurityGate';
+
 export interface AndroidInternalsWikiArticle {
   relativePath: string;
   title?: string;
@@ -66,13 +72,34 @@ function listMarkdownFiles(directory: string): string[] {
   return files.sort();
 }
 
-export function scanAndroidInternalsWiki(rootPath: string): AndroidInternalsWikiCorpus {
-  const resolvedRoot = path.resolve(rootPath);
+export function scanAndroidInternalsWiki(
+  rootPath: string,
+  acceptedRelativePaths?: readonly string[],
+  limits: Readonly<{maxFileBytes?: number; maxTotalBytes?: number}> = {},
+): AndroidInternalsWikiCorpus {
+  const resolvedRoot = fs.realpathSync(path.resolve(rootPath));
   const articles: AndroidInternalsWikiArticle[] = [];
-  for (const filePath of listMarkdownFiles(path.join(resolvedRoot, 'src'))) {
-    const raw = fs.readFileSync(filePath, 'utf8');
+  const filePaths = acceptedRelativePaths
+    ? acceptedRelativePaths
+        .map(relativePath => relativePath.replace(/\\/g, '/'))
+        .filter(relativePath => {
+          const basename = path.posix.basename(relativePath).toUpperCase();
+          return relativePath.startsWith('src/') && relativePath.endsWith('.md') &&
+            basename !== 'README.MD' && basename !== 'SUMMARY.MD';
+        })
+        .sort()
+    : listMarkdownFiles(path.join(resolvedRoot, 'src'))
+        .map(filePath => path.relative(resolvedRoot, filePath).split(path.sep).join('/'));
+  const maxFileBytes = limits.maxFileBytes ?? DEFAULT_SOURCE_MAX_FILE_BYTES;
+  const maxTotalBytes = limits.maxTotalBytes ?? DEFAULT_SOURCE_MAX_TOTAL_BYTES;
+  let actualTotalBytes = 0;
+  for (const relativePath of filePaths) {
+    const raw = readAcceptedTextFileSync(resolvedRoot, relativePath, maxFileBytes);
+    actualTotalBytes += Buffer.byteLength(raw, 'utf8');
+    if (actualTotalBytes > maxTotalBytes) {
+      throw new Error(`source_total_bytes_exceeded:${maxTotalBytes}`);
+    }
     const frontmatterMatch = raw.match(FRONTMATTER);
-    const relativePath = path.relative(resolvedRoot, filePath).split(path.sep).join('/');
     if (!frontmatterMatch) {
       articles.push({
         relativePath,
@@ -103,21 +130,39 @@ export function scanAndroidInternalsWiki(rootPath: string): AndroidInternalsWiki
       return typeof value === 'string' ? value.trim() || undefined : scalar(frontmatter, key);
     };
     const parsedTags = parsed?.tags;
+    const title = stringValue('title');
+    const status = stringValue('status');
+    const confidence = stringValue('confidence');
+    const lastVerified = stringValue('last_verified');
+    const lastVerifiedAgainst = stringValue('last_verified_against');
+    const tags = Array.isArray(parsedTags)
+      ? parsedTags.filter((tag): tag is string => typeof tag === 'string').map(tag => tag.trim())
+      : [];
+    const validationErrors = [
+      ...(title && title.length > 240 ? ['title_too_long'] : []),
+      ...(confidence && !['low', 'medium', 'high'].includes(confidence.toLowerCase())
+        ? ['confidence_invalid'] : []),
+      ...(lastVerified && !Number.isFinite(Date.parse(lastVerified)) ? ['last_verified_invalid'] : []),
+      ...(lastVerifiedAgainst && (lastVerifiedAgainst.length > 200 || /[\r\n\0]/.test(lastVerifiedAgainst))
+        ? ['last_verified_against_invalid'] : []),
+      ...(tags.length > 32 || tags.some(tag => !tag || tag.length > 80 || /[\r\n\0]/.test(tag))
+        ? ['tags_invalid'] : []),
+    ];
     articles.push({
       relativePath,
-      title: stringValue('title'),
-      status: stringValue('status'),
-      confidence: stringValue('confidence'),
-      lastVerified: stringValue('last_verified'),
-      lastVerifiedAgainst: stringValue('last_verified_against'),
-      tags: Array.isArray(parsedTags)
-        ? parsedTags.filter((tag): tag is string => typeof tag === 'string').map(tag => tag.trim())
-        : [],
+      title,
+      status,
+      confidence,
+      lastVerified,
+      lastVerifiedAgainst,
+      tags,
       body,
       fileHash: createHash('sha256').update(raw).digest('hex'),
       contentHash: createHash('sha256').update(body.replace(/\s+/g, ' ').trim()).digest('hex'),
-      metadataValid: parsed !== null,
-      ...(metadataError ? {metadataError} : {}),
+      metadataValid: parsed !== null && validationErrors.length === 0,
+      ...((metadataError || validationErrors.length > 0)
+        ? {metadataError: metadataError ?? validationErrors.join(',')}
+        : {}),
     });
   }
   return {
@@ -146,7 +191,10 @@ export function inspectAndroidInternalsWikiIdentity(
       basename !== 'README.MD' &&
       basename !== 'SUMMARY.MD';
   };
-  const statusRecords = git([
+  let statusRecords: string[];
+  let revision: string;
+  try {
+    statusRecords = git([
     '-c',
     'core.quotePath=false',
     'status',
@@ -155,7 +203,16 @@ export function inspectAndroidInternalsWikiIdentity(
     '--untracked-files=all',
     '--',
     'src',
-  ]).split('\0');
+    ]).split('\0');
+    revision = git(['rev-parse', 'HEAD']).trim();
+  } catch {
+    return {
+      revision: `content-${corpus.contentFingerprint.slice(0, 40)}`,
+      contentFingerprint: corpus.contentFingerprint,
+      dirtyAcceptedArticlePaths: corpus.articles.map(article => article.relativePath).sort(),
+      dirty: true,
+    };
+  }
   const dirtyPaths = new Set<string>();
   for (let index = 0; index < statusRecords.length; index++) {
     const record = statusRecords[index];
@@ -170,7 +227,7 @@ export function inspectAndroidInternalsWikiIdentity(
   }
   const dirtyAcceptedArticlePaths = Array.from(dirtyPaths).sort();
   return {
-    revision: git(['rev-parse', 'HEAD']).trim(),
+    revision,
     contentFingerprint: corpus.contentFingerprint,
     dirtyAcceptedArticlePaths,
     dirty: dirtyAcceptedArticlePaths.length > 0,

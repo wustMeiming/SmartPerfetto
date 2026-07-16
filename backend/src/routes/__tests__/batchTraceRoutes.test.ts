@@ -281,7 +281,7 @@ describe('batch trace workspace routes', () => {
     );
     expect(exported.status).toBe(200);
     expect(exported.headers['content-type']).toContain('text/html');
-    expect(exported.text).toContain('SmartPerfetto Batch Trace Run');
+    expect(exported.text).toMatch(/SmartPerfetto (?:Batch Trace Run|批量轨迹分析)/);
 
     const promoted = await ssoHeaders(
       request(app).post('/api/workspaces/workspace-a/batch-traces/batch-route-run/promote-snapshots').send({

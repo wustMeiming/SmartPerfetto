@@ -27,9 +27,21 @@ import type { AnalyzeManagedSession } from '../assistant/application/agentAnalyz
 import { SessionPersistenceService } from './sessionPersistenceService';
 import { sessionContextManager } from '../agent/context/enhancedSessionContext';
 import { getDefaultCodebaseRegistry } from './codebase/defaultCodebaseServices';
+import {activeCodebaseGeneration} from './codebase/codebaseRegistry';
 import { CodeLookupLedger } from './codebase/codeLookupLedger';
 import type { DataEnvelope } from '../types/dataContract';
 import type { SqlResultMessageBundle, SqlResultMessageEntry } from '../models/sessionSchema';
+import type {KnowledgeScope} from './scopedKnowledgeStore';
+import {getDefaultExternalKnowledgeSourceRegistry} from './externalKnowledgeSourceRegistry';
+import {parseOutputLanguage} from '../agentv3/outputLanguage';
+import {
+  projectPrivateConclusion,
+  projectPrivateDataEnvelopes,
+  privateAnalysisQueryMessage,
+  projectPrivateSessionStateSnapshot,
+  projectPrivateTerminationMessage,
+  sessionUsesPrivateKnowledge,
+} from './security/privateAnalysisProjection';
 
 const MAX_SQL_RESULTS_PER_MESSAGE = 5;
 const MAX_SQL_RESULT_ENTRY_BYTES = 100 * 1024;
@@ -44,16 +56,42 @@ type PersistableSqlEnvelope = DataEnvelope & {
   stdlibInjectedModules?: string[];
 };
 
-function buildCodebaseSnapshot(codebaseIds: string[] | undefined) {
+function buildCodebaseSnapshot(
+  codebaseIds: string[] | undefined,
+  scope?: KnowledgeScope,
+) {
   if (!codebaseIds || codebaseIds.length === 0) return undefined;
   const registry = getDefaultCodebaseRegistry();
   return codebaseIds
-    .map(id => registry.get(id))
+    .map(id => registry.get(id, scope))
     .filter(Boolean)
     .map(ref => ({
       codebaseId: ref!.codebaseId,
       indexGeneration: ref!.indexGeneration,
+      activeGeneration: activeCodebaseGeneration(ref!),
+      contentFingerprint: ref!.contentFingerprint,
+      indexedRevision: ref!.indexedRevision,
+      indexedDirty: ref!.indexedDirty,
+      commitProvenance: ref!.commitProvenance,
       consentHash: ref!.consent.consentHash,
+    }));
+}
+
+function buildKnowledgeSourceSnapshot(
+  sourceIds: string[] | undefined,
+  scope?: KnowledgeScope,
+) {
+  if (!sourceIds || sourceIds.length === 0) return undefined;
+  const registry = getDefaultExternalKnowledgeSourceRegistry();
+  return sourceIds
+    .map(sourceId => registry.get(sourceId, scope ?? {}))
+    .filter(Boolean)
+    .map(source => ({
+      sourceId: source!.sourceId,
+      indexGeneration: source!.indexGeneration,
+      activeGeneration: source!.activeGeneration,
+      contentFingerprint: source!.contentFingerprint,
+      revision: source!.revision,
     }));
 }
 
@@ -192,14 +230,21 @@ function buildAssistantSqlResult(envelopes: unknown): SqlResultMessageBundle | u
 
 export function persistAgentTurn(input: PersistAgentTurnInput): void {
   const { session, sessionId, traceId, query, result, logger } = input;
+  const privateKnowledge = sessionUsesPrivateKnowledge(session);
+  const outputLanguage = session.outputLanguage
+    ?? parseOutputLanguage(process.env.SMARTPERFETTO_OUTPUT_LANGUAGE);
   const logComponent = input.logComponent ?? 'AgentPersistence';
   const persistenceService = SessionPersistenceService.getInstance();
+  const durableDataEnvelopes = privateKnowledge
+    ? projectPrivateDataEnvelopes(sessionId, (session.dataEnvelopes || []) as DataEnvelope[])
+    : (session.dataEnvelopes || []) as DataEnvelope[];
 
   try {
     const sessionContext = sessionContextManager.get(sessionId, traceId);
 
-      const snapshot = typeof session.orchestrator.takeSnapshot === 'function'
+      const rawSnapshot = typeof session.orchestrator.takeSnapshot === 'function'
         ? session.orchestrator.takeSnapshot(sessionId, traceId, {
+          outputLanguage,
           referenceTraceId: session.referenceTraceId,
           comparisonSource: session.comparisonSource,
           comparisonReportSection: session.comparisonReportSection,
@@ -208,7 +253,7 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
           conclusionHistory: session.conclusionHistory || [],
           agentDialogue: session.agentDialogue || [],
           agentResponses: session.agentResponses || [],
-          dataEnvelopes: session.dataEnvelopes || [],
+          dataEnvelopes: durableDataEnvelopes,
           claimSupport: session.result?.claimSupport || (session as any).claimSupport,
           claimVerificationResult: session.result?.claimVerificationResult || (session as any).claimVerificationResult,
           identityResolutions: session.result?.identityResolutions || (session as any).identityResolutions,
@@ -217,10 +262,27 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
             agentRuntimeProviderId: session.providerId,
             agentRuntimeProviderSnapshotHash: session.providerSnapshotHash,
             continuityBreaks: session.continuityBreaks,
+            analysisContextFingerprint: session.analysisContextFingerprint,
             lineage: session.lineage,
             codeAwareMode: (session as {codeAwareMode?: unknown}).codeAwareMode as any,
             codebaseIds: (session as {codebaseIds?: string[]}).codebaseIds,
-            codebaseSnapshot: buildCodebaseSnapshot((session as {codebaseIds?: string[]}).codebaseIds),
+            codebaseSnapshot: buildCodebaseSnapshot(
+              (session as {codebaseIds?: string[]}).codebaseIds,
+              {
+                tenantId: session.tenantId,
+                workspaceId: session.workspaceId,
+                userId: session.userId,
+              },
+            ),
+            knowledgeSourceIds: session.knowledgeSourceIds,
+            knowledgeSourceSnapshot: buildKnowledgeSourceSnapshot(
+              session.knowledgeSourceIds,
+              {
+                tenantId: session.tenantId,
+                workspaceId: session.workspaceId,
+                userId: session.userId,
+              },
+            ),
             codeLookupSummary: CodeLookupLedger.restore(sessionId, 12_000, 2).toSnapshotSummary(),
             runSequence: session.runSequence || 0,
           activeRun: session.activeRun,
@@ -228,6 +290,9 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
           conversationOrdinal: session.conversationOrdinal || 0,
         })
       : null;
+    const snapshot = rawSnapshot && privateKnowledge
+      ? projectPrivateSessionStateSnapshot(rawSnapshot)
+      : rawSnapshot;
 
     // Stash snapshot EARLY — report builder reads `_lastSnapshot` for
     // analysisNotes / analysisPlan / uncertaintyFlags. Must happen before
@@ -236,19 +301,22 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
       (session as unknown as { _lastSnapshot: unknown })._lastSnapshot = snapshot;
     }
 
-    if (snapshot && sessionContext) {
-      const focusStoreSnapshot = typeof session.orchestrator.getFocusStore === 'function'
+    if (snapshot) {
+      const focusStoreSnapshot = !privateKnowledge && typeof session.orchestrator.getFocusStore === 'function'
         ? session.orchestrator.getFocusStore().serialize()
         : undefined;
-      const traceAgentState = sessionContext.getTraceAgentState() || undefined;
+      const traceAgentState = !privateKnowledge
+        ? sessionContext?.getTraceAgentState() || undefined
+        : undefined;
 
       const saved = persistenceService.saveSessionStateSnapshot(
         sessionId,
         snapshot,
         {
-          sessionContext,
+          ...(!privateKnowledge && sessionContext ? {sessionContext} : {}),
           focusStoreSnapshot,
           traceAgentState,
+          clearPrivateContext: privateKnowledge,
           owner: {
             tenantId: session.tenantId,
             workspaceId: session.workspaceId,
@@ -262,7 +330,9 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
           steps: snapshot.conversationSteps.length,
           envelopes: snapshot.dataEnvelopes.length,
           notes: snapshot.analysisNotes.length,
-          entityStoreStats: sessionContext.getEntityStore().getStats(),
+          ...(!privateKnowledge && sessionContext
+            ? {entityStoreStats: sessionContext.getEntityStore().getStats()}
+            : {}),
         });
       }
     } else if (sessionContext) {
@@ -274,7 +344,6 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
           id: sessionId,
           traceId,
           traceName: traceId,
-          question: query,
           messages: [],
           createdAt: session.createdAt,
           updatedAt: Date.now(),
@@ -285,24 +354,33 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
             referenceTraceId: session.referenceTraceId,
             comparisonSource: session.comparisonSource,
           },
+          question: privateKnowledge
+            ? privateAnalysisQueryMessage(outputLanguage)
+            : query,
         });
       }
-      persistenceService.saveSessionContext(sessionId, sessionContext);
-      if (typeof session.orchestrator.getCachedArchitecture === 'function') {
+      if (privateKnowledge) {
+        persistenceService.clearPrivateSessionContextSnapshots(sessionId);
+      } else {
+        persistenceService.saveSessionContext(sessionId, sessionContext);
+      }
+      if (!privateKnowledge && typeof session.orchestrator.getCachedArchitecture === 'function') {
         const cachedArch = session.orchestrator.getCachedArchitecture(traceId);
         if (cachedArch) persistenceService.saveArchitectureSnapshot(sessionId, cachedArch);
       }
-      if (typeof session.orchestrator.getFocusStore === 'function') {
+      if (!privateKnowledge && typeof session.orchestrator.getFocusStore === 'function') {
         persistenceService.saveFocusStore(sessionId, session.orchestrator.getFocusStore());
       }
-      const traceAgentState = sessionContext.getTraceAgentState();
-      if (traceAgentState) persistenceService.saveTraceAgentState(sessionId, traceAgentState);
+      if (!privateKnowledge) {
+        const traceAgentState = sessionContext.getTraceAgentState();
+        if (traceAgentState) persistenceService.saveTraceAgentState(sessionId, traceAgentState);
+      }
       persistenceService.saveRuntimeArrays(sessionId, {
-        conversationSteps: session.conversationSteps || [],
-        dataEnvelopes: session.dataEnvelopes || [],
-        hypotheses: session.hypotheses || [],
-        queryHistory: session.queryHistory || [],
-        conclusionHistory: session.conclusionHistory || [],
+        conversationSteps: privateKnowledge ? [] : session.conversationSteps || [],
+        dataEnvelopes: durableDataEnvelopes,
+        hypotheses: privateKnowledge ? [] : session.hypotheses || [],
+        queryHistory: privateKnowledge ? [] : session.queryHistory || [],
+        conclusionHistory: privateKnowledge ? [] : session.conclusionHistory || [],
       });
     }
 
@@ -311,7 +389,7 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
     if (sessionContext) {
       try {
         const turnIndex = session.runSequence || 1;
-        const sessionEnvelopes = Array.isArray(session.dataEnvelopes) ? session.dataEnvelopes : [];
+        const sessionEnvelopes = durableDataEnvelopes;
         const snapshotEnvelopes = Array.isArray((snapshot as {dataEnvelopes?: unknown[]} | null)?.dataEnvelopes)
           ? (snapshot as {dataEnvelopes: unknown[]}).dataEnvelopes
           : [];
@@ -323,13 +401,29 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
           {
             id: `msg-${sessionId}-turn${turnIndex}-user`,
             role: 'user',
-            content: query,
+            content: privateKnowledge
+              ? privateAnalysisQueryMessage(outputLanguage)
+              : query,
             timestamp: now - (result.totalDurationMs || 0),
           },
           {
             id: `msg-${sessionId}-turn${turnIndex}-assistant`,
             role: 'assistant',
-            content: buildPersistedAssistantMessage(result),
+            content: privateKnowledge
+              ? buildPersistedAssistantMessage({
+                  ...result,
+                  conclusion: projectPrivateConclusion({
+                    sessionId,
+                    conclusion: result.conclusion,
+                    success: session.result?.success !== false,
+                    language: outputLanguage,
+                  }),
+                  terminationMessage: projectPrivateTerminationMessage(
+                    result.terminationMessage,
+                    outputLanguage,
+                  ),
+                })
+              : buildPersistedAssistantMessage(result),
             timestamp: now,
             sqlResult: assistantSqlResult,
           },

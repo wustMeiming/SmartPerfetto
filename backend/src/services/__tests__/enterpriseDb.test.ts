@@ -30,6 +30,14 @@ describe('enterprise SQLite WAL database', () => {
     } as NodeJS.ProcessEnv)).toBe(configuredPath);
   });
 
+  test('places the default database under the configured backend data directory', async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'smartperfetto-enterprise-db-'));
+
+    expect(resolveEnterpriseDbPath({
+      SMARTPERFETTO_BACKEND_DATA_DIR: tmpDir,
+    } as NodeJS.ProcessEnv)).toBe(path.join(tmpDir, 'sessions', 'sessions.db'));
+  });
+
   test('opens SQLite with WAL, foreign keys, busy timeout, and schema migrations', async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'smartperfetto-enterprise-db-'));
     const dbPath = path.join(tmpDir, 'enterprise.sqlite');
@@ -57,6 +65,7 @@ describe('enterprise SQLite WAL database', () => {
         { version: 11 },
         { version: 12 },
         { version: 13 },
+        { version: 14 },
       ]);
     } finally {
       db.close();

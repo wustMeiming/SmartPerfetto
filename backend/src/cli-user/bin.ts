@@ -135,7 +135,8 @@ function main(): void {
     .option('--mode <mode>', 'analysis mode: fast, full, auto')
     .option('--code-aware <mode>', 'code-aware mode: off, metadata_only, provider_send')
     .option('--codebase-id <id>', 'registered codebase id to expose to the analysis session', collectCodebaseId, [])
-    .action(async (trace: string, question: string[] | undefined, opts: { format?: string; mode?: string; codeAware?: string; codebaseId?: string[] }) => {
+    .option('--knowledge-source-id <id>', 'registered private knowledge source id to expose', collectCodebaseId, [])
+    .action(async (trace: string, question: string[] | undefined, opts: { format?: string; mode?: string; codeAware?: string; codebaseId?: string[]; knowledgeSourceId?: string[] }) => {
       const g = globals();
       await runAndExit(() => runAnalyzeCommand({
         trace,
@@ -148,6 +149,7 @@ function main(): void {
         analysisMode: parseAnalysisMode(opts.mode),
         codeAwareMode: codeAwareMode(opts.codeAware),
         codebaseIds: opts.codebaseId,
+        knowledgeSourceIds: opts.knowledgeSourceId,
       }));
     });
 
@@ -159,7 +161,8 @@ function main(): void {
     .option('--mode <mode>', 'analysis mode: fast, full, auto')
     .option('--code-aware <mode>', 'code-aware mode: off, metadata_only, provider_send')
     .option('--codebase-id <id>', 'registered codebase id to expose to the analysis session', collectCodebaseId, [])
-    .action(async (trace: string, opts: { query?: string; format?: string; mode?: string; codeAware?: string; codebaseId?: string[] }) => {
+    .option('--knowledge-source-id <id>', 'registered private knowledge source id to expose', collectCodebaseId, [])
+    .action(async (trace: string, opts: { query?: string; format?: string; mode?: string; codeAware?: string; codebaseId?: string[]; knowledgeSourceId?: string[] }) => {
       const g = globals();
       const query = g.prompt ?? g.query ?? opts.query ?? DEFAULT_ANALYSIS_QUERY;
       await runAndExit(() => runAnalyzeCommand({
@@ -173,6 +176,7 @@ function main(): void {
         analysisMode: parseAnalysisMode(opts.mode),
         codeAwareMode: codeAwareMode(opts.codeAware),
         codebaseIds: opts.codebaseId,
+        knowledgeSourceIds: opts.knowledgeSourceId,
       }));
     });
 

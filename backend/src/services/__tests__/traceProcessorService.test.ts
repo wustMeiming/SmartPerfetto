@@ -623,7 +623,7 @@ describe('PortPool - Unit Tests', () => {
 
   beforeEach(() => {
     // Create a small pool for testing
-    pool = new PortPool(9100, 9105); // Only 6 ports
+    pool = new PortPool(9100, 9105, () => true); // Only 6 ports
   });
 
   afterEach(() => {
@@ -637,6 +637,18 @@ describe('PortPool - Unit Tests', () => {
 
       const port2 = pool.allocate('trace-2');
       expect(port2).toBe(9101);
+    });
+
+    it('should skip a port already bound by another process', () => {
+      const probe = jest.fn((port: number) => port !== 9100);
+      const crossProcessPool = new PortPool(9100, 9102, probe);
+
+      expect(crossProcessPool.allocate('trace-cross-process')).toBe(9101);
+      expect(probe).toHaveBeenCalledWith(9100);
+      expect(probe).toHaveBeenCalledWith(9101);
+      expect(crossProcessPool.getStats().blocked).toBe(1);
+
+      crossProcessPool.releaseAll();
     });
 
     it('should return same port for same traceId', () => {

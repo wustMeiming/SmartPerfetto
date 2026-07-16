@@ -86,6 +86,8 @@ const CAMERA_FRAGMENTS: PerfettoConfigFragment[] = [
       binder_transaction: 'true',
       dma_heap_stat: 'true',
       ion_stat: 'true',
+      ion_heap_grow: 'true',
+      ion_heap_shrink: 'true',
     },
   },
   {

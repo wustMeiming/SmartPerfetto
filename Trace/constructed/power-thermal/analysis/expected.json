@@ -7,7 +7,7 @@
       "id": "execute-android_dvfs_counter_stats",
       "type": "skill",
       "target": "android_dvfs_counter_stats",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/android_dvfs_counter_stats.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -20,7 +20,7 @@
       "id": "execute-battery_charge_timeline",
       "type": "skill",
       "target": "battery_charge_timeline",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/battery_charge_timeline.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -33,7 +33,7 @@
       "id": "execute-battery_drain_attribution",
       "type": "skill",
       "target": "battery_drain_attribution",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/battery_drain_attribution.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -46,7 +46,7 @@
       "id": "execute-battery_drain_rate_summary",
       "type": "skill",
       "target": "battery_drain_rate_summary",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/battery_drain_rate_summary.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -67,7 +67,7 @@
       "id": "execute-mali_gpu_power_state",
       "type": "skill",
       "target": "mali_gpu_power_state",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/mali_gpu_power_state.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -80,7 +80,7 @@
       "id": "execute-power_consumption_overview",
       "type": "skill",
       "target": "power_consumption_overview",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/power_consumption_overview.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -93,7 +93,7 @@
       "id": "execute-power_module",
       "type": "skill",
       "target": "power_module",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/modules/hardware/power_module.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -106,7 +106,7 @@
       "id": "execute-power_rails_energy_breakdown",
       "type": "skill",
       "target": "power_rails_energy_breakdown",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/power_rails_energy_breakdown.skill.yaml",
       "parameters": {
         "top_n": 30
@@ -121,7 +121,7 @@
       "id": "execute-suspend_wakeup_analysis",
       "type": "skill",
       "target": "suspend_wakeup_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/suspend_wakeup_analysis.skill.yaml",
       "parameters": {
         "frequent_wakeup_critical": 50,
@@ -143,7 +143,7 @@
       "id": "execute-thermal_module",
       "type": "skill",
       "target": "thermal_module",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/modules/hardware/thermal_module.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -164,7 +164,7 @@
       "id": "execute-thermal_throttling",
       "type": "skill",
       "target": "thermal_throttling",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/thermal_throttling.skill.yaml",
       "parameters": {
         "enable_expert_probes": true,
@@ -189,7 +189,7 @@
       "id": "execute-thermal_throttling_chain",
       "type": "skill",
       "target": "thermal_throttling_chain",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/thermal_throttling_chain.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -202,7 +202,7 @@
       "id": "execute-wakeup_frequency_summary",
       "type": "skill",
       "target": "wakeup_frequency_summary",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/wakeup_frequency_summary.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -229,7 +229,7 @@
       "id": "execute-wattson_rails_power_breakdown",
       "type": "skill",
       "target": "wattson_rails_power_breakdown",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/wattson_rails_power_breakdown.skill.yaml",
       "parameters": {
         "top_n": 20
@@ -244,7 +244,7 @@
       "id": "execute-wattson_thread_power_attribution",
       "type": "skill",
       "target": "wattson_thread_power_attribution",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/wattson_thread_power_attribution.skill.yaml",
       "parameters": {
         "top_n": 30

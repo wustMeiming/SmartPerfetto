@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import {withFilesystemRegistryLock} from '../filesystemRegistryLock';
 
 const sodium = require('sodium-native') as {
   crypto_secretbox_easy: (ciphertext: Buffer, message: Buffer, nonce: Buffer, key: Buffer) => void;
@@ -200,7 +201,14 @@ function readOrCreateLocalDevMasterKey(dir: string): Buffer {
   const key = randomMasterKey();
   const keyPath = path.join(dir, '.master-key');
   fs.mkdirSync(dir, {recursive: true});
-  fs.writeFileSync(keyPath, encodeMasterKey(key), {mode: 0o600});
+  try {
+    fs.writeFileSync(keyPath, encodeMasterKey(key), {mode: 0o600, flag: 'wx'});
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    const concurrentlyCreated = readLegacyLocalMasterKey(dir);
+    if (!concurrentlyCreated) throw error;
+    return concurrentlyCreated;
+  }
   try { fs.chmodSync(keyPath, 0o600); } catch { /* Windows */ }
   return key;
 }
@@ -289,6 +297,10 @@ export class LocalEncryptedSecretStore {
     const file = this.readFile();
     const entry = file.entries[ref];
     if (!entry) return {};
+    return this.decryptEntry(entry);
+  }
+
+  private decryptEntry(entry: EncryptedSecretEntry): Record<string, string> {
     try {
       const ciphertext = Buffer.from(entry.ciphertext, 'base64');
       if (ciphertext.length < sodium.crypto_secretbox_MACBYTES) {
@@ -317,8 +329,12 @@ export class LocalEncryptedSecretStore {
   }
 
   rotate(ref: string, value?: Record<string, string>): number {
-    const next = value ?? this.get(ref);
-    return this.writeEncrypted(ref, next);
+    return withFilesystemRegistryLock(this.filePath, 'secret_store_busy', () => {
+      const file = this.readFileUnlocked(true);
+      const current = file.entries[ref];
+      const next = value ?? (current ? this.decryptEntry(current) : {});
+      return this.writeEncryptedUnlocked(file, ref, next);
+    });
   }
 
   getVersion(ref: string): number | undefined {
@@ -326,16 +342,26 @@ export class LocalEncryptedSecretStore {
   }
 
   delete(ref: string): boolean {
-    const file = this.readFile();
-    const existed = Object.prototype.hasOwnProperty.call(file.entries, ref);
-    if (!existed) return false;
-    delete file.entries[ref];
-    this.writeFile(file);
-    return true;
+    return withFilesystemRegistryLock(this.filePath, 'secret_store_busy', () => {
+      const file = this.readFileUnlocked(true);
+      const existed = Object.prototype.hasOwnProperty.call(file.entries, ref);
+      if (!existed) return false;
+      delete file.entries[ref];
+      this.writeFile(file);
+      return true;
+    });
   }
 
   private writeEncrypted(ref: string, value: Record<string, string>): number {
-    const file = this.readFile();
+    return withFilesystemRegistryLock(this.filePath, 'secret_store_busy', () =>
+      this.writeEncryptedUnlocked(this.readFileUnlocked(true), ref, value));
+  }
+
+  private writeEncryptedUnlocked(
+    file: EncryptedSecretFile,
+    ref: string,
+    value: Record<string, string>,
+  ): number {
     const previous = file.entries[ref];
     const version = (previous?.version ?? 0) + 1;
     file.entries[ref] = this.encryptEntry(
@@ -348,6 +374,14 @@ export class LocalEncryptedSecretStore {
   }
 
   private readFile(): EncryptedSecretFile {
+    return withFilesystemRegistryLock(
+      this.filePath,
+      'secret_store_busy',
+      () => this.readFileUnlocked(true),
+    );
+  }
+
+  private readFileUnlocked(persistMigration: boolean): EncryptedSecretFile {
     if (!fs.existsSync(this.filePath)) return emptySecretFile();
     try {
       const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf-8'));
@@ -356,12 +390,14 @@ export class LocalEncryptedSecretStore {
       }
       if (parsed && parsed.version === 1 && parsed.entries && typeof parsed.entries === 'object') {
         const migrated = this.migrateLegacyFile(parsed as LegacyEncryptedSecretFile);
-        this.writeFile(migrated);
+        if (persistMigration) this.writeFile(migrated);
         return migrated;
       }
-      return emptySecretFile();
-    } catch {
-      return emptySecretFile();
+      throw new Error('unsupported secret store schema');
+    } catch (error) {
+      throw new Error(
+        `secret_store_invalid_storage_requires_recovery:${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -402,7 +438,7 @@ export class LocalEncryptedSecretStore {
           entry.updatedAt,
         );
       } catch (err) {
-        console.warn('[LocalSecretStore] Failed to migrate legacy AES secret:', (err as Error).message);
+        throw new Error(`Failed to migrate legacy AES secret '${ref}': ${(err as Error).message}`);
       }
     }
     return migrated;
@@ -410,9 +446,13 @@ export class LocalEncryptedSecretStore {
 
   private writeFile(file: EncryptedSecretFile): void {
     fs.mkdirSync(this.dir, {recursive: true});
-    const tmp = `${this.filePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(file, null, 2), {mode: 0o600});
-    fs.renameSync(tmp, this.filePath);
+    const tmp = `${this.filePath}.tmp.${process.pid}.${crypto.randomUUID()}`;
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(file, null, 2), {mode: 0o600, flag: 'wx'});
+      fs.renameSync(tmp, this.filePath);
+    } finally {
+      try { fs.rmSync(tmp, {force: true}); } catch { /* best effort */ }
+    }
     try { fs.chmodSync(this.filePath, 0o600); } catch { /* Windows */ }
   }
 }

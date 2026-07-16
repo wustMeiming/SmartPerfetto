@@ -9,8 +9,10 @@ import type { DataEnvelope } from '../../types/dataContract';
 import {
   buildCompletedAnalysisResultSnapshot,
   persistCompletedAnalysisResultSnapshot,
+  resolveAnalysisResultSceneType,
 } from '../analysisResultSnapshotPipeline';
 import { ENTERPRISE_DB_PATH_ENV, openEnterpriseDb } from '../enterpriseDb';
+import {clearCodeAwareOutputGuards, registerCodeAwareCanary} from '../security/codeAwareOutputRegistry';
 
 const originalDbPath = process.env[ENTERPRISE_DB_PATH_ENV];
 const tmpDirs: string[] = [];
@@ -54,6 +56,13 @@ function envelope(): DataEnvelope {
 }
 
 describe('analysis result snapshot pipeline', () => {
+  test('resolves a canonical scene before private query projection', () => {
+    expect(resolveAnalysisResultSceneType('分析点击响应性能')).toBe('interaction');
+    expect(resolveAnalysisResultSceneType(
+      'Private source or knowledge analysis request (original content not persisted)',
+    )).toBe('general');
+  });
+
   test('builds a partial snapshot from completed run metadata', () => {
     const snapshot = buildCompletedAnalysisResultSnapshot({
       tenantId: 'tenant-a',
@@ -603,6 +612,92 @@ describe('analysis result snapshot pipeline', () => {
       });
     } finally {
       db.close();
+    }
+  });
+
+  test('persists only the projected private snapshot graph', () => {
+    useTempEnterpriseDb();
+    const sessionId = 'session-private-snapshot';
+    const canary = 'PRIVATE_SNAPSHOT_DB_CANARY';
+    registerCodeAwareCanary(sessionId, canary);
+    try {
+      const snapshot = persistCompletedAnalysisResultSnapshot({
+        tenantId: 'tenant-private',
+        workspaceId: 'workspace-private',
+        userId: 'user-private',
+        traceId: 'trace-private',
+        sessionId,
+        runId: 'run-private',
+        query: `query ${canary}`,
+        traceLabel: `label ${canary}`,
+        conclusion: `conclusion ${canary}`,
+        conclusionContract: {claims: [{statement: canary}]},
+        claimSupport: [{claimId: canary}] as any,
+        claimVerificationResult: {status: canary} as any,
+        identityResolutions: [{identityRefId: canary}] as any,
+        dataEnvelopes: [{
+          ...envelope(),
+          sql: `SELECT '${canary}'`,
+          meta: {
+            ...envelope().meta,
+            source: canary,
+            skillId: canary,
+            stepId: canary,
+            intent: canary,
+          },
+          data: {columns: ['leak'], rows: [[canary]], executableSql: `SELECT '${canary}'`},
+          display: {...envelope().display, title: `Title ${canary}`},
+        } as any],
+        terminationMessage: canary,
+        analysisReceipt: {
+          schemaVersion: 1,
+          runId: 'run-private',
+          sessionId,
+          traceId: 'trace-private',
+          mode: 'full',
+          resolvedMode: 'full',
+          providerId: null,
+          generatedAt: 1,
+          traceEvidence: {sqlCount: 0, skillCount: 0, dataEnvelopeCount: 0, artifactCount: 0, evidenceRefCount: 0},
+          nonEvidenceContext: {frontendPrequeryCount: 0, memoryHintCount: 0, conversationContextCount: 0, strategyHintCount: 0},
+          claimAudit: {totalClaims: 0, verifiedClaims: 0, unsupportedClaims: 0, uncertainClaims: 0},
+          qualityGates: {finalReportContract: 'passed', claimVerification: 'passed', identityResolution: 'passed'},
+          outputs: {reportError: canary, cliTurnPath: `/tmp/${canary}`},
+        },
+        uiActionProposals: [{title: canary}] as any,
+        privateKnowledge: true,
+        outputLanguage: 'en',
+        sceneType: 'startup',
+      });
+
+      expect(snapshot).not.toBeNull();
+      expect(JSON.stringify(snapshot)).not.toContain(canary);
+      expect(snapshot?.userQuery).toBe(
+        'Private source or knowledge analysis request (original content not persisted)',
+      );
+      expect(snapshot?.traceLabel).toBe('trace-private');
+      expect(snapshot?.sceneType).toBe('startup');
+
+      const db = openEnterpriseDb();
+      try {
+        const rows = db.prepare(`
+          SELECT user_query, trace_label, summary_json, conclusion_contract_json,
+                 claim_support_json, claim_verification_json, identity_resolutions_json
+          FROM analysis_result_snapshots
+          WHERE session_id = ?
+        `).all(sessionId);
+        const run = db.prepare('SELECT question FROM analysis_runs WHERE id = ?').get('run-private');
+        expect(JSON.stringify({rows, run})).not.toContain(canary);
+        expect(rows).toHaveLength(1);
+        expect((rows[0] as any).conclusion_contract_json).not.toBeNull();
+        expect((rows[0] as any).claim_support_json).not.toBeNull();
+        expect((rows[0] as any).claim_verification_json).not.toBeNull();
+        expect((rows[0] as any).identity_resolutions_json).not.toBeNull();
+      } finally {
+        db.close();
+      }
+    } finally {
+      clearCodeAwareOutputGuards(sessionId);
     }
   });
 });

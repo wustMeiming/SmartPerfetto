@@ -146,6 +146,60 @@ function mergeConnectionSecrets(
   };
 }
 
+const CUSTOM_HEADER_SECRET_PREFIX = 'custom-header:';
+const CUSTOM_ENV_SECRET_PREFIX = 'custom-env:';
+
+function splitProviderSecrets(provider: ProviderConfig): {
+  publicConnection: ProviderConnection;
+  publicCustom: ProviderConfig['custom'];
+  secrets: Record<string, string>;
+} {
+  const {publicConnection, secretConnection} = splitConnectionSecrets(provider.connection);
+  const secrets = {...secretConnection};
+  for (const [key, value] of Object.entries(provider.custom?.headers ?? {})) {
+    secrets[`${CUSTOM_HEADER_SECRET_PREFIX}${encodeURIComponent(key)}`] = value;
+  }
+  for (const [key, value] of Object.entries(provider.custom?.envOverrides ?? {})) {
+    secrets[`${CUSTOM_ENV_SECRET_PREFIX}${encodeURIComponent(key)}`] = value;
+  }
+  const publicCustom = provider.custom
+    ? {
+        ...(provider.custom.headers ? {headers: {}} : {}),
+        ...(provider.custom.envOverrides ? {envOverrides: {}} : {}),
+      }
+    : undefined;
+  return {publicConnection, publicCustom, secrets};
+}
+
+function mergeProviderSecrets(
+  publicConnection: ProviderConnection | undefined,
+  publicCustom: ProviderConfig['custom'],
+  secrets: Record<string, string>,
+): {connection: ProviderConnection; custom: ProviderConfig['custom']} {
+  const connectionSecrets: Record<string, string> = {};
+  const headers = {...(publicCustom?.headers ?? {})};
+  const envOverrides = {...(publicCustom?.envOverrides ?? {})};
+  for (const [key, value] of Object.entries(secrets)) {
+    if (key.startsWith(CUSTOM_HEADER_SECRET_PREFIX)) {
+      headers[decodeURIComponent(key.slice(CUSTOM_HEADER_SECRET_PREFIX.length))] = value;
+    } else if (key.startsWith(CUSTOM_ENV_SECRET_PREFIX)) {
+      envOverrides[decodeURIComponent(key.slice(CUSTOM_ENV_SECRET_PREFIX.length))] = value;
+    } else {
+      connectionSecrets[key] = value;
+    }
+  }
+  const hasCustom = publicCustom || Object.keys(headers).length > 0 || Object.keys(envOverrides).length > 0;
+  return {
+    connection: mergeConnectionSecrets(publicConnection, connectionSecrets),
+    custom: hasCustom
+      ? {
+          ...(Object.keys(headers).length > 0 ? {headers} : {}),
+          ...(Object.keys(envOverrides).length > 0 ? {envOverrides} : {}),
+        }
+      : undefined,
+  };
+}
+
 function providerSecretRef(scope: ResolvedProviderScope, providerId: string): string {
   return `secret:provider:${scope.tenantId}:${scope.workspaceId}:${scope.userId ?? '_workspace'}:${providerId}`;
 }
@@ -335,14 +389,14 @@ export class ProviderStore {
     const workspaceId = effectiveScope === 'org' ? null : resolved.workspaceId;
     const ownerUserId = effectiveScope === 'personal' ? resolved.userId : null;
     const secretRef = existing?.secret_ref ?? providerSecretRef(resolved, provider.id);
-    const { publicConnection, secretConnection } = splitConnectionSecrets(provider.connection);
-    const secretVersion = this.getSecretStore().put(secretRef, secretConnection);
+    const {publicConnection, publicCustom, secrets} = splitProviderSecrets(provider);
+    const secretVersion = this.getSecretStore().put(secretRef, secrets);
     const policy: ProviderPolicyJson = {
       category: provider.category,
       isActive: provider.isActive,
       connection: publicConnection,
       ...(provider.tuning ? { tuning: provider.tuning } : {}),
-      ...(provider.custom ? { custom: provider.custom } : {}),
+      ...(publicCustom ? {custom: publicCustom} : {}),
       secretVersion,
     };
 
@@ -524,8 +578,8 @@ export class ProviderStore {
       row,
       secretVersion: policy.secretVersion,
     });
-    const secretConnection = this.getSecretStore().get(row.secret_ref);
-    const connection = mergeConnectionSecrets(policy.connection, secretConnection);
+    const secrets = this.getSecretStore().get(row.secret_ref);
+    const {connection, custom} = mergeProviderSecrets(policy.connection, policy.custom, secrets);
     return {
       id: row.id,
       name: row.name,
@@ -541,7 +595,7 @@ export class ProviderStore {
       },
       connection,
       ...(policy.tuning ? { tuning: policy.tuning } : {}),
-      ...(policy.custom ? { custom: policy.custom } : {}),
+      ...(custom ? {custom} : {}),
     };
   }
 

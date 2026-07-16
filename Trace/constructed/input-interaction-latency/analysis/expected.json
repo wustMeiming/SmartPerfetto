@@ -15,7 +15,7 @@
       "id": "execute-battery_doze_state_timeline",
       "type": "skill",
       "target": "battery_doze_state_timeline",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/battery_doze_state_timeline.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -28,7 +28,7 @@
       "id": "execute-click_response_analysis",
       "type": "skill",
       "target": "click_response_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/click_response_analysis.skill.yaml",
       "parameters": {
         "slow_event_threshold_ms": 100,
@@ -50,7 +50,7 @@
       "id": "execute-click_response_detail",
       "type": "skill",
       "target": "click_response_detail",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/click_response_detail.skill.yaml",
       "parameters": {
         "event_ts": "${trace_start}",
@@ -69,7 +69,7 @@
       "id": "execute-device_state_timeline",
       "type": "skill",
       "target": "device_state_timeline",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/device_state_timeline.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -90,7 +90,7 @@
       "id": "execute-input_module",
       "type": "skill",
       "target": "input_module",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/modules/framework/input_module.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -103,7 +103,7 @@
       "id": "execute-main_thread_handler_callback_slices",
       "type": "skill",
       "target": "main_thread_handler_callback_slices",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/main_thread_handler_callback_slices.skill.yaml",
       "parameters": {
         "package": "",
@@ -122,7 +122,7 @@
       "id": "execute-navigation_analysis",
       "type": "skill",
       "target": "navigation_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/navigation_analysis.skill.yaml",
       "parameters": {
         "slow_navigation_ms": 400,
@@ -146,7 +146,7 @@
       "id": "execute-scene_reconstruction",
       "type": "skill",
       "target": "scene_reconstruction",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/scene_reconstruction.skill.yaml",
       "parameters": {
         "trace_id": 1
@@ -161,7 +161,7 @@
       "id": "execute-state_timeline",
       "type": "skill",
       "target": "state_timeline",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/state_timeline.skill.yaml",
       "parameters": {
         "trace_id": 1

@@ -32,6 +32,7 @@ import {
   recordCaseEvolutionWorkerPoll,
   recordCaseEvolutionWorkerRunning,
 } from './caseEvolutionRuntimeMetrics';
+import {caseCandidateKnowledgeScope} from './caseCandidateBuilder';
 
 export type CaseCandidateReviewExecutor =
   (candidate: LeasedCaseCandidate['candidate']) => Promise<CaseCandidateReviewExecutionResult>;
@@ -175,6 +176,15 @@ export class CaseEvolutionWorker {
   private async processJob(job: LeasedCaseCandidate): Promise<void> {
     this.stats.attempted += 1;
     try {
+      const knowledgeScope = caseCandidateKnowledgeScope(job.candidate);
+      if (!knowledgeScope) {
+        this.stats.rejected += 1;
+        this.outbox.markRejected(
+          job.candidateId,
+          'candidate is missing a valid immutable origin scope',
+        );
+        return;
+      }
       const result = await this.executeReview(job.candidate);
       if (!result.ok) {
         this.markTransientFailure(job, `${result.reason}: ${result.details}`);
@@ -238,6 +248,7 @@ export class CaseEvolutionWorker {
             graph: new CaseGraph(backendLogPath('case_graph.json')),
             ragStore: getDefaultRagStore(),
             sidecarRelativePath: notePath?.path,
+            knowledgeScope,
           });
           learnedCaseId = ingestResult.learnedCaseId;
         } catch (err) {

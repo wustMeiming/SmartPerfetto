@@ -30,6 +30,11 @@ copyFileRequired(
   path.join(distRoot, 'perfetto-recording-tools-pin.env'),
 );
 
+copyFileRequired(
+  path.join(backendRoot, 'src', 'agentRuntime', 'engines', 'opencode', 'openCodeMcpBridgeChild.cjs'),
+  path.join(distRoot, 'agentRuntime', 'engines', 'opencode', 'openCodeMcpBridgeChild.cjs'),
+);
+
 const catalog = yaml.load(
   fs.readFileSync(path.join(backendRoot, 'skills', 'pipelines', 'index.yaml'), 'utf8'),
 );

@@ -4,8 +4,11 @@
 
 import { EventEmitter } from 'events';
 import * as crypto from 'crypto';
+import type {ChildProcess} from 'child_process';
+import spawn from 'cross-spawn';
 import * as fs from 'fs';
 import * as net from 'net';
+import * as os from 'os';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import type {
@@ -59,8 +62,10 @@ import {
 import {
   createOpenCodeSnapshotEngineState,
   getOpenCodeSnapshotEngineState,
+  projectSessionFieldsForDurableSnapshot,
   type OpenCodeOpaqueState,
   type SessionFieldsForSnapshot,
+  sessionFieldsUsePrivateKnowledge,
   type SessionStateSnapshot,
 } from '../../../agentv3/sessionStateSnapshot';
 import type { McpToolDefinition } from '../../../agentv3/mcpToolRegistry';
@@ -69,31 +74,40 @@ import { RPC_ERROR_CODES } from '../../../agentv3/standaloneMcpServer';
 import {
   applyFinalResultQualityGate,
   hasDeliverableFinalReportHeading,
+  stripLeadingProcessNarrationFromFinalReport,
+  type FinalResultComparisonIdentity,
 } from '../../../services/finalResultQualityGate';
+import {resolveEffectiveAnalysisMode} from '../../../services/effectiveAnalysisMode';
+import {analysisContextUsesPrivateKnowledge} from '../../../services/resolvedAnalysisContext';
 import { verifyConclusion } from '../claude/claudeVerifier';
 import { getExtendedKnowledgeBase } from '../../../services/sqlKnowledgeBase';
 import { sanitizeCodeAwareText } from '../../../services/security/codeAwareOutputRegistry';
-import {projectPrivateKnowledgeToolResult} from '../../../services/rag/toolResultProjectionFilter';
+import { assessFinalReportContractCompleteness } from '../../../services/finalReportContractGate';
+import {projectToolResultForExternalSurface} from '../../../services/rag/toolResultProjectionFilter';
 import { getProviderService, type ProviderConfig, type ProviderScope } from '../../../services/providerManager';
+import {providerSubprocessEnv} from '../../../services/providerManager/envIsolation';
 import type { RuntimeSelection } from '../../runtimeSelection';
 import type { EngineCapabilities } from '../../runtimeDescriptorTypes';
 import type { RuntimeEngineDefinition, RuntimeFactoryInput } from '../../runtimeRegistry';
 import { createAnalysisRunSpec, type AnalysisRunSpec } from '../../analysisRunSpec';
-import { buildRuntimeTracePairComparisonContext } from '../../runtimePromptContext';
+import {
+  buildQuickConversationContext,
+  buildRuntimeTracePairComparisonContext,
+} from '../../runtimePromptContext';
 import {
   buildQuickRunReceipt,
   buildEntityContext,
   buildQuickMemoryContextPayload,
   captureSkillDisplayEntities,
   createRuntimeSkillNotesBudget,
-  isTruncationVerificationIssue,
+  findTruncationVerificationIssue,
   quickStopReasonFromTermination,
   repairTruncatedFinalReport,
   resolveQuickTurnBudget,
   shouldMarkQuickRunTriage,
   toProtocolHypothesis as toRuntimeProtocolHypothesis,
 } from '../../runtimeCommon';
-import { buildCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
+import { buildRuntimeCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
 import { resolveRuntimeQuickMode } from '../../quickModeResolution';
 import {
   buildRuntimeQuickEvidenceDirectAnswer,
@@ -114,10 +128,12 @@ import {
 } from '../../runtimeToolSpec';
 import { isTraceProcessorQueryCancelledError } from '../../../services/traceProcessorCancellation';
 import { backendDataPath } from '../../../runtimePaths';
+import {diagnosticLogIdentity} from '../../../utils/logger';
 import {
   EXPERIMENTAL_OPENCODE_RUNTIME_KIND,
   OPENCODE_RUNTIME_KIND,
 } from '../../runtimeKinds';
+import {getLruCacheEntry, setLruCacheEntry} from '../../runtimeCache';
 
 export type ExperimentalOpenCodeRuntimeKind = typeof EXPERIMENTAL_OPENCODE_RUNTIME_KIND;
 export type PublicOpenCodeRuntimeKind = typeof OPENCODE_RUNTIME_KIND;
@@ -176,7 +192,7 @@ type EnvLike = Record<string, string | undefined>;
 
 interface OpenCodeServerHandle {
   url: string;
-  close(): void;
+  close(): void | Promise<void>;
 }
 
 interface OpenCodeSdkResponse<T> {
@@ -193,6 +209,9 @@ interface OpenCodeModelRef {
 }
 
 interface OpenCodeClient {
+  mcp?: {
+    status(input?: { query?: { directory?: string } }): Promise<unknown>;
+  };
   session: {
     create(input: {
       body?: { title?: string };
@@ -232,7 +251,12 @@ interface OpenCodeInstance {
 }
 
 interface OpenCodeSdkModule {
-  createOpencode(options?: Record<string, unknown>): Promise<OpenCodeInstance>;
+  createOpencode?(options?: Record<string, unknown>): Promise<OpenCodeInstance>;
+  createOpencodeWithEnv?(
+    options: Record<string, unknown>,
+    processEnv: NodeJS.ProcessEnv,
+  ): Promise<OpenCodeInstance>;
+  createOpencodeClient?(options?: Record<string, unknown>): OpenCodeClient;
 }
 
 interface OpenCodeActiveSession {
@@ -282,6 +306,7 @@ interface OpenCodeAnalysisPreparation {
   hypotheses: Hypothesis[];
   uncertaintyFlags: UncertaintyFlag[];
   analysisRunSpec: AnalysisRunSpec;
+  comparisonIdentity?: FinalResultComparisonIdentity;
   quickMemoryContextCounts?: ReturnType<typeof buildQuickMemoryContextPayload>['counts'];
 }
 
@@ -413,8 +438,13 @@ export async function loadOpenCodeSdkModule(
     ? pathToFileURL(explicitModulePath).href
     : '@opencode-ai/sdk';
   const module = await importEsmModule(specifier) as Partial<OpenCodeSdkModule>;
-  if (typeof module.createOpencode !== 'function') {
-    throw new Error('OpenCode SDK module does not export createOpencode');
+  if (
+    typeof module.createOpencodeClient !== 'function' &&
+    typeof module.createOpencodeWithEnv !== 'function'
+  ) {
+    throw new Error(
+      'OpenCode SDK module must export createOpencodeClient or explicit createOpencodeWithEnv',
+    );
   }
   return module as OpenCodeSdkModule;
 }
@@ -609,18 +639,53 @@ function resolveOpenCodeBridgeCommand(env: EnvLike): string[] {
   const explicitCommand = parseCommandJson(env[OPENCODE_MCP_COMMAND_JSON_ENV]);
   if (explicitCommand) return explicitCommand;
 
-  const compiledChild = path.join(__dirname, 'openCodeMcpBridgeChild.js');
-  if (fs.existsSync(compiledChild)) {
-    return [process.execPath, compiledChild];
+  const child = path.join(__dirname, 'openCodeMcpBridgeChild.cjs');
+  if (!fs.existsSync(child)) {
+    throw new Error(`OpenCode MCP bridge child is unavailable: ${child}`);
   }
+  return [process.execPath, child];
+}
 
-  const tsChild = path.resolve(process.cwd(), 'src/agentRuntime/engines/opencode/openCodeMcpBridgeChild.ts');
-  const tsxBin = path.resolve(process.cwd(), 'node_modules/.bin/tsx');
-  return [tsxBin, tsChild];
+async function assertOpenCodeMcpReady(
+  client: OpenCodeClient,
+  projectDir: string,
+  getBridgeDiagnostics?: () => OpenCodeMcpBridgeDiagnostics,
+): Promise<void> {
+  if (!client.mcp?.status) return;
+  const statusMap = unwrapSdkData<Record<string, unknown>>(
+    await client.mcp.status({query: {directory: projectDir}}) as OpenCodeSdkResponse<Record<string, unknown>>,
+    'OpenCode MCP status',
+  );
+  const status = isRecord(statusMap[STANDALONE_MCP_NAME])
+    ? statusMap[STANDALONE_MCP_NAME]
+    : undefined;
+  if (status?.status === 'connected') return;
+  const reason = typeof status?.error === 'string'
+    ? status.error
+    : status?.status
+      ? `status=${String(status.status)}`
+      : 'status unavailable';
+  const bridgeDiagnostics = getBridgeDiagnostics?.();
+  const diagnostic = bridgeDiagnostics
+    ? ` (connections=${bridgeDiagnostics.connectionCount}, requests=${bridgeDiagnostics.requestCount}, lastMethod=${bridgeDiagnostics.lastMethod ?? 'none'}, lastError=${bridgeDiagnostics.lastError ?? 'none'})`
+    : '';
+  throw new Error(`OpenCode SmartPerfetto MCP bridge unavailable: ${reason}${diagnostic}`);
 }
 
 export const __testing = {
+  allocateCandidateOpenCodePort,
+  assertOpenCodeMcpReady,
+  createIsolatedOpenCodeProcessEnv,
+  createOpenCodeInstanceWithExplicitEnv,
   resolveOpenCodeBridgeCommand,
+  resolveOpenCodeCliPath,
+  startOpenCodeMcpBridge,
+  waitForOpenCodeServer,
+  windowsTaskkillArgs,
+  cleanupStaleEphemeralOpenCodeDirs: (now?: number) => {
+    staleEphemeralOpenCodeDirsCleaned = false;
+    cleanupStaleEphemeralOpenCodeDirs(now);
+  },
 };
 
 function createOpenCodeMcpToolNames(
@@ -748,8 +813,9 @@ export async function dispatchOpenCodeBridgeRequest(
           signal: options.getSignal?.(),
         }),
       );
-      const projected = projectPrivateKnowledgeToolResult(definition.name, result);
-      const resultText = summarizeOpenCodeToolResult(projected ?? result);
+      const resultText = summarizeOpenCodeToolResult(
+        projectToolResultForExternalSurface(definition.name, result),
+      );
       recordPlanOrPrePlanToolCall(options.analysisPlan, {
         toolName: definition.name,
         input: args,
@@ -789,7 +855,15 @@ export async function dispatchOpenCodeBridgeRequest(
 interface OpenCodeMcpBridgeHandle {
   port: number;
   token: string;
+  getDiagnostics(): OpenCodeMcpBridgeDiagnostics;
   close(): Promise<void>;
+}
+
+interface OpenCodeMcpBridgeDiagnostics {
+  connectionCount: number;
+  requestCount: number;
+  lastMethod?: string;
+  lastError?: string;
 }
 
 function startOpenCodeMcpBridge(
@@ -798,23 +872,43 @@ function startOpenCodeMcpBridge(
   options: OpenCodeBridgeDispatchOptions = {},
 ): Promise<OpenCodeMcpBridgeHandle> {
   const token = crypto.randomBytes(24).toString('hex');
+  const diagnostics: OpenCodeMcpBridgeDiagnostics = {
+    connectionCount: 0,
+    requestCount: 0,
+  };
   const server = net.createServer((socket) => {
+    diagnostics.connectionCount += 1;
     socket.setEncoding('utf-8');
+    socket.setTimeout(5_000, () => {
+      diagnostics.lastError = 'bridge_handshake_timeout';
+      socket.destroy();
+    });
     let buffer = '';
+    let bufferedBytes = 0;
     socket.on('data', (chunk: string) => {
       buffer += chunk;
+      bufferedBytes += Buffer.byteLength(chunk, 'utf8');
+      if (bufferedBytes > 64 * 1024) {
+        diagnostics.lastError = 'bridge_request_too_large';
+        socket.destroy();
+        return;
+      }
       const newline = buffer.indexOf('\n');
       if (newline < 0) return;
+      socket.setTimeout(0);
       const line = buffer.slice(0, newline);
       buffer = buffer.slice(newline + 1);
       void (async () => {
         try {
           const envelope = JSON.parse(line) as { token?: string; request?: JsonRpcRequest };
           if (envelope.token !== token || !envelope.request) {
+            diagnostics.lastError = 'invalid_bridge_request';
             socket.write(`${JSON.stringify(rpcError(null, RPC_ERROR_CODES.INVALID_REQUEST, 'Invalid bridge request'))}\n`);
             socket.end();
             return;
           }
+          diagnostics.requestCount += 1;
+          diagnostics.lastMethod = envelope.request.method;
           const response = await dispatchOpenCodeBridgeRequest(
             definitions,
             envelope.request,
@@ -824,6 +918,7 @@ function startOpenCodeMcpBridge(
           if (response) socket.write(`${JSON.stringify(response)}\n`);
           socket.end();
         } catch (error) {
+          diagnostics.lastError = error instanceof Error ? error.message : String(error);
           if (isTraceProcessorQueryCancelledError(error)) {
             socket.end();
             return;
@@ -848,6 +943,7 @@ function startOpenCodeMcpBridge(
       resolve({
         port: address.port,
         token,
+        getDiagnostics: () => ({...diagnostics}),
         close: () => new Promise<void>((closeResolve, closeReject) => {
           server.close(err => err ? closeReject(err) : closeResolve());
         }),
@@ -866,11 +962,15 @@ function ensureDirectory(dir: string): string {
   return dir;
 }
 
+function openCodeSessionRoot(sessionId: string): string {
+  return backendDataPath('agent-runtime', 'opencode', safeSessionPathSegment(sessionId));
+}
+
 function createDurableOpenCodeSessionDirs(
   sessionId: string,
   env: EnvLike,
 ): OpenCodeSessionDirs {
-  const root = backendDataPath('agent-runtime', 'opencode', safeSessionPathSegment(sessionId));
+  const root = openCodeSessionRoot(sessionId);
   const projectDir = env[OPENCODE_PROJECT_DIR_ENV]?.trim()
     ? path.resolve(env[OPENCODE_PROJECT_DIR_ENV]!.trim())
     : path.join(root, 'project');
@@ -879,6 +979,77 @@ function createDurableOpenCodeSessionDirs(
     homeDir: ensureDirectory(path.join(root, 'home')),
     configDir: ensureDirectory(path.join(root, 'config')),
   };
+}
+
+function createEphemeralOpenCodeSessionDirs(): OpenCodeSessionDirs & {ephemeralRoot: string} {
+  cleanupStaleEphemeralOpenCodeDirs();
+  const ephemeralRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'smartperfetto-opencode-private-'));
+  fs.writeFileSync(
+    path.join(ephemeralRoot, '.owner.json'),
+    JSON.stringify({pid: process.pid, createdAt: Date.now()}),
+    {encoding: 'utf8', mode: 0o600},
+  );
+  return {
+    ephemeralRoot,
+    projectDir: ensureDirectory(path.join(ephemeralRoot, 'project')),
+    homeDir: ensureDirectory(path.join(ephemeralRoot, 'home')),
+    configDir: ensureDirectory(path.join(ephemeralRoot, 'config')),
+  };
+}
+
+let staleEphemeralOpenCodeDirsCleaned = false;
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  if (pid === process.pid) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === 'EPERM';
+  }
+}
+
+function readEphemeralOpenCodeOwner(candidate: string): {pid: number; createdAt: number} | null {
+  try {
+    const raw = fs.readFileSync(path.join(candidate, '.owner.json'), 'utf8');
+    if (raw.length > 4096) return null;
+    const value = JSON.parse(raw) as {pid?: unknown; createdAt?: unknown};
+    if (!Number.isSafeInteger(value.pid) || Number(value.pid) <= 0) return null;
+    if (!Number.isFinite(value.createdAt) || Number(value.createdAt) <= 0) return null;
+    return {pid: Number(value.pid), createdAt: Number(value.createdAt)};
+  } catch {
+    return null;
+  }
+}
+
+function cleanupStaleEphemeralOpenCodeDirs(now = Date.now()): void {
+  if (staleEphemeralOpenCodeDirsCleaned) return;
+  staleEphemeralOpenCodeDirsCleaned = true;
+  const root = os.tmpdir();
+  const maxAgeMs = 24 * 60 * 60 * 1000;
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = fs.readdirSync(root, {withFileTypes: true});
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('smartperfetto-opencode-private-')) continue;
+    const candidate = path.join(root, entry.name);
+    try {
+      const stat = fs.statSync(candidate);
+      if (now - stat.mtimeMs < maxAgeMs) continue;
+      if (typeof process.getuid === 'function' && typeof stat.uid === 'number' && stat.uid !== process.getuid()) {
+        continue;
+      }
+      const owner = readEphemeralOpenCodeOwner(candidate);
+      if (owner && isProcessAlive(owner.pid)) continue;
+      fs.rmSync(candidate, {recursive: true, force: true});
+    } catch {
+      // Best-effort crash residue cleanup. Unknown failures preserve the directory.
+    }
+  }
 }
 
 function openCodeOpaqueDirsExist(opaque: OpenCodeOpaqueState): boolean {
@@ -908,32 +1079,284 @@ function createOpenCodeOpaqueState(
   };
 }
 
-let openCodeEnvLock: Promise<void> = Promise.resolve();
-
-async function withOpenCodeProcessEnv<T>(
-  dirs: Pick<OpenCodeSessionDirs, 'homeDir' | 'configDir'>,
-  task: () => Promise<T>,
-): Promise<T> {
-  const previousLock = openCodeEnvLock;
-  let releaseLock!: () => void;
-  openCodeEnvLock = new Promise<void>(resolve => {
-    releaseLock = resolve;
-  });
-  await previousLock;
-
-  const previousHome = process.env.HOME;
-  const previousConfigDir = process.env.OPENCODE_CONFIG_DIR;
-  try {
-    process.env.HOME = dirs.homeDir;
-    process.env.OPENCODE_CONFIG_DIR = dirs.configDir;
-    return await task();
-  } finally {
-    if (previousHome === undefined) delete process.env.HOME;
-    else process.env.HOME = previousHome;
-    if (previousConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
-    else process.env.OPENCODE_CONFIG_DIR = previousConfigDir;
-    releaseLock();
+function resolveOpenCodeCliPath(): string {
+  const packageJsonPath = require.resolve('opencode-ai/package.json');
+  const packageRoot = path.dirname(packageJsonPath);
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as {
+    bin?: string | Record<string, string>;
+  };
+  const relativeBin = typeof packageJson.bin === 'string'
+    ? packageJson.bin
+    : packageJson.bin?.opencode;
+  if (!relativeBin) throw new Error('opencode-ai package does not declare the opencode CLI');
+  const executable = path.resolve(packageRoot, relativeBin);
+  const relative = path.relative(packageRoot, executable);
+  if (relative.startsWith('..') || path.isAbsolute(relative) || !fs.existsSync(executable)) {
+    throw new Error('opencode-ai CLI path is unavailable or outside its package');
   }
+  return executable;
+}
+
+const OPENCODE_START_MAX_ATTEMPTS = 3;
+
+interface OpenCodeProcessIsolation {
+  env: NodeJS.ProcessEnv;
+  authorizationHeader: string;
+}
+
+interface OpenCodeSpawnOptions {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  stdio: ['ignore', 'pipe', 'pipe'];
+  windowsHide: boolean;
+}
+
+interface OpenCodeProcessDeps {
+  allocatePort?: (hostname: string) => Promise<number>;
+  spawnChild?: (
+    executable: string,
+    args: string[],
+    options: OpenCodeSpawnOptions,
+  ) => ChildProcess;
+}
+
+class OpenCodeServerStartError extends Error {
+  constructor(message: string, readonly portCollision: boolean) {
+    super(message);
+    this.name = 'OpenCodeServerStartError';
+  }
+}
+
+function isolatedOpenCodeDirectory(root: string, ...segments: string[]): string {
+  return ensureDirectory(path.join(root, ...segments));
+}
+
+function createIsolatedOpenCodeProcessEnv(
+  dirs: OpenCodeSessionDirs,
+  inheritedEnv: EnvLike,
+  config?: Record<string, unknown>,
+): OpenCodeProcessIsolation {
+  const username = `smartperfetto-${crypto.randomBytes(12).toString('hex')}`;
+  const password = crypto.randomBytes(32).toString('base64url');
+  const appData = isolatedOpenCodeDirectory(dirs.homeDir, 'AppData', 'Roaming');
+  const localAppData = isolatedOpenCodeDirectory(dirs.homeDir, 'AppData', 'Local');
+  const tempDir = isolatedOpenCodeDirectory(dirs.homeDir, 'tmp');
+  const env = {
+    ...providerSubprocessEnv(inheritedEnv),
+    HOME: dirs.homeDir,
+    USERPROFILE: dirs.homeDir,
+    XDG_DATA_HOME: isolatedOpenCodeDirectory(dirs.homeDir, 'xdg', 'data'),
+    XDG_STATE_HOME: isolatedOpenCodeDirectory(dirs.homeDir, 'xdg', 'state'),
+    XDG_CACHE_HOME: isolatedOpenCodeDirectory(dirs.homeDir, 'xdg', 'cache'),
+    XDG_CONFIG_HOME: dirs.configDir,
+    APPDATA: appData,
+    LOCALAPPDATA: localAppData,
+    TMPDIR: tempDir,
+    TMP: tempDir,
+    TEMP: tempDir,
+    OPENCODE_CONFIG_DIR: dirs.configDir,
+    OPENCODE_SERVER_USERNAME: username,
+    OPENCODE_SERVER_PASSWORD: password,
+    ...(config ? {OPENCODE_CONFIG_CONTENT: JSON.stringify(config)} : {}),
+  } as NodeJS.ProcessEnv;
+  return {
+    env,
+    authorizationHeader: `Basic ${Buffer.from(`${username}:${password}`, 'utf8').toString('base64')}`,
+  };
+}
+
+function allocateCandidateOpenCodePort(hostname: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const reservation = net.createServer();
+    reservation.unref();
+    reservation.once('error', reject);
+    reservation.listen(0, hostname, () => {
+      const address = reservation.address();
+      if (!address || typeof address === 'string') {
+        reservation.close();
+        reject(new Error('Unable to reserve an OpenCode server port'));
+        return;
+      }
+      const port = address.port;
+      reservation.close(error => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
+function isOpenCodePortCollision(error: unknown): boolean {
+  if (error instanceof OpenCodeServerStartError) return error.portCollision;
+  const candidate = error as {code?: unknown; message?: unknown};
+  return candidate?.code === 'EADDRINUSE' ||
+    /EADDRINUSE|address already in use|port is already in use/i.test(String(candidate?.message || ''));
+}
+
+async function createOpenCodeInstanceWithExplicitEnv(
+  sdk: OpenCodeSdkModule,
+  dirs: OpenCodeSessionDirs,
+  env: EnvLike,
+  options: Record<string, unknown>,
+  deps: OpenCodeProcessDeps = {},
+): Promise<OpenCodeInstance> {
+  const hostname = typeof options.hostname === 'string' ? options.hostname : '127.0.0.1';
+  const configuredPort = typeof options.port === 'number' && options.port > 0
+    ? options.port
+    : undefined;
+  const allocatePort = deps.allocatePort ?? allocateCandidateOpenCodePort;
+  const config = isRecord(options.config) ? options.config : {};
+  const isolation = createIsolatedOpenCodeProcessEnv(dirs, env, config);
+  if (!sdk.createOpencodeClient) {
+    if (!sdk.createOpencodeWithEnv) {
+      throw new Error('OpenCode adapter does not support explicit per-process environment isolation');
+    }
+    for (let attempt = 1; attempt <= (configuredPort ? 1 : OPENCODE_START_MAX_ATTEMPTS); attempt += 1) {
+      const port = configuredPort ?? await allocatePort(hostname);
+      try {
+        return await sdk.createOpencodeWithEnv({...options, port}, isolation.env);
+      } catch (error) {
+        if (configuredPort || attempt === OPENCODE_START_MAX_ATTEMPTS || !isOpenCodePortCollision(error)) {
+          throw error;
+        }
+      }
+    }
+    throw new Error('OpenCode server failed to start after port collision retries');
+  }
+  const timeout = typeof options.timeout === 'number' ? options.timeout : DEFAULT_SERVER_TIMEOUT_MS;
+  const spawnChild = deps.spawnChild ?? ((executable, args, spawnOptions) => (
+    spawn(executable, args, spawnOptions) as ChildProcess
+  ));
+  for (let attempt = 1; attempt <= (configuredPort ? 1 : OPENCODE_START_MAX_ATTEMPTS); attempt += 1) {
+    const port = configuredPort ?? await allocatePort(hostname);
+    const args = ['serve', `--hostname=${hostname}`, `--port=${port}`];
+    if (typeof config.logLevel === 'string') args.push(`--log-level=${config.logLevel}`);
+    const child = spawnChild(resolveOpenCodeCliPath(), args, {
+      cwd: dirs.projectDir,
+      env: isolation.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    try {
+      const url = await waitForOpenCodeServer(child, timeout);
+      const client = sdk.createOpencodeClient({
+        baseUrl: url,
+        headers: {Authorization: isolation.authorizationHeader},
+      });
+      return {
+        client,
+        server: {url, close: () => terminateOpenCodeChild(child)},
+      };
+    } catch (error) {
+      await terminateOpenCodeChild(child);
+      if (configuredPort || attempt === OPENCODE_START_MAX_ATTEMPTS || !isOpenCodePortCollision(error)) {
+        throw error;
+      }
+    }
+  }
+  throw new Error('OpenCode server failed to start after port collision retries');
+}
+
+function waitForOpenCodeServer(child: ChildProcess, timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const maxStartupOutputChars = 64 * 1024;
+    let output = '';
+    let settled = false;
+    let timer: NodeJS.Timeout;
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      child.removeListener('error', onError);
+      child.removeListener('exit', onExit);
+      child.stdout?.removeListener('data', inspect);
+      child.stderr?.removeListener('data', inspect);
+    };
+    const finish = (error?: Error, url?: string): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else {
+        // The long-lived server keeps stdout/stderr piped. Continue draining
+        // both streams after startup without retaining provider/private logs,
+        // otherwise a full OS pipe buffer can deadlock the child.
+        child.stdout?.resume();
+        child.stderr?.resume();
+        resolve(url!);
+      }
+    };
+    const inspect = (chunk: Buffer | string): void => {
+      output = `${output}${chunk.toString()}`.slice(-maxStartupOutputChars);
+      for (const line of output.split(/\r?\n/)) {
+        const match = line.match(/opencode server listening.*on\s+(https?:\/\/[^\s]+)/);
+        if (match) finish(undefined, match[1]);
+      }
+    };
+    const onError = (error: Error): void => finish(new OpenCodeServerStartError(
+      error.message,
+      isOpenCodePortCollision(error),
+    ));
+    const onExit = (code: number | null): void => finish(new OpenCodeServerStartError(
+      `OpenCode server exited code=${code ?? 'unknown'} ${diagnosticLogIdentity(output, {domain: 'opencode_process', code: 'process_exit'})}`,
+      /EADDRINUSE|address already in use|port is already in use/i.test(output),
+    ));
+    child.stdout?.on('data', inspect);
+    child.stderr?.on('data', inspect);
+    child.once('error', onError);
+    child.once('exit', onExit);
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const timeoutError = new Error(
+        `OpenCode server start timeout after ${timeoutMs}ms ${diagnosticLogIdentity(output, {domain: 'opencode_process', code: 'start_timeout'})}`,
+      );
+      void terminateOpenCodeChild(child).then(() => reject(timeoutError), () => reject(timeoutError));
+    }, timeoutMs);
+  });
+}
+
+function windowsTaskkillArgs(pid: number): string[] {
+  return ['/PID', String(pid), '/T', '/F'];
+}
+
+async function terminateWindowsProcessTree(pid: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const killer = spawn('taskkill', windowsTaskkillArgs(pid), {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    killer.once('error', reject);
+    killer.once('exit', code => {
+      if (code === 0) resolve();
+      else reject(new Error(`taskkill exited with code ${code ?? 'unknown'}`));
+    });
+  });
+}
+
+async function terminateOpenCodeChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === 'win32' && child.pid) {
+    try {
+      await terminateWindowsProcessTree(child.pid);
+    } catch {
+      // Best-effort fallback for an already-exited/unavailable taskkill. The
+      // primary Windows path above always targets the complete process tree.
+      child.kill();
+    }
+    return;
+  }
+  child.kill('SIGTERM');
+  await new Promise<void>(resolve => {
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      const forceTimer = setTimeout(resolve, 500);
+      child.once('exit', () => {
+        clearTimeout(forceTimer);
+        resolve();
+      });
+    }, 2_000);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {
@@ -1207,13 +1630,14 @@ function isOpenCodeAssistantMessageComplete(message: Record<string, unknown> | u
   return typeof time?.completed === 'number';
 }
 
-function isOpenCodeSessionIdle(statusResponse: unknown, sessionId: string): boolean {
-  if (!isRecord(statusResponse)) return false;
+type OpenCodeSessionStatus = 'idle' | 'active' | 'unknown';
+
+function getOpenCodeSessionStatus(statusResponse: unknown, sessionId: string): OpenCodeSessionStatus {
+  if (!isRecord(statusResponse)) return 'unknown';
   const statusMap = isRecord(statusResponse.data) ? statusResponse.data : statusResponse;
   const directStatus = isRecord(statusMap[sessionId]) ? statusMap[sessionId] : undefined;
-  if (directStatus) return directStatus.type === 'idle';
-  const statuses = Object.values(statusMap).filter(isRecord);
-  return statuses.length > 0 && statuses.every(status => status.type === 'idle');
+  if (!directStatus || typeof directStatus.type !== 'string') return 'unknown';
+  return directStatus.type === 'idle' ? 'idle' : 'active';
 }
 
 function delay(ms: number): Promise<void> {
@@ -1262,21 +1686,25 @@ export async function runOpenCodePrompt(
       );
       const currentTurnMessagesResponse = openCodeAssistantMessagesResponse(newAssistantMessages);
       const latestAssistant = newAssistantMessages[newAssistantMessages.length - 1];
-      if (isOpenCodeAssistantMessageComplete(latestAssistant)) {
-        return { messagesResponse: currentTurnMessagesResponse };
-      }
+      const latestAssistantComplete = isOpenCodeAssistantMessageComplete(latestAssistant);
       if (opencode.client.session.status) {
         const statusResponse = await opencode.client.session.status({
           query: { directory: projectDir },
         });
         if (isAborted?.()) throw new Error('OpenCode prompt aborted');
         assertSdkSuccess(statusResponse, 'OpenCode session status');
+        const sessionStatus = getOpenCodeSessionStatus(statusResponse, sessionId);
         if (
-          isOpenCodeSessionIdle(statusResponse, sessionId) &&
+          sessionStatus === 'idle' &&
           extractOpenCodeAssistantText(currentTurnMessagesResponse)
         ) {
           return { messagesResponse: currentTurnMessagesResponse };
         }
+        if (sessionStatus === 'unknown' && latestAssistantComplete) {
+          return { messagesResponse: currentTurnMessagesResponse };
+        }
+      } else if (latestAssistantComplete) {
+        return { messagesResponse: currentTurnMessagesResponse };
       }
     }
     throw new Error(`OpenCode prompt timed out after ${timeoutMs}ms`);
@@ -1341,6 +1769,10 @@ export function completeOpenCodeFinalReportPhaseIfDelivered(
   return phase;
 }
 
+export function sanitizeOpenCodeConclusionText(conclusion: string): string {
+  return stripLeadingProcessNarrationFromFinalReport(conclusion);
+}
+
 function formatIncompletePlanMessage(
   status: { pending: string[]; evidenceGaps?: AnalysisPlanCompletionStatus['evidenceGaps'] },
   outputLanguage: string,
@@ -1398,10 +1830,16 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     });
   }
 
-  private resolveSessionDirs(sessionId: string): {
+  private resolveSessionDirs(sessionId: string, privateKnowledge = false): {
     dirs: OpenCodeSessionDirs;
     restoredOpenCodeSessionId?: string;
+    ephemeralRoot?: string;
   } {
+    if (privateKnowledge) {
+      this.sessionOpaqueStates.delete(sessionId);
+      const ephemeral = createEphemeralOpenCodeSessionDirs();
+      return {dirs: ephemeral, ephemeralRoot: ephemeral.ephemeralRoot};
+    }
     const restored = this.sessionOpaqueStates.get(sessionId);
     if (restored?.degradedReason) {
       this.emitOpenCodeStateDegraded(restored.degradedReason);
@@ -1430,7 +1868,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     dirs: OpenCodeSessionDirs,
     options: Record<string, unknown>,
   ): Promise<OpenCodeInstance> {
-    return withOpenCodeProcessEnv(dirs, () => sdk.createOpencode(options));
+    return createOpenCodeInstanceWithExplicitEnv(sdk, dirs, this.env, options);
   }
 
   private async canReuseOpenCodeSession(
@@ -1484,6 +1922,10 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     traceId: string,
     options?: AnalysisOptions,
   ): Promise<AnalysisResult> {
+    options = {
+      ...(options ?? {}),
+      analysisMode: resolveEffectiveAnalysisMode(options?.analysisMode, options ?? {}),
+    };
     if (
       this.selection.kind === OPENCODE_RUNTIME_KIND ||
       truthyEnv(this.env[OPENCODE_REAL_ANALYSIS_ENV])
@@ -1499,7 +1941,11 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     });
 
     const sdk = await this.moduleLoader(this.env);
-    const { dirs, restoredOpenCodeSessionId } = this.resolveSessionDirs(sessionId);
+    const privateKnowledge = analysisContextUsesPrivateKnowledge(options ?? {});
+    const {dirs, restoredOpenCodeSessionId, ephemeralRoot} = this.resolveSessionDirs(
+      sessionId,
+      privateKnowledge,
+    );
     const port = numericEnv(this.env[OPENCODE_SERVER_PORT_ENV]);
     const timeout = numericEnv(this.env[OPENCODE_SERVER_TIMEOUT_MS_ENV]) ?? DEFAULT_SERVER_TIMEOUT_MS;
 
@@ -1542,13 +1988,14 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
         },
       }), 'OpenCode hidden prompt');
     } finally {
-      if (activeSession) {
+      if (activeSession && !privateKnowledge) {
         this.sessionOpaqueStates.set(sessionId, createOpenCodeOpaqueState(
           activeSession.openCodeSessionId,
           dirs,
         ));
       }
       await this.closeSessionHandle(sessionId, activeSession);
+      if (ephemeralRoot) fs.rmSync(ephemeralRoot, {recursive: true, force: true});
     }
 
     const duration = Date.now() - startedAt;
@@ -1586,7 +2033,8 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     options: AnalysisOptions,
   ): Promise<AnalysisResult> {
     const startedAt = Date.now();
-    const outputLanguage = parseOutputLanguage(this.env.SMARTPERFETTO_OUTPUT_LANGUAGE);
+    const outputLanguage = options.outputLanguage
+      ?? parseOutputLanguage(this.env.SMARTPERFETTO_OUTPUT_LANGUAGE);
     const sceneType = classifyScene(query);
     const sessionContext = sessionContextManager.getOrCreate(sessionId, traceId);
     const previousTurns = sessionContext.getAllTurns?.() || [];
@@ -1681,7 +2129,11 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
         analysisPlan: prep.quickMode ? undefined : prep.analysisPlan,
       },
     );
-    const { dirs, restoredOpenCodeSessionId } = this.resolveSessionDirs(sessionId);
+    const privateKnowledge = analysisContextUsesPrivateKnowledge(options);
+    const {dirs, restoredOpenCodeSessionId, ephemeralRoot} = this.resolveSessionDirs(
+      sessionId,
+      privateKnowledge,
+    );
     const port = numericEnv(this.env[OPENCODE_SERVER_PORT_ENV]);
     const timeout = numericEnv(this.env[OPENCODE_SERVER_TIMEOUT_MS_ENV]) ?? DEFAULT_SERVER_TIMEOUT_MS;
     const promptTimeout = numericEnv(this.env[OPENCODE_PROMPT_TIMEOUT_MS_ENV]) ?? DEFAULT_PROMPT_TIMEOUT_MS;
@@ -1701,6 +2153,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
           modelConfig,
         ),
       });
+      await assertOpenCodeMcpReady(opencode.client, dirs.projectDir, () => bridge.getDiagnostics());
       activeSession = {
         server: opencode.server,
         client: opencode.client,
@@ -1759,19 +2212,20 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       promptResponse = promptResult.promptResponse;
       messagesResponse = promptResult.messagesResponse;
     } finally {
-      if (activeSession) {
+      if (activeSession && !privateKnowledge) {
         this.sessionOpaqueStates.set(sessionId, createOpenCodeOpaqueState(
           activeSession.openCodeSessionId,
           dirs,
         ));
       }
       await this.closeSessionHandle(sessionId, activeSession);
+      if (ephemeralRoot) fs.rmSync(ephemeralRoot, {recursive: true, force: true});
     }
 
-    let conclusion = extractOpenCodeAssistantText(messagesResponse)
+    let conclusion = sanitizeOpenCodeConclusionText(extractOpenCodeAssistantText(messagesResponse)
       || extractOpenCodeAssistantText(promptResponse)
-      || 'OpenCode runtime completed without assistant text.';
-    if (options.codeAwareMode && options.codeAwareMode !== 'off') {
+      || 'OpenCode runtime completed without assistant text.');
+    if (analysisContextUsesPrivateKnowledge(options)) {
       conclusion = sanitizeCodeAwareText(sessionId, conclusion);
     }
 
@@ -1868,15 +2322,26 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
         outputLanguage: prep.analysisRunSpec.outputLanguage,
         query,
         emitIssueProgress: false,
+        allowPersistentLearning: !analysisContextUsesPrivateKnowledge(options),
       });
       let verification = await verifyCurrentConclusion();
       let verificationIssue = [
         ...verification.heuristicIssues,
         ...(verification.llmIssues || []),
       ].find(issue => issue.severity === 'error');
+      const contractIssue = assessFinalReportContractCompleteness({
+        conclusion: result.conclusion,
+        query,
+        sceneType: prep.sceneType,
+        caseRecommendations: result.conclusionContract?.caseRecommendations,
+      });
+      const truncationIssue = findTruncationVerificationIssue([
+        ...verification.heuristicIssues,
+        ...(verification.llmIssues || []),
+      ].filter(issue => issue.severity === 'error'));
       if (
         verificationIssue &&
-        isTruncationVerificationIssue(verificationIssue) &&
+        (truncationIssue || Boolean(contractIssue?.missingSections.length)) &&
         planStatus.complete
       ) {
         const repairedConclusion = repairTruncatedFinalReport({
@@ -1884,19 +2349,29 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
           plan: prep.analysisPlan.current,
           hypotheses: prep.hypotheses,
           outputLanguage: prep.analysisRunSpec.outputLanguage,
+          recoveryKind: truncationIssue ? 'truncation' : 'missing_contract',
+          missingContractSections: contractIssue?.missingSections,
         });
         if (repairedConclusion) {
+          const preRecoveryConfidence = result.confidence;
           result.conclusion = repairedConclusion;
           result.findings = extractFindingsFromText(repairedConclusion);
-          result.confidence = estimateConfidence(result.findings, false);
+          result.confidence = Math.min(
+            preRecoveryConfidence,
+            estimateConfidence(result.findings, Boolean(result.partial)),
+          );
           this.emitUpdate({
             type: 'progress',
             content: {
               phase: 'concluding',
               message: localize(
                 prep.analysisRunSpec.outputLanguage,
-                '最终报告输出被截断，已基于结构化证据补齐收尾并重新验证。',
-                'The final report output was truncated; it was closed from structured evidence and re-verified.',
+                truncationIssue
+                  ? '最终报告输出被截断，已基于结构化证据补齐收尾并重新验证。'
+                  : '最终报告缺少必需结构，已基于完成阶段的证据补齐并重新验证。',
+                truncationIssue
+                  ? 'The final report output was truncated; it was closed from structured evidence and re-verified.'
+                  : 'The final report missed required structure; it was completed from finished-phase evidence and re-verified.',
               ),
             },
             timestamp: Date.now(),
@@ -1928,7 +2403,12 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     }
 
     const wasPartialBeforeQualityGate = result.partial === true;
-    const gateIssue = applyFinalResultQualityGate({ result, query, sceneType: prep.sceneType });
+    const gateIssue = applyFinalResultQualityGate({
+      result,
+      query,
+      sceneType: prep.sceneType,
+      comparisonIdentity: prep.comparisonIdentity,
+    });
     if (gateIssue && !wasPartialBeforeQualityGate) {
       result.confidence = estimateConfidence(result.findings, true);
       this.emitUpdate({
@@ -2102,7 +2582,8 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     traceId: string,
     options: AnalysisOptions,
   ): Promise<OpenCodeAnalysisPreparation> {
-    const outputLanguage = parseOutputLanguage(this.env.SMARTPERFETTO_OUTPUT_LANGUAGE);
+    const outputLanguage = options.outputLanguage
+      ?? parseOutputLanguage(this.env.SMARTPERFETTO_OUTPUT_LANGUAGE);
     const sceneType = classifyScene(query);
     const sessionContext = sessionContextManager.getOrCreate(sessionId, traceId);
     const previousTurns = sessionContext.getAllTurns?.() || [];
@@ -2138,7 +2619,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     skillExecutor.registerSkills(skillRegistry.getAllSkills());
     skillExecutor.setFragmentRegistry(skillRegistry.getFragmentCache());
 
-    let architecture = this.architectureCache.get(traceId);
+    let architecture = getLruCacheEntry(this.architectureCache, traceId);
     if (!architecture && !quickResolution.skipTracePreflightDetection) {
       try {
         architecture = await createArchitectureDetector().detect({
@@ -2146,7 +2627,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
           traceProcessorService: this.input.traceProcessorService,
           packageName: effectivePackageName,
         });
-        if (architecture) this.architectureCache.set(traceId, architecture);
+        if (architecture) setLruCacheEntry(this.architectureCache, traceId, architecture);
       } catch (err) {
         console.warn('[OpenCodeRuntime] Architecture detection failed:', (err as Error).message);
       }
@@ -2209,9 +2690,12 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     uncertaintyFlags.splice(0);
 
     const knowledgeScope = analysisRunSpec.scopes.knowledge;
-    const recentSqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope);
+    const privateAnalysisContext = analysisContextUsesPrivateKnowledge(options);
+    const recentSqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope, options);
     const skillNotesBudget = createRuntimeSkillNotesBudget(quickMode);
-    const comparisonContext = buildRuntimeTracePairComparisonContext({
+    const comparisonContext = await buildRuntimeTracePairComparisonContext({
+      traceProcessorService: this.input.traceProcessorService,
+      currentTraceId: traceId,
       ...(options.referenceTraceId ? { referenceTraceId: options.referenceTraceId } : {}),
       ...(options.tracePairContext ? { tracePairContext: options.tracePairContext } : {}),
     });
@@ -2242,6 +2726,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
       knowledgeSourceIds: options.knowledgeSourceIds,
+      analysisContextFingerprint: options.analysisContextFingerprint,
       referenceTraceId: options.referenceTraceId,
       ...(comparisonContext ? { comparisonContext } : {}),
     });
@@ -2258,10 +2743,24 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     });
 
     if (quickMode) {
+      const quickConversationContext = buildQuickConversationContext(previousTurns, outputLanguage);
+      if (quickConversationContext) {
+        prompt = `${quickConversationContext}\n\n${prompt}`;
+      }
       const quickMemoryPayload = buildQuickMemoryContextPayload({
-        patternContext: buildPatternContextSection(traceFeatures, knowledgeScope),
-        negativePatternContext: buildNegativePatternSection(traceFeatures, knowledgeScope),
-        caseBackgroundContext: buildCaseBackgroundContext(sceneType, architecture?.type, knowledgeScope),
+        patternContext: privateAnalysisContext
+          ? undefined
+          : buildPatternContextSection(traceFeatures, knowledgeScope),
+        negativePatternContext: privateAnalysisContext
+          ? undefined
+          : buildNegativePatternSection(traceFeatures, knowledgeScope),
+        caseBackgroundContext: buildRuntimeCaseBackgroundContext({
+          sceneType,
+          architectureType: architecture?.type,
+          knowledgeScope,
+          outputLanguage,
+          privateAnalysisContext,
+        }),
         sqlErrorFixPairs: recentSqlErrors,
         recentSqlResultsContext: sessionContext.generateRecentSqlResultPromptContext(3),
         outputLanguage,
@@ -2324,14 +2823,19 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
           errorMessage: entry.errorMessage,
           fixedSql: entry.fixedSql,
         })),
-      patternContext: buildPatternContextSection(
-        traceFeatures,
+      patternContext: privateAnalysisContext
+        ? undefined
+        : buildPatternContextSection(traceFeatures, knowledgeScope),
+      negativePatternContext: privateAnalysisContext
+        ? undefined
+        : buildNegativePatternSection(traceFeatures, knowledgeScope),
+      caseBackgroundContext: buildRuntimeCaseBackgroundContext({
+        sceneType,
+        architectureType: architecture?.type,
         knowledgeScope,
-      ),
-      negativePatternContext: buildNegativePatternSection(
-        traceFeatures,
-        knowledgeScope,
-      ),
+        outputLanguage,
+        privateAnalysisContext,
+      }),
       previousPlan,
       planHistory: analysisPlan.history.length > 0 ? analysisPlan.history : undefined,
       selectionContext: options.selectionContext,
@@ -2365,6 +2869,12 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       hypotheses,
       uncertaintyFlags,
       analysisRunSpec,
+      ...(comparisonContext ? {
+        comparisonIdentity: {
+          currentPackageName: effectivePackageName,
+          referencePackageName: comparisonContext.referencePackageName,
+        },
+      } : {}),
     };
   }
 
@@ -2372,6 +2882,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     this.currentSessionId = undefined;
     void this.abortAllSessions();
     this.sessionOpaqueStates.clear();
+    this.architectureCache.clear();
     this.removeAllListeners();
   }
 
@@ -2383,6 +2894,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     this.sessionHypotheses.delete(sessionId);
     this.sessionUncertaintyFlags.delete(sessionId);
     this.sessionOpaqueStates.delete(sessionId);
+    fs.rmSync(openCodeSessionRoot(sessionId), {recursive: true, force: true});
   }
 
   async abortSession(sessionId: string): Promise<void> {
@@ -2395,16 +2907,16 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
         path: { id: handle.openCodeSessionId },
       }).catch(() => undefined);
     }
-    handle.server?.close();
+    await Promise.resolve(handle.server?.close()).catch(() => undefined);
     await handle.closeBridge?.().catch(() => undefined);
   }
 
   restoreArchitectureCache(traceId: string, architecture: ArchitectureInfo): void {
-    this.architectureCache.set(traceId, architecture);
+    setLruCacheEntry(this.architectureCache, traceId, architecture);
   }
 
   getCachedArchitecture(traceId: string): ArchitectureInfo | undefined {
-    return this.architectureCache.get(traceId);
+    return getLruCacheEntry(this.architectureCache, traceId);
   }
 
   getSessionNotes(sessionId: string): AnalysisNote[] {
@@ -2424,6 +2936,8 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     traceId: string,
     sessionFields: SessionFieldsForSnapshot,
   ): SessionStateSnapshot {
+    const privateKnowledge = sessionFieldsUsePrivateKnowledge(sessionFields);
+    const durableFields = projectSessionFieldsForDurableSnapshot(sessionFields);
     const planState = this.sessionPlans.get(sessionId);
     const artifactStore = this.artifactStores.get(sessionId);
     const activeSession = this.activeSessions.get(sessionId);
@@ -2441,21 +2955,23 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
         : createDurableOpenCodeSessionDirs(sessionId, this.env);
       activeOpaque = createOpenCodeOpaqueState(activeSession.openCodeSessionId, activeDirs);
     }
-    const opaque = this.sessionOpaqueStates.get(sessionId)
-      ?? activeOpaque
-      ?? { version: 1, degradedReason: 'state_unavailable' as const };
+    const opaque = privateKnowledge
+      ? undefined
+      : this.sessionOpaqueStates.get(sessionId)
+        ?? activeOpaque
+        ?? {version: 1, degradedReason: 'state_unavailable' as const};
     return {
       version: 1,
       snapshotTimestamp: Date.now(),
       sessionId,
       traceId,
-      ...sessionFields,
-      analysisNotes: this.sessionNotes.get(sessionId) || [],
-      analysisPlan: planState?.current ?? null,
-      planHistory: planState?.history ?? [],
-      uncertaintyFlags: this.sessionUncertaintyFlags.get(sessionId) || [],
-      claudeHypotheses: this.sessionHypotheses.get(sessionId) || undefined,
-      architecture: this.architectureCache.get(traceId),
+      ...durableFields,
+      analysisNotes: privateKnowledge ? [] : this.sessionNotes.get(sessionId) || [],
+      analysisPlan: privateKnowledge ? null : planState?.current ?? null,
+      planHistory: privateKnowledge ? [] : planState?.history ?? [],
+      uncertaintyFlags: privateKnowledge ? [] : this.sessionUncertaintyFlags.get(sessionId) || [],
+      claudeHypotheses: privateKnowledge ? undefined : this.sessionHypotheses.get(sessionId) || undefined,
+      architecture: getLruCacheEntry(this.architectureCache, traceId),
       engineState: createOpenCodeSnapshotEngineState({
         providerId: sessionFields.agentRuntimeProviderId,
         providerSnapshotHash: sessionFields.agentRuntimeProviderSnapshotHash,
@@ -2464,7 +2980,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       agentRuntimeKind: OPENCODE_RUNTIME_KIND,
       agentRuntimeProviderId: sessionFields.agentRuntimeProviderId,
       agentRuntimeProviderSnapshotHash: sessionFields.agentRuntimeProviderSnapshotHash,
-      artifacts: artifactStore?.serialize(),
+      artifacts: privateKnowledge ? undefined : artifactStore?.serialize(),
     };
   }
 
@@ -2485,7 +3001,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
       this.sessionUncertaintyFlags.set(sessionId, [...snapshot.uncertaintyFlags]);
     }
     if (snapshot.architecture) {
-      this.architectureCache.set(traceId, snapshot.architecture);
+      setLruCacheEntry(this.architectureCache, traceId, snapshot.architecture);
     }
     if (snapshot.artifacts) {
       try {
@@ -2507,7 +3023,7 @@ export class OpenCodeRuntime extends EventEmitter implements IOrchestrator {
     if (!handle) return;
     if (this.currentServer === handle.server) this.currentServer = undefined;
     if (this.currentSessionId === handle.openCodeSessionId) this.currentSessionId = undefined;
-    handle.server?.close();
+    await Promise.resolve(handle.server?.close()).catch(() => undefined);
     await handle.closeBridge?.().catch(() => undefined);
     if (this.activeSessions.get(sessionId) === handle) {
       this.activeSessions.delete(sessionId);

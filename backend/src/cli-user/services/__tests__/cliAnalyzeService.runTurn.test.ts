@@ -28,19 +28,26 @@ const mockRunClaimVerification = jest.fn((_input: unknown): any => ({
   },
   identityResolutions: [],
 }));
+const mockCodebaseGet = jest.fn();
+const mockKnowledgeSourceGet = jest.fn();
+const mockPrepareSession = jest.fn();
 
 let mockPreparedSession: any;
 
 jest.mock('../../../assistant/application/agentAnalyzeSessionService', () => ({
   AgentAnalyzeSessionService: jest.fn().mockImplementation(() => ({
-    prepareSession: jest.fn(() => ({
-      sessionId: 'cli-session-quality',
-      session: mockPreparedSession,
-      isNewSession: true,
-    })),
+    prepareSession: (...args: unknown[]) => mockPrepareSession(...args),
   })),
   buildAgentQueryWithContinuityNotice: (query: string) => query,
 }));
+
+function defaultPreparedSessionResult() {
+  return {
+      sessionId: 'cli-session-quality',
+      session: mockPreparedSession,
+      isNewSession: true,
+  };
+}
 
 jest.mock('../../../services/sessionPersistenceService', () => ({
   SessionPersistenceService: {
@@ -69,8 +76,25 @@ jest.mock('../../../services/verifier/claimVerificationRunner', () => ({
   runClaimVerification: (input: unknown) => mockRunClaimVerification(input),
 }));
 
+jest.mock('../../../services/codebase/defaultCodebaseServices', () => ({
+  getDefaultCodebaseRegistry: () => ({get: mockCodebaseGet}),
+}));
+
+jest.mock('../../../services/externalKnowledgeSourceRegistry', () => ({
+  externalKnowledgeSourceHasActiveIndex: (source: {
+    activeGeneration?: string;
+    contentFingerprint?: string;
+    indexedChunkCount?: number;
+  }) => Boolean(
+    source.activeGeneration && source.contentFingerprint && (source.indexedChunkCount ?? 0) > 0
+  ),
+  getDefaultExternalKnowledgeSourceRegistry: () => ({get: mockKnowledgeSourceGet}),
+}));
+
 jest.mock('../../../agent/context/enhancedSessionContext', () => ({
   sessionContextManager: {
+    set: jest.fn(),
+    remove: jest.fn(),
     get: jest.fn(() => ({
       annotateLatestCompletedTurn: mockAnnotateLatestCompletedTurn,
     })),
@@ -120,6 +144,9 @@ describe('CliAnalyzeService runTurn final quality gate', () => {
       },
       identityResolutions: [],
     });
+    mockCodebaseGet.mockReset();
+    mockKnowledgeSourceGet.mockReset();
+    mockPrepareSession.mockImplementation(() => defaultPreparedSessionResult());
     const orchestrator = new EventEmitter() as EventEmitter & {
       analyze: typeof mockAnalyze;
       getSdkSessionId: () => string;
@@ -145,6 +172,153 @@ describe('CliAnalyzeService runTurn final quality gate', () => {
       rounds: 1,
       totalDurationMs: 1000,
     });
+  });
+
+  it('defaults codebase-only CLI analysis to private metadata mode', async () => {
+    mockCodebaseGet.mockReturnValue({
+      codebaseId: 'cb-cli',
+      indexGeneration: 3,
+      activeGeneration: 'codebase_3_test',
+      contentFingerprint: 'a'.repeat(64),
+      chunkCount: 1,
+      consent: {sendToProvider: false, consentHash: 'consent'},
+    });
+    mockAnalyze.mockImplementationOnce(async () => {
+      mockPreparedSession.orchestrator.emit('update', {
+        type: 'finding',
+        content: {message: 'CLI_PRIVATE_STREAM_CANARY'},
+        timestamp: Date.now(),
+      } satisfies StreamingUpdate);
+      return {
+        sessionId: 'cli-session-quality',
+        success: true,
+        findings: [],
+        hypotheses: [],
+        conclusion: '## 综合结论\n\n已完成。',
+        confidence: 0.9,
+        rounds: 1,
+        totalDurationMs: 1,
+      };
+    });
+    const events: StreamingUpdate[] = [];
+
+    const output = await new CliAnalyzeService().runTurn({
+      traceId: 'trace-cli',
+      query: '分析源码',
+      codebaseIds: ['cb-cli'],
+      onEvent: event => events.push(event),
+    });
+
+    const analyzeCall = mockAnalyze.mock.calls[0] as unknown[];
+    expect(analyzeCall[3]).toEqual(expect.objectContaining({
+      codeAwareMode: 'metadata_only',
+      codebaseIds: ['cb-cli'],
+    }));
+    expect(mockPreparedSession.codeAwareMode).toBe('metadata_only');
+    expect(mockPrepareSession).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({
+        codeAwareMode: 'metadata_only',
+        codebaseIds: ['cb-cli'],
+      }),
+    }));
+    expect(output.codeAwareMode).toBe('metadata_only');
+    expect(JSON.stringify(events)).not.toContain('CLI_PRIVATE_STREAM_CANARY');
+  });
+
+  it.each([
+    ['source only', ['cb-cli'], undefined],
+    ['RAG only', undefined, ['wiki-cli']],
+    ['source and RAG', ['cb-cli'], ['wiki-cli']],
+  ] as const)('marks %s private before session preparation logs the query', async (
+    _label,
+    codebaseIds,
+    knowledgeSourceIds,
+  ) => {
+    mockCodebaseGet.mockReturnValue({
+      codebaseId: 'cb-cli',
+      indexGeneration: 3,
+      activeGeneration: 'codebase_3_test',
+      contentFingerprint: 'a'.repeat(64),
+      chunkCount: 1,
+      consent: {sendToProvider: false, consentHash: 'consent'},
+    });
+    mockKnowledgeSourceGet.mockReturnValue({
+      sourceId: 'wiki-cli',
+      indexGeneration: 2,
+      activeGeneration: 'knowledge_2_test',
+      contentFingerprint: 'b'.repeat(64),
+      indexedChunkCount: 1,
+      rightsAcknowledged: true,
+      sendToProvider: true,
+      consentedAt: Date.now(),
+    });
+
+    await new CliAnalyzeService().runTurn({
+      traceId: 'trace-cli',
+      query: 'PRIVATE_PREPARE_QUERY_CANARY',
+      ...(codebaseIds ? {codebaseIds: [...codebaseIds]} : {}),
+      ...(knowledgeSourceIds ? {knowledgeSourceIds: [...knowledgeSourceIds]} : {}),
+      onEvent: jest.fn(),
+    });
+
+    expect(mockPrepareSession).toHaveBeenCalledWith(expect.objectContaining({
+      query: 'PRIVATE_PREPARE_QUERY_CANARY',
+      options: expect.objectContaining({
+        ...(codebaseIds ? {
+          codeAwareMode: 'metadata_only',
+          codebaseIds: ['cb-cli'],
+        } : {codeAwareMode: 'off'}),
+        ...(knowledgeSourceIds ? {knowledgeSourceIds: ['wiki-cli']} : {}),
+      }),
+    }));
+  });
+
+  it('rejects codebase ids when code-aware mode is explicitly off', async () => {
+    await expect(new CliAnalyzeService().runTurn({
+      traceId: 'trace-cli',
+      query: 'do not use source',
+      codeAwareMode: 'off',
+      codebaseIds: ['cb-disabled'],
+      onEvent: jest.fn(),
+    })).rejects.toThrow('CODEBASE_IDS_REQUIRE_CODE_AWARE_MODE');
+    expect(mockAnalyze).not.toHaveBeenCalled();
+  });
+
+  it('rejects a selected codebase that has no active indexed generation', async () => {
+    mockCodebaseGet.mockReturnValue({
+      codebaseId: 'cb-unindexed',
+      indexGeneration: 1,
+      chunkCount: 0,
+      consent: {sendToProvider: false, consentHash: 'consent'},
+    });
+
+    await expect(new CliAnalyzeService().runTurn({
+      traceId: 'trace-cli',
+      query: 'analyze source',
+      codebaseIds: ['cb-unindexed'],
+      onEvent: jest.fn(),
+    })).rejects.toThrow('ANALYSIS_CONTEXT_CODEBASE_UNAVAILABLE');
+    expect(mockAnalyze).not.toHaveBeenCalled();
+  });
+
+  it('rejects an activated knowledge source whose generation contains no chunks', async () => {
+    mockKnowledgeSourceGet.mockReturnValue({
+      sourceId: 'wiki-empty',
+      indexGeneration: 2,
+      activeGeneration: 'knowledge_2_empty',
+      contentFingerprint: 'b'.repeat(64),
+      indexedChunkCount: 0,
+      rightsAcknowledged: true,
+      sendToProvider: true,
+    });
+
+    await expect(new CliAnalyzeService().runTurn({
+      traceId: 'trace-cli',
+      query: 'analyze with private knowledge',
+      knowledgeSourceIds: ['wiki-empty'],
+      onEvent: jest.fn(),
+    })).rejects.toThrow('未激活');
+    expect(mockAnalyze).not.toHaveBeenCalled();
   });
 
   it('marks phase-summary runtime output partial across CLI result, session, report, and event stream', async () => {

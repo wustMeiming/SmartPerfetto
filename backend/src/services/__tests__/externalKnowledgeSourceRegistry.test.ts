@@ -175,6 +175,39 @@ describe('ExternalKnowledgeSourceRegistry', () => {
     expect(fs.existsSync(path.join(tmpDir, 'second.json'))).toBe(false);
   });
 
+  it('fails closed across dual-write instances when filesystem consent persistence fails', () => {
+    process.env[ENTERPRISE_FEATURE_FLAG_ENV] = 'true';
+    process.env[ENTERPRISE_DB_PATH_ENV] = path.join(tmpDir, 'enterprise-dual-consent.sqlite');
+    process.env[ENTERPRISE_MIGRATION_PHASE_ENV] = 'dual-write';
+    const storagePath = path.join(tmpDir, 'dual-sources.json');
+    const scope = {tenantId: 'tenant-1', workspaceId: 'workspace-1', userId: 'user-1'};
+    const first = new ExternalKnowledgeSourceRegistry(storagePath);
+    const second = new ExternalKnowledgeSourceRegistry(storagePath);
+    const source = first.register({
+      kind: 'android_internals_wiki',
+      displayName: 'Android Internals Wiki',
+      rootRealpath: path.join(tmpDir, 'wiki'),
+      revision: 'a'.repeat(40),
+      contentFingerprint: 'b'.repeat(64),
+      dirty: false,
+      license: 'CC-BY-NC-SA-4.0',
+      rightsAcknowledged: true,
+      sendToProvider: true,
+      consentedBy: 'user-1',
+      scope,
+    });
+    jest.spyOn(first as any, 'persist').mockImplementationOnce(() => {
+      throw new Error('simulated_filesystem_persist_failure');
+    });
+
+    expect(() => first.setProviderConsent(source.sourceId, scope, false, 'user-1'))
+      .toThrow('simulated_filesystem_persist_failure');
+    expect(second.evaluateAccess(source.sourceId, scope, [source.sourceId])).toEqual({
+      allowed: false,
+      reason: 'provider_send_not_consented',
+    });
+  });
+
   it('serializes reindex operations across enterprise registry instances', async () => {
     process.env[ENTERPRISE_FEATURE_FLAG_ENV] = 'true';
     process.env[ENTERPRISE_DB_PATH_ENV] = path.join(tmpDir, 'enterprise-lease.sqlite');

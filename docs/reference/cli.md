@@ -192,8 +192,12 @@ smp run trace.perfetto-trace \
 
 `metadata_only` 只把 `CodeRef` 元数据暴露给模型；源码正文不会进入 session、
 报告或导出。`provider_send` 只有在注册 codebase 时使用 `--send-to-provider`
-并且本次分析也选择 `--code-aware provider_send` 时才允许发送片段。不传
-`--codebase-id` 时，即使本机已有注册代码库，本次分析也按 trace-only 路径运行。
+并且本次分析也选择 `--code-aware provider_send` 时才允许发送片段。只传
+`--codebase-id` 会默认使用 `metadata_only`；`--code-aware off` 与 codebase ID
+组合会被拒绝。未传任何 codebase/knowledge source ID 时才是 trace-only。
+`--knowledge-source-id <id>` 可单独启用已授权的私有外部 RAG，也可与 codebase
+叠加。源码、私有 RAG 或 reference trace 会把显式 `fast` 解析为 `full`，避免
+轻量 runtime 静默丢失能力。
 完整说明见 [Code-Aware Analysis](../getting-started/code-aware-analysis.md)。
 
 ## 双 Trace 对比

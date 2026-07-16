@@ -4,7 +4,27 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  localize,
+  parseOutputLanguage,
+  type OutputLanguage,
+} from '../../agentv3/outputLanguage';
 import type { BatchTraceRunV1 } from './batchTraceTypes';
+
+export function batchTraceStatusLabel(status: string, language: OutputLanguage): string {
+  const labels: Record<string, [string, string]> = {
+    queued: ['等待中', 'Queued'],
+    running: ['运行中', 'Running'],
+    completed: ['已完成', 'Completed'],
+    partial: ['部分完成', 'Partial'],
+    failed: ['失败', 'Failed'],
+    cancelled: ['已取消', 'Cancelled'],
+    unsupported: ['不支持', 'Unsupported'],
+    unavailable: ['不可用', 'Unavailable'],
+  };
+  const label = labels[status];
+  return label ? localize(language, label[0], label[1]) : status;
+}
 
 function escapeHtml(value: unknown): string {
   return String(value ?? '')
@@ -20,13 +40,13 @@ function formatNumber(value: number | undefined): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/\.?0+$/, '');
 }
 
-function perTraceRows(run: BatchTraceRunV1): string {
+function perTraceRows(run: BatchTraceRunV1, language: OutputLanguage): string {
   return run.perTrace.map(result => {
     const diagnostics = result.diagnostics.map(item => `${item.severity}: ${item.message}`).join('; ');
     return `<tr>
       <td>${result.ordinal}</td>
       <td>${escapeHtml(result.input.label ?? result.input.traceId ?? result.input.tracePath)}</td>
-      <td>${escapeHtml(result.status)}</td>
+      <td data-status="${escapeHtml(result.status)}">${escapeHtml(batchTraceStatusLabel(result.status, language))}</td>
       <td>${result.metrics.length}</td>
       <td>${formatNumber(result.executionTimeMs)} ms</td>
       <td>${escapeHtml(result.error ?? diagnostics)}</td>
@@ -49,18 +69,18 @@ function aggregateRows(run: BatchTraceRunV1): string {
   </tr>`).join('\n');
 }
 
-function limitationItems(run: BatchTraceRunV1): string {
+function limitationItems(run: BatchTraceRunV1, language: OutputLanguage): string {
   const limitations = run.aggregate?.limitations ?? [];
-  if (limitations.length === 0) return '<li>None</li>';
+  if (limitations.length === 0) return `<li>${localize(language, '无', 'None')}</li>`;
   return limitations.map(item => `<li>${escapeHtml(item)}</li>`).join('\n');
 }
 
-function listItems(values: string[]): string {
-  if (values.length === 0) return '<li>None</li>';
+function listItems(values: string[], language: OutputLanguage): string {
+  if (values.length === 0) return `<li>${localize(language, '无', 'None')}</li>`;
   return values.map(value => `<li>${escapeHtml(value)}</li>`).join('\n');
 }
 
-function domainAnalysisSection(run: BatchTraceRunV1): string {
+function domainAnalysisSection(run: BatchTraceRunV1, language: OutputLanguage): string {
   const domain = run.domainAnalysis;
   if (!domain || domain.operation !== 'heap_path_cluster') return '';
   const result = domain.result;
@@ -76,34 +96,41 @@ function domainAnalysisSection(run: BatchTraceRunV1): string {
     <td>${cluster.evidenceRefIds.length}</td>
   </tr>`).join('\n');
   const failures = result.failures.map(failure =>
-    `trace ordinal ${failure.traceOrdinal}${failure.traceId ? ` (${failure.traceId})` : ''}: ${failure.reason}`);
-  return `<h2>Heap Path Cluster Analysis</h2>
-  <p><strong>Status:</strong> ${escapeHtml(result.status)}</p>
-  <p><strong>Selected K:</strong> ${result.selectedK ?? 'N/A'}</p>
-  <p><strong>Silhouette:</strong> ${result.silhouetteScore === null ? 'N/A' : formatNumber(result.silhouetteScore)}</p>
-  <p><strong>Input:</strong> ${result.input.traceCount} traces, ${result.input.sampleCount} samples, ${result.input.rowCount} rows</p>
-  <p><strong>Evidence rows:</strong> ${domain.evidence.rowCount}</p>
-  <p><strong>Rejected rows:</strong> ${domain.evidence.rejectedRowCount}</p>
-  <p><strong>Truncated rows:</strong> ${domain.evidence.truncatedRowCount}</p>
-  <p><strong>Seed:</strong> <code>${escapeHtml(result.seedHash)}</code></p>
+    `${localize(language, '轨迹序号', 'Trace ordinal')} ${failure.traceOrdinal}${failure.traceId ? ` (${failure.traceId})` : ''}${localize(language, '：', ':')} ${failure.reason}`);
+  const unavailable = localize(language, '不可用', 'N/A');
+  const colon = localize(language, '：', ':');
+  const separator = localize(language, '，', ', ');
+  return `<h2>${localize(language, '堆内存路径聚类分析', 'Heap Path Cluster Analysis')}</h2>
+  <p><strong>${localize(language, '状态', 'Status')}${colon}</strong> <span data-status="${escapeHtml(result.status)}">${escapeHtml(batchTraceStatusLabel(result.status, language))}</span></p>
+  <p><strong>${localize(language, '选定 K 值', 'Selected K')}${colon}</strong> ${result.selectedK ?? unavailable}</p>
+  <p><strong>${localize(language, '轮廓系数', 'Silhouette')}${colon}</strong> ${result.silhouetteScore === null ? unavailable : formatNumber(result.silhouetteScore)}</p>
+  <p><strong>${localize(language, '输入', 'Input')}${colon}</strong> ${result.input.traceCount} ${localize(language, '条轨迹', 'traces')}${separator}${result.input.sampleCount} ${localize(language, '个样本', 'samples')}${separator}${result.input.rowCount} ${localize(language, '行', 'rows')}</p>
+  <p><strong>${localize(language, '证据行', 'Evidence rows')}${colon}</strong> ${domain.evidence.rowCount}</p>
+  <p><strong>${localize(language, '拒绝行', 'Rejected rows')}${colon}</strong> ${domain.evidence.rejectedRowCount}</p>
+  <p><strong>${localize(language, '截断行', 'Truncated rows')}${colon}</strong> ${domain.evidence.truncatedRowCount}</p>
+  <p><strong>${localize(language, '种子', 'Seed')}${colon}</strong> <code>${escapeHtml(result.seedHash)}</code></p>
   <table>
     <thead>
-      <tr><th>Cluster</th><th>Representative path</th><th>Trace support</th><th>Samples</th><th>Rows</th><th>Mean retained bytes</th><th>P95 retained bytes</th><th>Collapsed paths</th><th>Evidence refs</th></tr>
+      <tr><th>${localize(language, '聚类', 'Cluster')}</th><th>${localize(language, '代表路径', 'Representative path')}</th><th>${localize(language, '轨迹支持率', 'Trace support')}</th><th>${localize(language, '样本', 'Samples')}</th><th>${localize(language, '行数', 'Rows')}</th><th>${localize(language, '平均保留字节', 'Mean retained bytes')}</th><th>${localize(language, 'P95 保留字节', 'P95 retained bytes')}</th><th>${localize(language, '合并路径', 'Collapsed paths')}</th><th>${localize(language, '证据引用', 'Evidence refs')}</th></tr>
     </thead>
     <tbody>${clusterRows}</tbody>
   </table>
-  <h3>Cluster Limitations</h3>
-  <ul>${listItems(result.limitations)}</ul>
-  <h3>Cluster Failures</h3>
-  <ul>${listItems(failures)}</ul>`;
+  <h3>${localize(language, '聚类限制', 'Cluster Limitations')}</h3>
+  <ul>${listItems(result.limitations, language)}</ul>
+  <h3>${localize(language, '聚类失败项', 'Cluster Failures')}</h3>
+  <ul>${listItems(failures, language)}</ul>`;
 }
 
-export function renderBatchTraceHtmlReport(run: BatchTraceRunV1): string {
+export function renderBatchTraceHtmlReport(
+  run: BatchTraceRunV1,
+  language: OutputLanguage = parseOutputLanguage(process.env.SMARTPERFETTO_OUTPUT_LANGUAGE),
+): string {
+  const colon = localize(language, '：', ':');
   return `<!doctype html>
-<html lang="en">
+<html lang="${language}">
 <head>
   <meta charset="utf-8">
-  <title>SmartPerfetto Batch Trace Run ${escapeHtml(run.id)}</title>
+  <title>${localize(language, 'SmartPerfetto 批量轨迹分析', 'SmartPerfetto Batch Trace Run')} ${escapeHtml(run.id)}</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 32px; color: #1f2328; }
     table { border-collapse: collapse; width: 100%; margin: 16px 0 28px; }
@@ -113,28 +140,28 @@ export function renderBatchTraceHtmlReport(run: BatchTraceRunV1): string {
   </style>
 </head>
 <body>
-  <h1>SmartPerfetto Batch Trace Run</h1>
-  <p><strong>Run:</strong> <code>${escapeHtml(run.id)}</code></p>
-  <p><strong>Skill:</strong> <code>${escapeHtml(run.input.skillId)}</code></p>
-  <p><strong>Status:</strong> ${escapeHtml(run.status)}</p>
-  <p><strong>Trace count:</strong> ${run.input.traceInputs.length}</p>
-  <h2>Per Trace Results</h2>
+  <h1>${localize(language, 'SmartPerfetto 批量轨迹分析', 'SmartPerfetto Batch Trace Run')}</h1>
+  <p><strong>${localize(language, '运行', 'Run')}${colon}</strong> <code>${escapeHtml(run.id)}</code></p>
+  <p><strong>${localize(language, '技能', 'Skill')}${colon}</strong> <code>${escapeHtml(run.input.skillId)}</code></p>
+  <p><strong>${localize(language, '状态', 'Status')}${colon}</strong> <span data-status="${escapeHtml(run.status)}">${escapeHtml(batchTraceStatusLabel(run.status, language))}</span></p>
+  <p><strong>${localize(language, '轨迹数量', 'Trace count')}${colon}</strong> ${run.input.traceInputs.length}</p>
+  <h2>${localize(language, '逐轨迹结果', 'Per Trace Results')}</h2>
   <table>
     <thead>
-      <tr><th>Ordinal</th><th>Trace</th><th>Status</th><th>Metrics</th><th>Execution</th><th>Diagnostics / Error</th></tr>
+      <tr><th>${localize(language, '序号', 'Ordinal')}</th><th>${localize(language, '轨迹', 'Trace')}</th><th>${localize(language, '状态', 'Status')}</th><th>${localize(language, '指标', 'Metrics')}</th><th>${localize(language, '执行耗时', 'Execution')}</th><th>${localize(language, '诊断 / 错误', 'Diagnostics / Error')}</th></tr>
     </thead>
-    <tbody>${perTraceRows(run)}</tbody>
+    <tbody>${perTraceRows(run, language)}</tbody>
   </table>
-  <h2>Aggregate Metrics</h2>
+  <h2>${localize(language, '聚合指标', 'Aggregate Metrics')}</h2>
   <table>
     <thead>
-      <tr><th>Metric</th><th>Count</th><th>Missing</th><th>Min</th><th>P50</th><th>P90</th><th>P95</th><th>Max</th><th>Mean</th><th>Outliers</th></tr>
+      <tr><th>${localize(language, '指标', 'Metric')}</th><th>${localize(language, '数量', 'Count')}</th><th>${localize(language, '缺失', 'Missing')}</th><th>${localize(language, '最小值', 'Min')}</th><th>P50</th><th>P90</th><th>P95</th><th>${localize(language, '最大值', 'Max')}</th><th>${localize(language, '平均值', 'Mean')}</th><th>${localize(language, '离群项', 'Outliers')}</th></tr>
     </thead>
     <tbody>${aggregateRows(run)}</tbody>
   </table>
-  ${domainAnalysisSection(run)}
-  <h2>Limitations</h2>
-  <ul>${limitationItems(run)}</ul>
+  ${domainAnalysisSection(run, language)}
+  <h2>${localize(language, '限制', 'Limitations')}</h2>
+  <ul>${limitationItems(run, language)}</ul>
 </body>
 </html>`;
 }
@@ -144,6 +171,7 @@ export function writeBatchTraceArtifacts(input: {
   directory: string;
   htmlPath?: string;
   jsonPath?: string;
+  outputLanguage?: OutputLanguage;
 }): BatchTraceRunV1 {
   fs.mkdirSync(input.directory, { recursive: true });
   const jsonPath = input.jsonPath ?? path.join(input.directory, 'result.json');
@@ -159,6 +187,6 @@ export function writeBatchTraceArtifacts(input: {
     },
   };
   fs.writeFileSync(jsonPath, JSON.stringify(withPaths, null, 2));
-  fs.writeFileSync(htmlPath, renderBatchTraceHtmlReport(withPaths));
+  fs.writeFileSync(htmlPath, renderBatchTraceHtmlReport(withPaths, input.outputLanguage));
   return withPaths;
 }

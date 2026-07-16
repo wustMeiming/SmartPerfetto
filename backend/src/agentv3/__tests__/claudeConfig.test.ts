@@ -242,7 +242,7 @@ describe('getClaudeRuntimeDiagnostics', () => {
     process.env.CLAUDE_MODEL = 'mimo-main';
     process.env.CLAUDE_LIGHT_MODEL = 'mimo-light';
 
-    const diagnostics = getClaudeRuntimeDiagnostics();
+    const diagnostics = getClaudeRuntimeDiagnostics(null);
 
     expect(diagnostics.runtime).toBe('claude-agent-sdk');
     expect(diagnostics.providerMode).toBe('anthropic_compatible_proxy');
@@ -258,7 +258,7 @@ describe('getClaudeRuntimeDiagnostics', () => {
     delete process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_AUTH_TOKEN = 'sk-deepseek-test';
 
-    const diagnostics = getClaudeRuntimeDiagnostics();
+    const diagnostics = getClaudeRuntimeDiagnostics(null);
 
     expect(diagnostics.providerMode).toBe('anthropic_compatible_proxy');
     expect(diagnostics.configured).toBe(true);
@@ -272,7 +272,7 @@ describe('getClaudeRuntimeDiagnostics', () => {
     delete process.env.CLAUDE_CODE_USE_BEDROCK;
     delete process.env.CLAUDE_CODE_USE_VERTEX;
 
-    const diagnostics = getClaudeRuntimeDiagnostics();
+    const diagnostics = getClaudeRuntimeDiagnostics(null);
 
     expect(diagnostics.providerMode).toBe('unconfigured');
     expect(diagnostics.configured).toBe(false);
@@ -285,7 +285,7 @@ describe('getClaudeRuntimeDiagnostics', () => {
     delete process.env.CLAUDE_CODE_USE_BEDROCK;
     delete process.env.CLAUDE_CODE_USE_VERTEX;
 
-    const diagnostics = getClaudeRuntimeDiagnostics();
+    const diagnostics = getClaudeRuntimeDiagnostics(null);
 
     expect(diagnostics.providerMode).toBe('unconfigured');
     expect(diagnostics.configured).toBe(false);
@@ -301,7 +301,7 @@ describe('getClaudeRuntimeDiagnostics', () => {
     process.env.ANTHROPIC_VERTEX_PROJECT_ID = 'smartperfetto-project';
     process.env.CLOUD_ML_REGION = 'us-central1';
 
-    const diagnostics = getClaudeRuntimeDiagnostics();
+    const diagnostics = getClaudeRuntimeDiagnostics(null);
 
     expect(diagnostics.providerMode).toBe('google_vertex');
     expect(diagnostics.configured).toBe(true);
@@ -322,7 +322,7 @@ describe('getClaudeRuntimeDiagnostics', () => {
     process.env.CLAUDE_CODE_USE_VERTEX = '1';
     delete process.env.ANTHROPIC_VERTEX_PROJECT_ID;
 
-    const diagnostics = getClaudeRuntimeDiagnostics();
+    const diagnostics = getClaudeRuntimeDiagnostics(null);
 
     expect(diagnostics.providerMode).toBe('google_vertex');
     expect(diagnostics.configured).toBe(false);

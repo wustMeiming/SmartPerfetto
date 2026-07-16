@@ -129,14 +129,13 @@ analysis:
         Camera 多路输出（preview/analysis/record）可能竞争共享硬件与 buffer 资源。
         ImageReader 未及时 release / Codec 堆积导致 HAL back-pressure 只能作为候选解释；
         需要 buffer ownership、acquire/release 或 fence 证据支持，不能仅凭 PSS/RSS 增长判定泄漏。
-      detection_skill: gpu_render_in_range
 
     - id: release_fence_late_blocks_hal
       name: "Release fence 晚回阻塞 HAL"
       description: |
         消费侧 release fence 晚回（HWC/SurfaceFlinger/宿主采样/Codec 编码） →
-        HAL 拿不到新 buffer → request pipeline 整体 back-pressure。
-      detection_skill: present_fence_timing
+        HAL 拿不到新 buffer → request pipeline 整体 back-pressure。必须有 Camera buffer ownership、
+        acquire/release 与 fence 的同一生命周期关联；display present fence 不能替代 Camera completion。
 
     - id: textureview_extra_resample_overhead
       name: "TextureView 模式宿主 RT 采样开销"

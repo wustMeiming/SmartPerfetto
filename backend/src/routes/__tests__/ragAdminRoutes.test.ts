@@ -148,7 +148,7 @@ describe('GET / DELETE /api/rag/chunks/:chunkId', () => {
     expect(res.body.chunk.chunkId).toBe('a');
   });
 
-  it('sanitizes source-backed chunks on the legacy chunk endpoint', async () => {
+  it('sanitizes registry-owned source reads and blocks generic deletion', async () => {
     const root = path.join(tmpDir, 'repo');
     fs.mkdirSync(root);
     const ref = registry.register({
@@ -163,15 +163,21 @@ describe('GET / DELETE /api/rag/chunks/:chunkId', () => {
       snippet: 'class MainActivity { fun secretLaunch() {} }',
       codebaseId: ref.codebaseId,
       registryOrigin: 'codebase_registry',
+      sourceGeneration: `codebase_${ref.indexGeneration}`,
       filePath: 'MainActivity.kt',
       language: 'kotlin',
-    }));
+    }), DEFAULT_SCOPE);
 
-    const res = await request(app).get('/api/rag/chunks/source-a');
-    expect(res.status).toBe(200);
-    expect(res.body.chunk.snippet).toBeUndefined();
-    expect(res.body.chunk.snippetHash).toEqual(expect.any(String));
-    expect(JSON.stringify(res.body)).not.toContain('secretLaunch');
+    const read = await request(app).get('/api/rag/chunks/source-a');
+    const remove = await request(app).delete('/api/rag/chunks/source-a');
+
+    expect(read.status).toBe(200);
+    expect(read.body.chunk.snippet).toBeUndefined();
+    expect(read.body.chunk.snippetHash).toEqual(expect.any(String));
+    expect(remove.status).toBe(404);
+    expect(store.getChunk('source-a', DEFAULT_SCOPE)).toBeDefined();
+    expect(JSON.stringify({read: read.body, remove: remove.body}))
+      .not.toContain('secretLaunch');
   });
 
   it('keeps private wiki chunks off generic admin chunk and search endpoints', async () => {
@@ -247,6 +253,19 @@ describe('POST /api/rag/search', () => {
   it('400 on missing query', async () => {
     const res = await request(app).post('/api/rag/search').send({});
     expect(res.status).toBe(400);
+  });
+
+  it.each([
+    [{query: 'binder', topK: -1}, 'topK'],
+    [{query: 'x'.repeat(8 * 1024 + 1)}, 'query'],
+    [{query: 'binder', kinds: Array.from({length: 101}, () => 'aosp')}, 'kinds'],
+    [{query: 'binder', codebaseIds: Array.from({length: 101}, (_, index) => `cb-${index}`)}, 'codebaseIds'],
+  ])('400 on bounded search input violations', async (body, field) => {
+    const res = await request(app).post('/api/rag/search').send(body);
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('invalid_rag_search_input');
+    expect(res.body.error).toContain(field);
   });
 });
 
@@ -464,6 +483,25 @@ describe('Android Internals Wiki routes', () => {
 });
 
 describe('codebase routes', () => {
+  it('rejects ambiguous provider consent and unsafe path filters', async () => {
+    const root = path.join(tmpDir, 'validation-repo');
+    fs.mkdirSync(root, {recursive: true});
+    fs.writeFileSync(path.join(root, 'Main.kt'), 'class Main\n');
+
+    const ambiguousConsent = await request(app)
+      .post('/api/rag/codebases/register')
+      .send({displayName: 'Repo', rootPath: root, sendToProvider: 'false'});
+    const traversalFilter = await request(app)
+      .post('/api/rag/codebases/register')
+      .send({displayName: 'Repo', rootPath: root, pathFilters: ['../private']});
+
+    expect(ambiguousConsent.status).toBe(400);
+    expect(ambiguousConsent.body.error).toContain('explicit boolean');
+    expect(traversalFilter.status).toBe(400);
+    expect(traversalFilter.body.error).toContain('must not traverse parent directories');
+    expect(registry.list(DEFAULT_SCOPE)).toHaveLength(0);
+  });
+
   it('previews, registers, reindexes, and resolves app source symbols', async () => {
     const root = path.join(tmpDir, 'HighPerformanceMini');
     fs.mkdirSync(path.join(root, 'launch-aosp/src/main/java/com/example'), {recursive: true});
@@ -520,5 +558,173 @@ describe('codebase routes', () => {
     expect(excerpt.status).toBe(200);
     expect(excerpt.body.excerpt.text).toContain('simulateHeavyLaunch()');
     expect(excerpt.body.excerpt.filePath).toBe('launch-aosp/src/main/java/com/example/MainActivity.kt');
+
+    store.addChunk(makeChunk({
+      chunkId: 'stale-generation',
+      kind: 'app_source',
+      uri: 'codebase://stale/MainActivity.kt',
+      snippet: 'STALE_GENERATION_PRIVATE_CANARY',
+      codebaseId,
+      registryOrigin: 'codebase_registry',
+      sourceGeneration: 'codebase_0',
+      filePath: 'MainActivity.kt',
+      language: 'kotlin',
+    }), DEFAULT_SCOPE);
+    const staleExcerpt = await request(app)
+      .get(`/api/rag/codebases/${codebaseId}/excerpt`)
+      .query({chunkId: 'stale-generation'});
+    expect(staleExcerpt.status).toBe(404);
+    expect(JSON.stringify(staleExcerpt.body)).not.toContain('STALE_GENERATION_PRIVATE_CANARY');
+  });
+
+  it('deletes only the scoped codebase and every indexed generation', async () => {
+    const root = path.join(tmpDir, 'delete-repo');
+    fs.mkdirSync(root);
+    const ref = registry.register({
+      kind: 'app_source',
+      displayName: 'Delete Me',
+      rootPath: root,
+      ...DEFAULT_SCOPE,
+    });
+    const otherScope = {
+      tenantId: 'other-tenant',
+      workspaceId: 'other-workspace',
+      userId: 'other-user',
+    };
+    const other = registry.register({
+      kind: 'app_source',
+      displayName: 'Keep Me',
+      rootPath: root,
+      ...otherScope,
+    });
+    store.addChunk(makeChunk({
+      chunkId: 'delete-active',
+      kind: 'app_source',
+      uri: `codebase://${ref.codebaseId}/Main.kt`,
+      codebaseId: ref.codebaseId,
+      registryOrigin: 'codebase_registry',
+      sourceGeneration: 'codebase_2_active',
+    }), DEFAULT_SCOPE);
+    store.addChunk(makeChunk({
+      chunkId: 'delete-staged',
+      kind: 'app_source',
+      uri: `codebase://${ref.codebaseId}/Staged.kt`,
+      codebaseId: ref.codebaseId,
+      registryOrigin: 'codebase_registry',
+      sourceGeneration: 'codebase_3_staged',
+    }), DEFAULT_SCOPE);
+    store.addChunk(makeChunk({
+      chunkId: 'keep-other-tenant',
+      kind: 'app_source',
+      uri: `codebase://${other.codebaseId}/Other.kt`,
+      codebaseId: other.codebaseId,
+      registryOrigin: 'codebase_registry',
+      sourceGeneration: 'codebase_2_active',
+    }), otherScope);
+
+    const forbidden = await request(app).delete(`/api/rag/codebases/${other.codebaseId}`);
+    expect(forbidden.status).toBe(200);
+    expect(forbidden.body).toMatchObject({success: true, alreadyDeleted: true});
+    expect(registry.get(other.codebaseId, otherScope)).toBeDefined();
+    expect(store.getChunk('keep-other-tenant', otherScope)).toBeDefined();
+
+    const deleted = await request(app).delete(`/api/rag/codebases/${ref.codebaseId}`);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body).toEqual({
+      success: true,
+      codebaseId: ref.codebaseId,
+      removedChunkCount: 2,
+    });
+    expect(registry.get(ref.codebaseId, DEFAULT_SCOPE)).toBeUndefined();
+    expect(store.getChunk('delete-active', DEFAULT_SCOPE)).toBeUndefined();
+    expect(store.getChunk('delete-staged', DEFAULT_SCOPE)).toBeUndefined();
+    expect(registry.get(other.codebaseId, otherScope)).toBeDefined();
+    expect(store.getChunk('keep-other-tenant', otherScope)).toBeDefined();
+  });
+
+  it('returns a retryable conflict instead of deleting during reindex', async () => {
+    const root = path.join(tmpDir, 'busy-delete-repo');
+    fs.mkdirSync(root);
+    const ref = registry.register({
+      kind: 'app_source',
+      displayName: 'Busy App',
+      rootPath: root,
+      ...DEFAULT_SCOPE,
+    });
+    const leaseSpy = jest.spyOn(registry, 'withIngestLease')
+      .mockRejectedValueOnce(new Error('codebase_reindex_in_progress'));
+
+    const response = await request(app).delete(`/api/rag/codebases/${ref.codebaseId}`);
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({success: false, code: 'CODEBASE_BUSY'});
+    expect(registry.get(ref.codebaseId, DEFAULT_SCOPE)).toBeDefined();
+    leaseSpy.mockRestore();
+  });
+
+  it('retires retrieval before cleanup and resumes an interrupted delete idempotently', async () => {
+    const root = path.join(tmpDir, 'retry-delete-repo');
+    fs.mkdirSync(root);
+    const ref = registry.register({
+      kind: 'app_source',
+      displayName: 'Retry Delete',
+      rootPath: root,
+      sendToProvider: true,
+      ...DEFAULT_SCOPE,
+    });
+    store.addChunk(makeChunk({
+      chunkId: 'retry-delete-chunk',
+      kind: 'app_source',
+      uri: `codebase://${ref.codebaseId}/Main.kt`,
+      codebaseId: ref.codebaseId,
+      registryOrigin: 'codebase_registry',
+      sourceGeneration: 'codebase_2_active',
+    }), DEFAULT_SCOPE);
+    const removeSpy = jest.spyOn(store, 'removeCodebaseChunks')
+      .mockImplementationOnce(() => {
+        throw new Error('simulated_cleanup_failure');
+      });
+
+    const interrupted = await request(app).delete(`/api/rag/codebases/${ref.codebaseId}`);
+
+    expect(interrupted.status).toBe(500);
+    expect(interrupted.body).toMatchObject({
+      success: false,
+      code: 'CODEBASE_DELETE_INCOMPLETE',
+    });
+    const retired = registry.get(ref.codebaseId, DEFAULT_SCOPE);
+    expect(retired).toMatchObject({
+      lifecycleState: 'deleting',
+      chunkCount: 0,
+      consent: {sendToProvider: false},
+    });
+    expect(retired?.activeGeneration).toMatch(/^deleted_/);
+    expect(retired?.contentFingerprint).toBeUndefined();
+    expect(store.getChunk('retry-delete-chunk', DEFAULT_SCOPE)).toBeDefined();
+
+    const reindex = await request(app)
+      .post(`/api/rag/codebases/${ref.codebaseId}/reindex`)
+      .send({});
+    expect(reindex.status).toBe(400);
+    expect(reindex.body.error).toBe('codebase_deleting');
+
+    removeSpy.mockRestore();
+    const retried = await request(app).delete(`/api/rag/codebases/${ref.codebaseId}`);
+    expect(retried.status).toBe(200);
+    expect(retried.body).toMatchObject({
+      success: true,
+      codebaseId: ref.codebaseId,
+      removedChunkCount: 1,
+    });
+    expect(registry.get(ref.codebaseId, DEFAULT_SCOPE)).toBeUndefined();
+
+    const repeated = await request(app).delete(`/api/rag/codebases/${ref.codebaseId}`);
+    expect(repeated.status).toBe(200);
+    expect(repeated.body).toEqual({
+      success: true,
+      codebaseId: ref.codebaseId,
+      removedChunkCount: 0,
+      alreadyDeleted: true,
+    });
   });
 });

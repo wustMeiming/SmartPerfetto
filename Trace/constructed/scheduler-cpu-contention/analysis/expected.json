@@ -7,7 +7,7 @@
       "id": "execute-android_job_scheduler_events",
       "type": "skill",
       "target": "android_job_scheduler_events",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/android_job_scheduler_events.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -28,7 +28,7 @@
       "id": "execute-cpu_analysis",
       "type": "skill",
       "target": "cpu_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/cpu_analysis.skill.yaml",
       "parameters": {
         "big_core_threshold_pct": 30,
@@ -52,7 +52,7 @@
       "id": "execute-cpu_cluster_load_in_range",
       "type": "skill",
       "target": "cpu_cluster_load_in_range",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_cluster_load_in_range.skill.yaml",
       "parameters": {
         "start_ts": "${trace_start}",
@@ -69,7 +69,7 @@
       "id": "execute-cpu_cluster_mapping_view",
       "type": "skill",
       "target": "cpu_cluster_mapping_view",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_cluster_mapping_view.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -82,7 +82,7 @@
       "id": "execute-cpu_freq_residency_summary",
       "type": "skill",
       "target": "cpu_freq_residency_summary",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_freq_residency_summary.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -95,7 +95,7 @@
       "id": "execute-cpu_freq_timeline",
       "type": "skill",
       "target": "cpu_freq_timeline",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_freq_timeline.skill.yaml",
       "parameters": {
         "start_ts": "${trace_start}",
@@ -121,7 +121,7 @@
       "id": "execute-cpu_idle_state_residency",
       "type": "skill",
       "target": "cpu_idle_state_residency",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_idle_state_residency.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -134,7 +134,7 @@
       "id": "execute-cpu_load_in_range",
       "type": "skill",
       "target": "cpu_load_in_range",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_load_in_range.skill.yaml",
       "parameters": {
         "start_ts": "${trace_start}",
@@ -151,7 +151,7 @@
       "id": "execute-cpu_module",
       "type": "skill",
       "target": "cpu_module",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/modules/hardware/cpu_module.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -165,7 +165,7 @@
       "id": "execute-cpu_process_utilization_period",
       "type": "skill",
       "target": "cpu_process_utilization_period",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_process_utilization_period.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -178,7 +178,7 @@
       "id": "execute-cpu_profiling",
       "type": "skill",
       "target": "cpu_profiling",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/deep/cpu_profiling.skill.yaml",
       "parameters": {
         "min_runtime_ms": 1
@@ -194,7 +194,7 @@
       "id": "execute-cpu_slice_analysis",
       "type": "skill",
       "target": "cpu_slice_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_slice_analysis.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -208,7 +208,7 @@
       "id": "execute-cpu_thread_utilization_period",
       "type": "skill",
       "target": "cpu_thread_utilization_period",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_thread_utilization_period.skill.yaml",
       "parameters": {
         "top_n": 30
@@ -223,7 +223,7 @@
       "id": "execute-cpu_throttling_in_range",
       "type": "skill",
       "target": "cpu_throttling_in_range",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_throttling_in_range.skill.yaml",
       "parameters": {
         "start_ts": "${trace_start}",
@@ -240,7 +240,7 @@
       "id": "execute-cpu_time_per_frame",
       "type": "skill",
       "target": "cpu_time_per_frame",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_time_per_frame.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -253,7 +253,7 @@
       "id": "execute-cpu_topology_detection",
       "type": "skill",
       "target": "cpu_topology_detection",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_topology_detection.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -267,7 +267,7 @@
       "id": "execute-cpu_topology_view",
       "type": "skill",
       "target": "cpu_topology_view",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_topology_view.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -284,7 +284,7 @@
       "id": "execute-cpu_utilization_per_period",
       "type": "skill",
       "target": "cpu_utilization_per_period",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/cpu_utilization_per_period.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -305,7 +305,7 @@
       "id": "execute-irq_analysis",
       "type": "skill",
       "target": "irq_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/irq_analysis.skill.yaml",
       "parameters": {
         "hard_irq_long_threshold_us": 1000,
@@ -324,7 +324,7 @@
       "id": "execute-linux_irq_summary",
       "type": "skill",
       "target": "linux_irq_summary",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/linux_irq_summary.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -337,7 +337,7 @@
       "id": "execute-linux_runqueue_depth_timeline",
       "type": "skill",
       "target": "linux_runqueue_depth_timeline",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/linux_runqueue_depth_timeline.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -350,7 +350,7 @@
       "id": "execute-linux_sched_latency_distribution",
       "type": "skill",
       "target": "linux_sched_latency_distribution",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/linux_sched_latency_distribution.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -387,7 +387,7 @@
       "id": "execute-scheduler_module",
       "type": "skill",
       "target": "scheduler_module",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/modules/kernel/scheduler_module.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -409,7 +409,7 @@
       "id": "execute-screen_off_background_cpu_attribution",
       "type": "skill",
       "target": "screen_off_background_cpu_attribution",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/screen_off_background_cpu_attribution.skill.yaml",
       "parameters": {
         "top_n": 30
@@ -424,7 +424,7 @@
       "id": "execute-selection_range_cpu_sched_summary",
       "type": "skill",
       "target": "selection_range_cpu_sched_summary",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/selection_range_cpu_sched_summary.skill.yaml",
       "parameters": {
         "start_ts": "${trace_start}",
@@ -449,7 +449,7 @@
       "id": "execute-task_migration_in_range",
       "type": "skill",
       "target": "task_migration_in_range",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/task_migration_in_range.skill.yaml",
       "parameters": {
         "start_ts": "${trace_start}",

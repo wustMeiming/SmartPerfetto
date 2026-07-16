@@ -21,8 +21,15 @@ import { getTraceProcessorService } from '../services/traceProcessorService';
 import { SkillExecutor } from '../services/skillEngine/skillExecutor';
 import { skillRegistry, ensureSkillRegistryInitialized } from '../services/skillEngine/skillLoader';
 import { getSceneDeepDiveRoute } from '../agent/config/domainManifest';
-import { SceneStoryService } from '../agent/scene/sceneStoryService';
+import {
+  SceneStoryService,
+  projectSceneReport,
+} from '../agent/scene/sceneStoryService';
 import type { SceneReport } from '../agent/scene/types';
+import {
+  DEFAULT_OUTPUT_LANGUAGE,
+  type OutputLanguage,
+} from '../agentv3/outputLanguage';
 import { requireRequestContext } from '../middleware/auth';
 import {
   isOwnedByContext,
@@ -50,6 +57,7 @@ export interface SceneReconstructSession extends ManagedAssistantSession {
   orchestratorUpdateHandler?: (update: StreamingUpdate) => void;
   traceId: string;
   query: string;
+  outputLanguage?: OutputLanguage;
   tenantId?: string;
   workspaceId?: string;
   userId?: string;
@@ -75,6 +83,29 @@ export interface SceneReconstructSession extends ManagedAssistantSession {
   }>;
   conversationOrdinal: number;
   conversationSteps: SceneReconstructConversationStep[];
+}
+
+export function normalizeSceneOutputLanguage(value: unknown): OutputLanguage | null {
+  if (value === undefined || value === null || value === '') {
+    return DEFAULT_OUTPUT_LANGUAGE;
+  }
+  return value === 'en' || value === 'zh-CN' ? value : null;
+}
+
+export function projectSceneStoryStatusResult(
+  report: SceneReport,
+  outputLanguage: OutputLanguage,
+) {
+  const projected = projectSceneReport(report, outputLanguage);
+  return {
+    reportId: projected.reportId,
+    summary: projected.summary,
+    scenesCount: projected.displayedScenes.length,
+    jobCount: projected.jobs.length,
+    partialReport: projected.partialReport,
+    executionTimeMs: projected.totalDurationMs,
+    cachePolicy: projected.cachePolicy,
+  };
 }
 
 async function ensureTraceAccessible(
@@ -223,11 +254,22 @@ export function registerSceneReconstructRoutes<TSession extends SceneReconstruct
   router.get('/scene-reconstruct/report/:reportId', async (req, res) => {
     try {
       const { reportId } = req.params;
+      const outputLanguage = normalizeSceneOutputLanguage(req.query.outputLanguage);
+      if (!outputLanguage) {
+        return res.status(400).json({
+          success: false,
+          error: 'outputLanguage must be en or zh-CN',
+          code: 'UNSUPPORTED_OUTPUT_LANGUAGE',
+        });
+      }
       const report = await deps.sceneStoryService.getReport(reportId);
       if (!report || !await readTraceMetadataForContext(report.traceId, requireRequestContext(req))) {
         return sendResourceNotFound(res, 'Report not found or expired');
       }
-      return res.json({ success: true, report });
+      return res.json({
+        success: true,
+        report: projectSceneReport(report, outputLanguage),
+      });
     } catch (error: any) {
       console.error('[AgentRoutes] getReport error:', error);
       return res.status(500).json({
@@ -239,12 +281,41 @@ export function registerSceneReconstructRoutes<TSession extends SceneReconstruct
 
   router.post('/scene-reconstruct', async (req, res) => {
     try {
-      const { traceId, options = {} } = req.body;
+      const { traceId } = req.body ?? {};
+      const rawOptions = req.body?.options;
+      if (
+        rawOptions !== undefined &&
+        (!rawOptions || typeof rawOptions !== 'object' || Array.isArray(rawOptions))
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: 'options must be an object',
+          code: 'INVALID_SCENE_OPTIONS',
+        });
+      }
+      const options = (rawOptions ?? {}) as Record<string, unknown>;
+      for (const field of ['generateTracks', 'forceRefresh'] as const) {
+        if (options[field] !== undefined && typeof options[field] !== 'boolean') {
+          return res.status(400).json({
+            success: false,
+            error: `${field} must be a boolean`,
+            code: 'INVALID_SCENE_OPTIONS',
+          });
+        }
+      }
 
-      if (!traceId) {
+      if (!traceId || typeof traceId !== 'string') {
         return res.status(400).json({
           success: false,
           error: 'traceId is required',
+        });
+      }
+      const outputLanguage = normalizeSceneOutputLanguage(options.outputLanguage);
+      if (!outputLanguage) {
+        return res.status(400).json({
+          success: false,
+          error: 'outputLanguage must be en or zh-CN',
+          code: 'UNSUPPORTED_OUTPUT_LANGUAGE',
         });
       }
 
@@ -272,8 +343,13 @@ export function registerSceneReconstructRoutes<TSession extends SceneReconstruct
       deps.ensureToolsRegistered();
 
       const deepAnalysis = false;
-      const generateTracks = options.generateTracks ?? true;
-      const query = deepAnalysis ? '场景还原' : '场景还原 仅检测';
+      const generateTracks = typeof options.generateTracks === 'boolean'
+        ? options.generateTracks
+        : true;
+      const forceRefresh = options.forceRefresh === true;
+      const query = outputLanguage === 'en'
+        ? (deepAnalysis ? 'Scene reconstruction' : 'Scene reconstruction detection only')
+        : (deepAnalysis ? '场景还原' : '场景还原 仅检测');
       const analysisId = `scene-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
       const owner = ownerFieldsFromContext(requireRequestContext(req));
 
@@ -293,6 +369,7 @@ export function registerSceneReconstructRoutes<TSession extends SceneReconstruct
         status: 'pending',
         traceId,
         query,
+        outputLanguage,
         ...owner,
         createdAt: Date.now(),
         lastActivityAt: Date.now(),
@@ -326,7 +403,8 @@ export function registerSceneReconstructRoutes<TSession extends SceneReconstruct
           skillExecutor,
           owner,
           options: {
-            forceRefresh: options.forceRefresh ?? false,
+            forceRefresh,
+            outputLanguage,
           },
         });
       })().catch((error) => {
@@ -480,15 +558,10 @@ export function registerSceneReconstructRoutes<TSession extends SceneReconstruct
       } else {
         const sceneStoryReport = session.sceneStoryReport;
         if (sceneStoryReport) {
-          response.result = {
-            reportId: sceneStoryReport.reportId,
-            summary: sceneStoryReport.summary,
-            scenesCount: sceneStoryReport.displayedScenes.length,
-            jobCount: sceneStoryReport.jobs.length,
-            partialReport: sceneStoryReport.partialReport,
-            executionTimeMs: sceneStoryReport.totalDurationMs,
-            cachePolicy: sceneStoryReport.cachePolicy,
-          };
+          response.result = projectSceneStoryStatusResult(
+            sceneStoryReport,
+            session.outputLanguage ?? DEFAULT_OUTPUT_LANGUAGE,
+          );
         }
       }
     }

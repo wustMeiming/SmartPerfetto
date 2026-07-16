@@ -170,7 +170,8 @@ provider/runtime identity.
 
 ## Health Check
 
-`GET /health` exposes the selected runtime:
+Authenticated `GET /api/runtime-health` exposes the selected runtime. Public
+`GET /health` returns only liveness and version:
 
 ```json
 {

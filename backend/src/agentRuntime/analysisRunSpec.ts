@@ -8,7 +8,12 @@ import { buildComplexityClassifierInput } from '../agentv3/queryComplexityContex
 import type { SceneType } from '../agentv3/sceneClassifier';
 import type { ComplexityClassifierInput, QueryComplexity, SelectionContext } from '../agentv3/types';
 import type { OutputLanguage } from '../agentv3/outputLanguage';
-import { normalizeCodeAwareMode, type CodeAwareMode } from '../services/codebase/codeAwareFeature';
+import {
+  MAX_CODEBASE_IDS_PER_ANALYSIS,
+  MAX_KNOWLEDGE_SOURCE_IDS_PER_ANALYSIS,
+  normalizeCodeAwareMode,
+  type CodeAwareMode,
+} from '../services/codebase/codeAwareFeature';
 import type { KnowledgeScope } from '../services/scopedKnowledgeStore';
 import type { ProviderScope } from '../services/providerManager';
 import type { RuntimeSelection } from './runtimeSelection';
@@ -99,8 +104,12 @@ export interface CreateAnalysisRunSpecInput {
   budget?: RuntimeBudgetInputs;
 }
 
-function compactCodebaseIds(ids: string[] | undefined): string[] {
-  return Array.from(new Set(ids ?? [])).filter(Boolean);
+function compactAuthorizationIds(ids: string[] | undefined, label: string, maxItems: number): string[] {
+  const compacted = Array.from(new Set(ids ?? [])).filter(Boolean);
+  if (compacted.length > maxItems) {
+    throw new Error(`${label} exceeds the maximum of ${maxItems} unique ids`);
+  }
+  return compacted;
 }
 
 function resolveEngineCapabilities(input: CreateAnalysisRunSpecInput): EngineCapabilities {
@@ -118,8 +127,16 @@ export function createAnalysisRunSpec(input: CreateAnalysisRunSpecInput): Analys
   const options = input.options ?? {};
   const engineCapabilities = resolveEngineCapabilities(input);
   const codeAwareMode = normalizeCodeAwareMode(options.codeAwareMode);
-  const codebaseIds = compactCodebaseIds(options.codebaseIds);
-  const knowledgeSourceIds = compactCodebaseIds(options.knowledgeSourceIds);
+  const codebaseIds = compactAuthorizationIds(
+    options.codebaseIds,
+    'codebaseIds',
+    MAX_CODEBASE_IDS_PER_ANALYSIS,
+  );
+  const knowledgeSourceIds = compactAuthorizationIds(
+    options.knowledgeSourceIds,
+    'knowledgeSourceIds',
+    MAX_KNOWLEDGE_SOURCE_IDS_PER_ANALYSIS,
+  );
   const providerScope = providerScopeFromAnalysisOptions(options);
   const knowledgeScope = knowledgeScopeFromAnalysisOptions(options);
   const classifierInput = buildComplexityClassifierInput({

@@ -120,4 +120,28 @@ describe('LocalEncryptedSecretStore', () => {
     expect(wrongKeyStore.get('secret:provider:test')).toEqual({});
     warnSpy.mockRestore();
   });
+
+  it('fails closed instead of overwriting malformed encrypted storage', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'provider-secrets.enc.json'),
+      '{not-json',
+      'utf-8',
+    );
+    const store = new LocalEncryptedSecretStore(tmpDir);
+
+    expect(() => store.put('secret:provider:new', {openaiApiKey: 'must-not-write'}))
+      .toThrow(/secret_store_invalid_storage_requires_recovery/);
+    await expect(fs.readFile(path.join(tmpDir, 'provider-secrets.enc.json'), 'utf-8'))
+      .resolves.toBe('{not-json');
+  });
+
+  it('merges writes from separate store instances under the shared filesystem lock', () => {
+    const first = new LocalEncryptedSecretStore(tmpDir);
+    const second = new LocalEncryptedSecretStore(tmpDir);
+    first.put('secret:first', {openaiApiKey: 'first'});
+    second.put('secret:second', {openaiApiKey: 'second'});
+
+    expect(first.get('secret:first')).toEqual({openaiApiKey: 'first'});
+    expect(first.get('secret:second')).toEqual({openaiApiKey: 'second'});
+  });
 });

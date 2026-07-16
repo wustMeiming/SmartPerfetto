@@ -161,7 +161,36 @@ plan_template:
       waivable: false
       trigger_keywords: ['TextureView', 'SurfaceTexture', 'WebView', 'DrawFunctor', 'React Native', 'RN', 'Fabric', 'JSI', 'GLSurfaceView', 'NativeActivity', 'OpenGL', 'Compose', 'Flutter', 'mixed', '混合']
       match_keywords: ['TextureView', 'SurfaceTexture', 'WebView', 'DrawFunctor', 'React Native', 'RN', 'Fabric', 'JSI', 'GLSurfaceView', 'NativeActivity', 'OpenGL', 'Compose', 'Flutter', 'mixed', '混合', '架构']
-      suggestion: '非标准/混合渲染架构必须在 plan.expectedCalls 声明对应专属 skill；Flutter/TextureView 用 invoke_skill(flutter_scrolling_analysis)，其他架构用对应 producer/SF skill。执行时拆 HWUI host 链路 + producer 链路 + SF 合成链路，再合并因果，避免只看 FrameTimeline'
+      suggestion: '非标准/混合渲染架构必须在 plan.expectedCalls 声明对应专属 skill：Flutter 用 flutter_scrolling_analysis，TextureView 用 textureview_producer_frame_timing，其他架构选门禁返回的匹配 producer/SF skill。执行时拆 HWUI host 链路 + producer 链路 + SF 合成链路，再合并因果，避免只看 FrameTimeline。'
+      conditional_required_expected_calls:
+        - trigger_keywords: ['Flutter', 'FLUTTER']
+          required_expected_calls:
+            - tool: invoke_skill
+              skill_id: flutter_scrolling_analysis
+        - trigger_keywords: ['TextureView', 'SurfaceTexture', 'TEXTUREVIEW_STANDARD']
+          required_expected_calls:
+            - tool: invoke_skill
+              skill_id: textureview_producer_frame_timing
+        - trigger_keywords: ['WebView', 'DrawFunctor']
+          required_expected_calls:
+            - tool: invoke_skill
+              skill_id: webview_drawfunctor_jank_chain
+        - trigger_keywords: ['RN_OLD_ARCH', 'React Native Bridge']
+          required_expected_calls:
+            - tool: invoke_skill
+              skill_id: rn_bridge_to_frame_jank
+        - trigger_keywords: ['RN_NEW_ARCH', 'Fabric', 'JSI']
+          required_expected_calls:
+            - tool: invoke_skill
+              skill_id: rn_fabric_render_jank
+        - trigger_keywords: ['GLSurfaceView', 'NativeActivity', 'OPENGL', 'GL_STANDALONE']
+          required_expected_calls:
+            - tool: invoke_skill
+              skill_id: gl_standalone_swap_jank
+        - trigger_keywords: ['Compose', 'COMPOSE']
+          required_expected_calls:
+            - tool: invoke_skill
+              skill_id: compose_recomposition_hotspot
       required_expected_call_alternatives:
         - tool: invoke_skill
           skill_id: flutter_scrolling_analysis

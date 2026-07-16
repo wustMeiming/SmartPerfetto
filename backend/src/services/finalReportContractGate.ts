@@ -16,6 +16,12 @@ export interface FinalReportContractCompletenessInput {
 export interface FinalReportContractCompletenessResult {
   sceneType: SceneType;
   missingLabels: string[];
+  missingSections: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    recoveryText: { zh: string[]; en: string[] };
+  }>;
 }
 
 export interface FinalReportContractApplicabilityResult {
@@ -99,12 +105,21 @@ export function assessFinalReportContractCompleteness(
   const sceneType = applicability.sceneType;
   const contract = getFinalReportContract(sceneType);
 
-  const missingLabels = (contract?.requiredSections ?? [])
+  const missingRequirements = (contract?.requiredSections ?? [])
     .filter(requirement => requirement.required !== false)
     .filter(requirement => requirementApplies(input, requirement))
-    .filter(requirement => !requirementSatisfied(input.conclusion, requirement))
-    .map(requirement => requirement.label || requirement.id);
+    .filter(requirement => !requirementSatisfied(input.conclusion, requirement));
+  const missingLabels = missingRequirements.map(requirement => requirement.label || requirement.id);
 
   if (missingLabels.length === 0) return undefined;
-  return { sceneType, missingLabels };
+  return {
+    sceneType,
+    missingLabels,
+    missingSections: missingRequirements.map(requirement => ({
+      id: requirement.id,
+      label: requirement.label || requirement.id,
+      ...(requirement.description ? { description: requirement.description } : {}),
+      recoveryText: requirement.recoveryText,
+    })),
+  };
 }

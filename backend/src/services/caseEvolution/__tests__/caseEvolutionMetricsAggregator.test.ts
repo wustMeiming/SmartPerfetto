@@ -33,7 +33,7 @@ afterEach(() => {
 function candidate(candidateId: string): CaseCandidate {
   return {
     candidateId,
-    schemaVersion: 'case_candidate@1',
+    schemaVersion: 'case_candidate@2',
     provenance: {
       sourceSessionId: 'session-1',
       sourceAnalysisRunId: 'run-1',
@@ -43,6 +43,7 @@ function candidate(candidateId: string): CaseCandidate {
       engine: 'claude',
       sceneType: 'scrolling',
       architectureType: 'unknown',
+      originScope: {tenantId: 'default-dev-tenant', workspaceId: 'default-workspace'},
     },
     cluster: {
       scene: 'scrolling',

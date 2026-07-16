@@ -15,7 +15,10 @@ import { skillRegistry, type SkillRegistry } from '../services/skillEngine/skill
 import { getWorkspaceSkillRegistry } from '../services/skillPacks/workspaceSkillRegistryProvider';
 import { createArchitectureDetector } from '../agent/detectors/architectureDetector';
 import { createDataEnvelope, displayResultToEnvelope } from '../types/dataContract';
-import type { DisplayResult as SkillDisplayResult } from '../services/skillEngine/types';
+import type {
+  DisplayResult as SkillDisplayResult,
+  SkillExecutionResult,
+} from '../services/skillEngine/types';
 import type { IdentityResolutionV1 } from '../types/identityContract';
 import type { StreamingUpdate } from '../agent/types';
 import type { ArchitectureInfo } from '../agent/detectors/types';
@@ -53,7 +56,11 @@ import {
 } from './strategyLoader';
 import { matchPhaseHintForNextPhase } from './phaseHintMatcher';
 import { buildActivePhaseReminder } from './activePhaseReminder';
-import { validatePlanAgainstSceneTemplate, MIN_WAIVER_REASON_CHARS } from './scenePlanTemplates';
+import {
+  validatePlanAgainstSceneTemplate,
+  MIN_WAIVER_REASON_CHARS,
+  type PlanValidationResult,
+} from './scenePlanTemplates';
 import { summarizeToolCallInput } from './toolCallSummary';
 import { buildQuickArtifactGuidance } from './quickAnswerContract';
 import {
@@ -105,7 +112,8 @@ import {
   type ToolRequestScope,
 } from './mcpToolRegistry';
 import { backendLogPath } from '../runtimePaths';
-import {CodebaseRegistry} from '../services/codebase/codebaseRegistry';
+import {diagnosticLogIdentity} from '../utils/logger';
+import {activeCodebaseGeneration, CodebaseRegistry} from '../services/codebase/codebaseRegistry';
 import {getDefaultCodebaseRegistry} from '../services/codebase/defaultCodebaseServices';
 import {CodeLookupLedger} from '../services/codebase/codeLookupLedger';
 import {PatchProposer} from '../services/codebase/patchProposer';
@@ -116,6 +124,11 @@ import {
   getDefaultExternalKnowledgeSourceRegistry,
 } from '../services/externalKnowledgeSourceRegistry';
 import {SymbolResolver} from '../services/symbol/symbolResolver';
+import {
+  analysisContextUsesPrivateKnowledge,
+  buildAnalysisContextAuthorizationFingerprint,
+  type AnalysisContextSelection,
+} from '../services/resolvedAnalysisContext';
 import type { RuntimeToolExtra } from '../agentRuntime/runtimeToolSpec';
 import {
   rethrowIfTraceProcessorQueryCancelled,
@@ -455,9 +468,10 @@ function normalizeExpectedCall(call: unknown): NonNullable<PlanPhase['expectedCa
 function parseExpectedCallShorthand(value: string): Record<string, unknown> | undefined {
   const text = value.trim();
   if (!text) return undefined;
-  const functionMatch = text.match(/^([A-Za-z0-9_.:-]+)\(([^)]+)\)$/);
+  const functionMatch = text.match(/^([A-Za-z0-9_.:-]+)\(([^)]*)\)$/);
   if (functionMatch) {
-    return { tool: functionMatch[1], skillId: functionMatch[2] };
+    const skillId = functionMatch[2].trim();
+    return skillId ? { tool: functionMatch[1], skillId } : { tool: functionMatch[1] };
   }
   const colonIndex = text.indexOf(':');
   if (colonIndex > 0) {
@@ -645,7 +659,7 @@ const PHASE_SEMANTIC_PATTERNS: Array<{ kind: PhaseSemanticKind; pattern: RegExp 
   },
   {
     kind: 'overview',
-    pattern: /(概览|批量根因分类|滑动性能概览|启动概览|启动事件|启动类型|数据质量|ttid|ttfd|dur\s*=|帧统计|掉帧分布|scrolling_analysis|startup_overview|overview|startup event|launch type)/i,
+    pattern: /(概览|批量根因分类|根因分布|reason_code\s*分布|batch_frame_root_cause|滑动性能概览|启动概览|启动事件|启动类型|数据质量|ttid|ttfd|dur\s*=|帧统计|掉帧分布|scrolling_analysis|startup_overview|overview|startup event|launch type)/i,
   },
 ];
 
@@ -793,6 +807,19 @@ const REASONING_NUDGE_ZH = '\n\n[REFLECT] 在执行下一步之前：这个数�
 const REASONING_NUDGE_EN = '\n\n[REFLECT] Before the next action: what is the key finding from this data? Does it support or refute your hypothesis? If there is an important inference, record it with submit_hypothesis or write_analysis_note.';
 export const MIN_PHASE_SUMMARY_CHARS = 15;
 
+const EXPECTED_CALL_SKIP_CONDITION_PATTERN =
+  /(条件|触发条件|阈值|threshold|condition).{0,32}(未触发|未达到|未满足|不满足|not (?:triggered|met|satisfied)|below (?:the )?threshold)|(不是|并非)(?:冷|热|温)?启动|not (?:a )?(?:cold|warm|hot) start/i;
+const EXPECTED_CALL_SKIP_EVIDENCE_SUBJECT_PATTERN =
+  /(trace|跟踪|数据|信号|事件|窗口|进程|线程|帧|启动记录|schema|字段|列|表|模块|stdlib|data|signal|event|window|process|thread|frame|startup)/i;
+const EXPECTED_CALL_SKIP_UNAVAILABLE_PATTERN =
+  /(无(?:对应|相关|可用|足够)?|没有(?:对应|相关|可用|足够)?|缺少|缺失|不可用|不支持|无法执行|not (?:available|present|found|supported)|missing|absent|unavailable|unsupported|insufficient|no (?:matching |relevant |available )?)/i;
+
+function skipSummaryExplainsEvidenceBoundary(summary: string): boolean {
+  if (EXPECTED_CALL_SKIP_CONDITION_PATTERN.test(summary)) return true;
+  return EXPECTED_CALL_SKIP_EVIDENCE_SUBJECT_PATTERN.test(summary) &&
+    EXPECTED_CALL_SKIP_UNAVAILABLE_PATTERN.test(summary);
+}
+
 function sqlErrorLogFile(scope?: KnowledgeScope): string {
   if (!enterpriseKnowledgeStoreEnabled() && !scope) {
     return path.join(SQL_ERROR_LOG_DIR, 'error_fix_pairs.json');
@@ -809,7 +836,9 @@ function sqlErrorLogFile(scope?: KnowledgeScope): string {
 export function loadLearnedSqlFixPairs(
   maxPairs = 10,
   scope?: KnowledgeScope,
+  selection: AnalysisContextSelection = {},
 ): SqlErrorFixPair[] {
+  if (analysisContextUsesPrivateKnowledge(selection)) return [];
   try {
     const logFile = sqlErrorLogFile(scope);
     if (!fs.existsSync(logFile)) return [];
@@ -1052,6 +1081,8 @@ export interface ClaudeMcpServerOptions {
   codebaseIds?: string[];
   /** Private external-knowledge source ids whitelisted for this analysis session. */
   knowledgeSourceIds?: string[];
+  /** Non-secret authorization partition for active lookup/patch capability state. */
+  analysisContextFingerprint?: string;
   /** Test hook / alternate private external-knowledge registry. */
   externalKnowledgeRegistry?: ExternalKnowledgeSourceRegistry;
   /** Test hook / alternate registry. */
@@ -1079,17 +1110,68 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
   const outputLanguage = options.outputLanguage ?? DEFAULT_OUTPUT_LANGUAGE;
   const knowledgeScope = options.knowledgeScope;
   const codeAwareMode = normalizeCodeAwareMode(options.codeAwareMode);
-  const codebaseIds = Array.from(new Set(options.codebaseIds ?? [])).filter(Boolean);
+  const codebaseIds = codeAwareMode === 'off'
+    ? []
+    : Array.from(new Set(options.codebaseIds ?? [])).filter(Boolean);
   const knowledgeSourceIds = Array.from(new Set(options.knowledgeSourceIds ?? [])).filter(Boolean);
+  const retrievedContextSafety = loadPromptTemplate('retrieved-context-tool-safety');
+  if (!retrievedContextSafety) {
+    throw new Error('Missing required retrieved-context-safety prompt template');
+  }
+  const retrievedContextToolBoundary = retrievedContextSafety.replace(/\s+/g, ' ').trim();
+  const retrievedData = <T extends Record<string, unknown>>(payload: T): T & {
+    dataTrust: 'untrusted_retrieved_data';
+  } => ({...payload, dataTrust: 'untrusted_retrieved_data'});
   const knowledgeSourceCapabilityHint = knowledgeSourceIds.length > 0
     ? ` Request-authorized knowledge source ids: ${knowledgeSourceIds.join(', ')}.`
     : ' No private knowledge source is authorized for this request.';
   const externalKnowledgeRegistry = options.externalKnowledgeRegistry ??
     getDefaultExternalKnowledgeSourceRegistry();
   const codebaseRegistry = options.codebaseRegistry ?? getDefaultCodebaseRegistry();
+  const ragStore = options.ragStore ?? getRagStore();
+  const analysisContextSelection = {codeAwareMode, codebaseIds, knowledgeSourceIds};
+  const privateAnalysisContext = analysisContextUsesPrivateKnowledge(analysisContextSelection);
+  const pinnedAnalysisContextFingerprint = options.analysisContextFingerprint ??
+    buildAnalysisContextAuthorizationFingerprint(analysisContextSelection, knowledgeScope ?? {}, {
+      codebaseRegistry,
+      knowledgeRegistry: externalKnowledgeRegistry,
+    });
+  const pinnedCodebaseGenerations = Object.fromEntries(codebaseIds.flatMap(codebaseId => {
+    const ref = codebaseRegistry.get(codebaseId, knowledgeScope);
+    return ref ? [[codebaseId, activeCodebaseGeneration(ref)]] : [];
+  }));
+  const pinnedKnowledgeSourceGenerations = Object.fromEntries(knowledgeSourceIds.flatMap(sourceId => {
+    const source = externalKnowledgeRegistry.get(sourceId, knowledgeScope ?? {});
+    return source?.activeGeneration ? [[sourceId, source.activeGeneration]] : [];
+  }));
+  const assertPrivateAnalysisContextCurrent = (): void => {
+    const currentFingerprint = buildAnalysisContextAuthorizationFingerprint(
+      analysisContextSelection,
+      knowledgeScope ?? {},
+      {codebaseRegistry, knowledgeRegistry: externalKnowledgeRegistry},
+    );
+    if (currentFingerprint !== pinnedAnalysisContextFingerprint) {
+      throw new Error('analysis_context_changed_restart_required');
+    }
+  };
   const codeLookupLedger = options.codeLookupLedger ?? (
-    options.sessionId ? CodeLookupLedger.restore(options.sessionId, 12_000, 2) : undefined
+    options.sessionId
+      ? CodeLookupLedger.restore(
+          options.sessionId,
+          12_000,
+          2,
+          undefined,
+          pinnedAnalysisContextFingerprint,
+        )
+      : undefined
   );
+  const activeCodebaseGenerations = (ids: readonly string[]): Record<string, string> => {
+    assertPrivateAnalysisContextCurrent();
+    return Object.fromEntries(ids.flatMap(codebaseId => {
+      const generation = pinnedCodebaseGenerations[codebaseId];
+      return generation ? [[codebaseId, generation]] : [];
+    }));
+  };
   const toolRequestScope: ToolRequestScope = {
     sessionId: options.sessionId ?? traceId,
     hasCodebaseAccess: codeAwareMode !== 'off' && codebaseIds.length > 0,
@@ -1216,6 +1298,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     missingAspectIds: string[];
     nonWaivableMissingAspectIds: string[];
     warnings: string[];
+    requirements: NonNullable<PlanValidationResult['missingAspectRequirements']>;
   } | null = null;
 
   function clearPendingPlanRevisionGate(plan = options.analysisPlan?.current): void {
@@ -1242,6 +1325,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       missingAspectIds: gate?.missingAspectIds ?? [],
       nonWaivableMissingAspectIds: gate?.nonWaivableMissingAspectIds ?? [],
       missingAspectSuggestions: gate?.warnings ?? [],
+      missingAspectRequirements: gate?.requirements ?? [],
     };
   }
 
@@ -1555,6 +1639,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     missingAspectIds: string[];
     nonWaivableMissingAspectIds: string[];
     planWarnings: string[];
+    missingAspectRequirements: NonNullable<PlanValidationResult['missingAspectRequirements']>;
     attempt: number;
     tooShortWaivers?: PlanAspectWaiver[];
     mode: 'submit_plan' | 'revise_plan';
@@ -1572,6 +1657,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         ? input.nonWaivableMissingAspectIds
         : undefined,
       missingAspectSuggestions: input.planWarnings,
+      missingAspectRequirements: input.missingAspectRequirements,
       attempt: input.attempt,
       maxAttempts: MAX_PLAN_ATTEMPTS,
       tooShortWaivers: input.tooShortWaivers && input.tooShortWaivers.length > 0
@@ -1607,6 +1693,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         missingAspectIds,
         nonWaivableMissingAspectIds,
         warnings: planValidation.warnings,
+        requirements: planValidation.missingAspectRequirements ?? [],
       };
       plan.unresolvedAspects = Array.from(new Set([
         ...(plan.unresolvedAspects ?? []),
@@ -1621,6 +1708,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         ? nonWaivableMissingAspectIds
         : undefined,
       missingAspectSuggestions: planValidation.warnings,
+      missingAspectRequirements: planValidation.missingAspectRequirements ?? [],
       action_required: 'revise_plan',
       note: localize(
         outputLanguage,
@@ -2535,10 +2623,14 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             return jaccard > 0.3; // At least 30% token overlap
           });
           if (matchingError) {
+            // Private source/RAG runs may learn within this in-memory turn, but
+            // raw SQL and provider errors must never cross the durable boundary.
+            if (!privateAnalysisContext) {
             await logSqlErrorFixPair(
               { ...matchingError, fixedSql: sql },
               knowledgeScope,
             );
+            }
             const idx = recentSqlErrors.indexOf(matchingError);
             if (idx >= 0) recentSqlErrors.splice(idx, 1);
           }
@@ -2855,8 +2947,11 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           };
           recentSqlErrors.push(errorPair);
           if (recentSqlErrors.length > 10) recentSqlErrors.shift();
-          // Persist to disk (fire-and-forget) for cross-session learning
-          logSqlErrorFixPair(errorPair, knowledgeScope).catch(() => {});
+          // Persist only trace-public learning. Skill params/errors can contain
+          // private source text or provider echoes.
+          if (!privateAnalysisContext) {
+            logSqlErrorFixPair(errorPair, knowledgeScope).catch(() => {});
+          }
         }
 
         // Artifact mode stores displayResults before emitting DataEnvelopes so
@@ -3598,9 +3693,9 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
   // never invents content.
   const lookupBlogKnowledge = tool(
     'lookup_blog_knowledge',
-    'Retrieve Android performance blog knowledge or request-authorized private Wiki background. ' +
-    `Wiki is explanatory, not trace evidence.${knowledgeSourceCapabilityHint} ` +
-    'If unsupportedReason is present, report unavailable and never invent or paraphrase unavailable content.',
+    `Retrieve public blog or authorized private Wiki background; Wiki is not trace evidence.${knowledgeSourceCapabilityHint} ` +
+    'On unsupportedReason, report unavailable without invention. ' +
+    retrievedContextToolBoundary,
     {
       query: z.string().describe('Search query — natural language is fine; tokens are lowercased and matched against snippet + title.'),
       top_k: z.number().int().min(1).max(20).optional().describe('Maximum hits returned (1-20, default 5).'),
@@ -3610,8 +3705,8 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         .describe(`Request-whitelisted source id for Android Internals Wiki.${knowledgeSourceCapabilityHint}`),
     },
     async ({ query, top_k, source, knowledge_source_id }) => {
-      const store = options.ragStore ?? getRagStore();
       if (source === 'android_internals_wiki') {
+        assertPrivateAnalysisContextCurrent();
         const sourceId = normalizeOptionalToolString(knowledge_source_id) ??
           (knowledgeSourceIds.length === 1 ? knowledgeSourceIds[0] : undefined);
         if (!sourceId || !knowledgeSourceIds.includes(sourceId) || !knowledgeScope) {
@@ -3644,11 +3739,15 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             }],
           };
         }
-        const raw = store.search(query, {
+        const pinnedGeneration = pinnedKnowledgeSourceGenerations[sourceId];
+        if (!pinnedGeneration) {
+          throw new Error('analysis_context_changed_restart_required');
+        }
+        const raw = ragStore.search(query, {
           topK: top_k ?? 5,
           kinds: ['android_internals_wiki'],
           knowledgeSourceIds: [sourceId],
-          activeSourceGenerations: {[sourceId]: access.source.activeGeneration},
+          activeSourceGenerations: {[sourceId]: pinnedGeneration},
           scope: knowledgeScope,
         });
         const filtered = await filterRagLookup(raw, {
@@ -3661,20 +3760,22 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           knowledgeScope,
         });
         await codeLookupLedger?.flush();
+        assertPrivateAnalysisContextCurrent();
         return {
           content: [{
             type: 'text' as const,
-            text: JSON.stringify({success: true, result: filtered}),
+            text: JSON.stringify(retrievedData({success: true, result: filtered})),
           }],
         };
       }
-      const result = store.search(query, {
+      const result = ragStore.search(query, {
         topK: top_k ?? 5,
         kinds: ['androidperformance.com'],
         scope: knowledgeScope,
+        activeCodebaseGenerations: activeCodebaseGenerations(codebaseIds),
       });
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+        content: [{ type: 'text' as const, text: JSON.stringify(retrievedData({...result})) }],
       };
     },
     { annotations: { readOnlyHint: true } },
@@ -3809,9 +3910,8 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
   // NOT cite as evidence, say the source is unavailable.
   const lookupAospSource = tool(
     'lookup_aosp_source',
-    'Retrieve indexed AOSP source chunks (frameworks/base, system/, etc.) to ground analysis claims in the actual implementation. ' +
-    'Returns ranked snippets with license + commit-anchored chunkId. ' +
-    'When the result carries `unsupportedReason` (license_blocked, index empty), the agent must say the source is unavailable and must NOT summarize, paraphrase, or invent content.',
+    'Retrieve indexed AOSP source with license and commit provenance. On unsupportedReason, report unavailable without invention. ' +
+    retrievedContextToolBoundary,
     {
       query: z.string().describe('Search query — typically a function or class name, or a behavior description.'),
       top_k: z.number().int().min(1).max(20).optional().describe('Maximum hits returned (1-20, default 5).'),
@@ -3831,22 +3931,31 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           isError: true,
         };
       }
-      const store = getRagStore();
-      const result = store.search(query, {
+      const selectedAospIds = codebaseIds.filter(id =>
+        codebaseRegistry.get(id, knowledgeScope)?.kind === 'aosp');
+      const effectiveCodebaseIds = codebaseId ? [codebaseId] : selectedAospIds;
+      if (codebaseId && !selectedAospIds.includes(codebaseId)) {
+        return {
+          content: [{type: 'text' as const, text: JSON.stringify({success: false, error: 'Requested codebase is not a registered AOSP source'})}],
+          isError: true,
+        };
+      }
+      const result = ragStore.search(query, {
         topK: top_k ?? 5,
         kinds: ['aosp'],
-        ...(codebaseId ? {codebaseIds: [codebaseId]} : {}),
+        ...(effectiveCodebaseIds.length > 0 ? {codebaseIds: effectiveCodebaseIds} : {}),
         ...(buildId ? {buildId} : {}),
         ...(symbolExact ? {symbolExact} : {}),
         ...(pathPrefix ? {pathPrefix} : {}),
         scope: knowledgeScope,
+        activeCodebaseGenerations: activeCodebaseGenerations(effectiveCodebaseIds),
       });
       if (result.results.some(hit => hit.chunk?.registryOrigin === 'codebase_registry')) {
         const scopedResult = {
           ...result,
           results: result.results.filter(hit =>
             hit.chunk?.registryOrigin !== 'codebase_registry' ||
-            (hit.chunk.codebaseId && codebaseIds.includes(hit.chunk.codebaseId))),
+            (hit.chunk.codebaseId && effectiveCodebaseIds.includes(hit.chunk.codebaseId))),
         };
         const filtered = await filterRagLookup(scopedResult, {
           toolName: 'lookup_aosp_source',
@@ -3855,14 +3964,16 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           ledger: codeLookupLedger,
           allowProviderSend: codeAwareMode === 'provider_send',
           sessionId: options.sessionId,
+          knowledgeScope,
         });
         await codeLookupLedger?.flush();
+        assertPrivateAnalysisContextCurrent();
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify({success: true, result: filtered}) }],
+          content: [{ type: 'text' as const, text: JSON.stringify(retrievedData({success: true, result: filtered})) }],
         };
       }
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+        content: [{ type: 'text' as const, text: JSON.stringify(retrievedData({...result})) }],
       };
     },
     { annotations: { readOnlyHint: true } },
@@ -3874,8 +3985,8 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
   // results must NOT be paraphrased or fabricated.
   const lookupOemSdk = tool(
     'lookup_oem_sdk',
-    'Retrieve indexed OEM SDK / tuning documentation chunks. Optionally restrict by vendor via the URI prefix (`oem://<vendor>/...`). ' +
-    'Read-only over the RagStore. When the result carries `unsupportedReason` (license_blocked, index empty), the agent must say the source is unavailable and must NOT summarize or invent.',
+    'Retrieve indexed OEM SDK/tuning documentation, optionally by vendor. On unsupportedReason, report unavailable without invention. ' +
+    retrievedContextToolBoundary,
     {
       query: z.string().describe('Search query — typically a tuning concept or vendor-specific knob.'),
       top_k: z.number().int().min(1).max(20).optional().describe('Maximum hits returned (1-20, default 5).'),
@@ -3891,20 +4002,29 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           isError: true,
         };
       }
-      const store = getRagStore();
-      const result = store.search(query, {
+      const selectedOemIds = codebaseIds.filter(id =>
+        codebaseRegistry.get(id, knowledgeScope)?.kind === 'oem_sdk');
+      const effectiveCodebaseIds = codebaseId ? [codebaseId] : selectedOemIds;
+      if (codebaseId && !selectedOemIds.includes(codebaseId)) {
+        return {
+          content: [{type: 'text' as const, text: JSON.stringify({success: false, error: 'Requested codebase is not a registered OEM SDK source'})}],
+          isError: true,
+        };
+      }
+      const result = ragStore.search(query, {
         topK: top_k ?? 5,
         kinds: ['oem_sdk'],
-        ...(codebaseId ? {codebaseIds: [codebaseId]} : {}),
+        ...(effectiveCodebaseIds.length > 0 ? {codebaseIds: effectiveCodebaseIds} : {}),
         ...(vendorId ? {vendor: vendorId} : {}),
         scope: knowledgeScope,
+        activeCodebaseGenerations: activeCodebaseGenerations(effectiveCodebaseIds),
       });
       if (result.results.some(hit => hit.chunk?.registryOrigin === 'codebase_registry')) {
         const scopedResult = {
           ...result,
           results: result.results.filter(hit =>
             hit.chunk?.registryOrigin !== 'codebase_registry' ||
-            (hit.chunk.codebaseId && codebaseIds.includes(hit.chunk.codebaseId))),
+            (hit.chunk.codebaseId && effectiveCodebaseIds.includes(hit.chunk.codebaseId))),
         };
         const filtered = await filterRagLookup(scopedResult, {
           toolName: 'lookup_oem_sdk',
@@ -3913,14 +4033,16 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           ledger: codeLookupLedger,
           allowProviderSend: codeAwareMode === 'provider_send',
           sessionId: options.sessionId,
+          knowledgeScope,
         });
         await codeLookupLedger?.flush();
+        assertPrivateAnalysisContextCurrent();
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify({success: true, result: filtered}) }],
+          content: [{ type: 'text' as const, text: JSON.stringify(retrievedData({success: true, result: filtered})) }],
         };
       }
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+        content: [{ type: 'text' as const, text: JSON.stringify(retrievedData({...result})) }],
       };
     },
     { annotations: { readOnlyHint: true } },
@@ -3932,17 +4054,24 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     'Returns metadata only; it never exposes local root paths.',
     {},
     async () => {
+      assertPrivateAnalysisContextCurrent();
       const allowed = new Set(codebaseIds);
-      const codebases = codebaseRegistry.list()
+      const codebases = codebaseRegistry.list(knowledgeScope)
         .filter(ref => allowed.has(ref.codebaseId))
         .map(ref => ({
           codebaseId: ref.codebaseId,
           kind: ref.kind,
           displayName: ref.displayName,
           indexGeneration: ref.indexGeneration,
+          activeGeneration: ref.activeGeneration,
+          contentFingerprint: ref.contentFingerprint,
+          indexedRevision: ref.indexedRevision,
+          indexedDirty: ref.indexedDirty,
+          commitProvenance: ref.commitProvenance,
           chunkCount: ref.chunkCount,
           eligibleForSendToProvider: ref.eligibleForSendToProvider,
         }));
+      assertPrivateAnalysisContextCurrent();
       return {
         content: [{type: 'text' as const, text: JSON.stringify({success: true, codebases})}],
       };
@@ -3953,7 +4082,8 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
   const lookupAppSource = tool(
     'lookup_app_source',
     'Look up registered app source chunks for this analysis session. ' +
-    'Only whitelisted codebase IDs are accepted. In metadata_only mode the result carries file/symbol references without snippets.',
+    'Only whitelisted codebase IDs are accepted. In metadata_only mode the result carries file/symbol references without snippets. ' +
+    retrievedContextToolBoundary,
     {
       query: z.string().describe('Natural-language query, symbol, class, method, or file term.'),
       top_k: z.number().int().min(1).max(20).optional().describe('Maximum hits returned (1-20, default 5).'),
@@ -3978,7 +4108,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           isError: true,
         };
       }
-      const raw = getRagStore().search(query, {
+      const raw = ragStore.search(query, {
         topK: top_k ?? 5,
         kinds: ['app_source'],
         codebaseIds: allowed,
@@ -3986,6 +4116,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         ...(filePath ? {filePathExact: filePath} : {}),
         ...(pathPrefix ? {pathPrefix} : {}),
         scope: knowledgeScope,
+        activeCodebaseGenerations: activeCodebaseGenerations(allowed),
       });
       const filtered = await filterRagLookup(raw, {
         toolName: 'lookup_app_source',
@@ -3994,10 +4125,12 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         ledger: codeLookupLedger,
         allowProviderSend: codeAwareMode === 'provider_send',
         sessionId: options.sessionId,
+        knowledgeScope,
       });
       await codeLookupLedger?.flush();
+      assertPrivateAnalysisContextCurrent();
       return {
-        content: [{type: 'text' as const, text: JSON.stringify({success: true, result: filtered})}],
+        content: [{type: 'text' as const, text: JSON.stringify(retrievedData({success: true, result: filtered}))}],
       };
     },
     {annotations: {readOnlyHint: true}},
@@ -4005,9 +4138,8 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
 
   const lookupKernelSource = tool(
     'lookup_kernel_source',
-    'Use when kernel/vendor source evidence is needed after trace evidence points at binder, scheduler, mm, io, or a kernel symbol. ' +
-    'Do NOT use for app or AOSP framework code. Prerequisites: a whitelisted kernel_source codebase, vendor or codebase_id, and a path_prefix/subsys. ' +
-    'Budget: top_k is capped at 20 and metadata_only sessions return CodeRef metadata without snippets. Outcomes: source hits, metadata-only hits, or an explicit unsupportedReason.',
+    'Retrieve whitelisted kernel/vendor source after trace evidence points to a kernel subsystem or symbol. Requires codebase/vendor and path prefix; metadata_only omits snippets. ' +
+    retrievedContextToolBoundary,
     {
       query: z.string().describe('Kernel symbol, subsystem, or behavior query.'),
       top_k: z.number().int().min(1).max(20).optional().describe('Maximum hits returned (1-20, default 5).'),
@@ -4033,7 +4165,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         };
       }
       const kernelRefs = allowed
-        .map(id => codebaseRegistry.get(id))
+        .map(id => codebaseRegistry.get(id, knowledgeScope))
         .filter(ref => ref?.kind === 'kernel_source');
       const vendors = new Set(kernelRefs.map(ref => ref!.vendor).filter(Boolean));
       if (!codebaseId && !vendorId && vendors.size > 1) {
@@ -4046,7 +4178,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           isError: true,
         };
       }
-      const raw = getRagStore().search(query, {
+      const raw = ragStore.search(query, {
         topK: top_k ?? 5,
         kinds: ['kernel_source'],
         codebaseIds: kernelRefs.map(ref => ref!.codebaseId),
@@ -4054,6 +4186,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         ...(symbolExact ? {symbolExact} : {}),
         ...(pathPrefix ? {pathPrefix} : {}),
         scope: knowledgeScope,
+        activeCodebaseGenerations: activeCodebaseGenerations(kernelRefs.map(ref => ref!.codebaseId)),
       });
       const filtered = await filterRagLookup(raw, {
         toolName: 'lookup_kernel_source',
@@ -4062,10 +4195,12 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         ledger: codeLookupLedger,
         allowProviderSend: codeAwareMode === 'provider_send',
         sessionId: options.sessionId,
+        knowledgeScope,
       });
       await codeLookupLedger?.flush();
+      assertPrivateAnalysisContextCurrent();
       return {
-        content: [{type: 'text' as const, text: JSON.stringify({success: true, result: filtered})}],
+        content: [{type: 'text' as const, text: JSON.stringify(retrievedData({success: true, result: filtered}))}],
       };
     },
     {annotations: {readOnlyHint: true}},
@@ -4086,6 +4221,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       top_k: z.number().int().min(1).max(20).optional().describe('Maximum candidates returned.'),
     },
     async ({symbol, kind, codebase_id, file_path, build_id, vendor, top_k}) => {
+      assertPrivateAnalysisContextCurrent();
       const codebaseId = normalizeOptionalToolString(codebase_id);
       const filePath = normalizeOptionalToolString(file_path);
       const buildId = normalizeOptionalToolString(build_id);
@@ -4101,9 +4237,9 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           isError: true,
         };
       }
-      const resolver = new SymbolResolver(getRagStore());
+      const resolver = new SymbolResolver(ragStore, knowledgeScope, codebaseRegistry);
       const results = allowed.map(id => {
-        const ref = codebaseRegistry.get(id);
+        const ref = codebaseRegistry.get(id, knowledgeScope);
         if (kind === 'kernel' || ref?.kind === 'kernel_source') {
           return resolver.resolveKernel({
             symbol,
@@ -4129,6 +4265,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           topK: top_k ?? 5,
         });
       });
+      assertPrivateAnalysisContextCurrent();
       return {
         content: [{type: 'text' as const, text: JSON.stringify({
           success: results.some(result => result.success),
@@ -4150,7 +4287,13 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       patch_sketch: z.string().optional().describe('Optional high-level sketch when no verified diff is available.'),
     },
     async ({context_chunk_ids, problem, proposed_diff, patch_sketch}) => {
-      const proposer = new PatchProposer(getRagStore(), codebaseRegistry, codeLookupLedger);
+      assertPrivateAnalysisContextCurrent();
+      const proposer = new PatchProposer(
+        ragStore,
+        codebaseRegistry,
+        codeLookupLedger,
+        knowledgeScope,
+      );
       const result = proposer.propose({
         contextChunkIds: context_chunk_ids,
         problem,
@@ -4159,6 +4302,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         turn: 0,
       });
       await codeLookupLedger?.flush();
+      assertPrivateAnalysisContextCurrent();
       return {
         content: [{type: 'text' as const, text: JSON.stringify({success: result.patchStatus !== 'unverified', result})}],
         ...(result.patchStatus === 'unverified' ? {isError: true} : {}),
@@ -4236,7 +4380,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       if (evidence_signatures && typeof evidence_signatures === 'object') {
         const retriever = createCaseRetriever({
           library,
-          ragStore: options.ragStore ?? getRagStore(),
+          ragStore,
           scope: knowledgeScope,
         });
         const effectiveScene = scene || options.sceneType || 'scrolling';
@@ -4358,7 +4502,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           ...(include_cases
             ? {
               caseLibrary: options.caseLibrary ?? getCaseLibrary(),
-              ragStore: options.ragStore ?? getRagStore(),
+              ragStore,
             }
             : {}),
         });
@@ -4682,6 +4826,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
               missingAspectIds,
               nonWaivableMissingAspectIds,
               planWarnings,
+              missingAspectRequirements: validation.missingAspectRequirements ?? [],
               attempt: planSubmitAttempts,
               tooShortWaivers,
               mode: 'submit_plan',
@@ -4846,6 +4991,33 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         };
       }
 
+      if (normalizedStatus === 'skipped' && (phase.expectedCalls ?? []).length > 0) {
+        const missingExpectedCalls = findMissingExpectedCallsForPhase(
+          phase,
+          Array.isArray(plan.toolCallLog) ? plan.toolCallLog : [],
+        );
+        if (missingExpectedCalls.length > 0 && !skipSummaryExplainsEvidenceBoundary(trimmedSummary!)) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                success: false,
+                error: localize(
+                  outputLanguage,
+                  `阶段 ${phaseId} 声明了关键证据调用，不能仅因已有初步根因或认为不再重要而跳过。请先执行缺失调用；只有条件未触发或 Trace/参数确实不可用时，才能以具体证据边界标记 skipped。`,
+                  `Phase ${phaseId} declares critical evidence calls and cannot be skipped merely because a preliminary root cause already looks likely. Run the missing calls first; only an unmet condition or genuinely unavailable trace data/parameters can justify skipped.`,
+                ),
+                action_required: 'run_expected_calls_or_explain_unavailability',
+                currentPhaseId: phase.id,
+                currentPhaseName: phase.name,
+                missingExpectedCalls,
+              }),
+            }],
+            isError: true,
+          };
+        }
+      }
+
       if (normalizedStatus === 'completed' && (phase.expectedCalls ?? []).length > 0) {
         const prospectivePlan: AnalysisPlanV3 = {
           ...plan,
@@ -4961,7 +5133,10 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           };
           console.log(`[MCP] Phase hint injected: ${matchedHint.id} for ${options.sceneType}`);
         } else if (hints.length > 0) {
-          console.log(`[MCP] Phase hint not found for: "${nextPhase.name}" in ${options.sceneType}`);
+          console.log(
+            `[MCP] Phase hint not found for ${options.sceneType}: ` +
+            diagnosticLogIdentity(nextPhase.name),
+          );
         }
 
         // Always include basic next phase info for non-hint scenarios
@@ -5146,6 +5321,30 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         };
       }
 
+      const newlyClosedPhases = normalizedUpdatedPhases.filter(up => {
+        if (up.status !== 'completed' && up.status !== 'skipped') return false;
+        const original = plan.phases.find(phase => phase.id === up.id);
+        return !original || (original.status !== 'completed' && original.status !== 'skipped');
+      });
+      if (newlyClosedPhases.length > 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              error: localize(
+                outputLanguage,
+                `revise_plan 只能修改计划结构，不能直接闭合未完成阶段: ${newlyClosedPhases.map(phase => phase.id).join(', ')}。请保留阶段状态，并用 update_plan_phase 提交摘要与证据门禁验证。`,
+                `revise_plan changes plan structure and cannot directly close unfinished phases: ${newlyClosedPhases.map(phase => phase.id).join(', ')}. Preserve their status and use update_plan_phase so summaries and evidence gates are validated.`,
+              ),
+              invalidPhaseIds: newlyClosedPhases.map(phase => phase.id),
+              action_required: 'update_plan_phase',
+            }),
+          }],
+          isError: true,
+        };
+      }
+
       const candidatePhases = normalizedUpdatedPhases.map((up): PlanPhase => {
         const original = plan.phases.find(p => p.id === up.id);
         if (original && (original.status === 'completed' || original.status === 'skipped')) {
@@ -5184,6 +5383,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
               missingAspectIds,
               nonWaivableMissingAspectIds,
               planWarnings: revisedPlanWarnings,
+              missingAspectRequirements: validation.missingAspectRequirements ?? [],
               attempt: planReviseAttempts,
               tooShortWaivers,
               mode: 'revise_plan',
@@ -5193,6 +5393,39 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         };
       }
       const forcedAccept = revisedPlanWarnings.length > 0;
+
+      const expectedCallKey = (call: NonNullable<PlanPhase['expectedCalls']>[number]): string =>
+        `${shortExpectedToolName(call.tool)}:${call.skillId ? shortExpectedToolName(call.skillId) : ''}`;
+      const updatedPhaseById = new Map(normalizedUpdatedPhases.map(phase => [phase.id, phase]));
+      const weakenedPhases = plan.phases.flatMap(original => {
+        if (original.status === 'completed' || original.status === 'skipped') return [];
+        const updated = updatedPhaseById.get(original.id);
+        const updatedCallKeys = new Set((updated?.expectedCalls ?? []).map(expectedCallKey));
+        const removedExpectedCalls = (original.expectedCalls ?? [])
+          .filter(call => !updatedCallKeys.has(expectedCallKey(call)));
+        return removedExpectedCalls.length > 0
+          ? [{ phaseId: original.id, removedExpectedCalls }]
+          : [];
+      });
+      if (weakenedPhases.length > 0) {
+        planReviseAttempts = 0;
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              error: localize(
+                outputLanguage,
+                `revise_plan 不能移除未完成阶段已声明的 expectedCalls: ${weakenedPhases.map(item => item.phaseId).join(', ')}。请保留证据要求；若触发条件未成立或 trace 证据不可用，请用 update_plan_phase 按边界跳过。`,
+                `revise_plan cannot remove declared expectedCalls from unfinished phases: ${weakenedPhases.map(item => item.phaseId).join(', ')}. Preserve the evidence requirements; if a trigger is not met or trace evidence is unavailable, skip through update_plan_phase with that boundary.`,
+              ),
+              weakenedPhases,
+              action_required: 'preserve_expected_calls',
+            }),
+          }],
+          isError: true,
+        };
+      }
 
       // Save revision history for audit trail
       const revision: PlanRevision = {
@@ -5562,6 +5795,17 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
       keywords: z.array(z.string()).optional().describe('Domain keywords (e.g., ["jank", "binder", "gpu"])'),
     },
     async ({ architectureType, sceneType: querySceneType, keywords }) => {
+      if (privateAnalysisContext) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({
+            success: true,
+            disabled: 'private_analysis_context',
+            positivePatterns: [],
+            negativePatterns: [],
+            message: 'Cross-session pattern recall is disabled for private source and RAG analyses.',
+          }) }],
+        };
+      }
       const features = extractTraceFeatures({
         architectureType,
         sceneType: querySceneType,
@@ -5927,7 +6171,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         const compareStart = Date.now();
         const currentTraceProvenance = buildScopedTraceProvenance(traceId, 'current');
         const referenceTraceProvenance = buildScopedTraceProvenance(referenceTraceId, 'reference');
-        const [currentResult, refResult] = await Promise.all([
+        const [currentSettled, referenceSettled] = await Promise.allSettled([
           skillExecutor.execute(skillId, traceId, effectiveParams, {
             __traceSide: 'current',
             ...(currentTraceProvenance.paneSide ? { __paneSide: currentTraceProvenance.paneSide } : {}),
@@ -5939,7 +6183,35 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             signal,
           }),
         ]);
+        if (currentSettled.status === 'rejected') {
+          rethrowIfTraceProcessorQueryCancelled(currentSettled.reason);
+        }
+        if (referenceSettled.status === 'rejected') {
+          rethrowIfTraceProcessorQueryCancelled(referenceSettled.reason);
+        }
+        const rejectedResult = (reason: unknown): SkillExecutionResult => ({
+          skillId,
+          skillName: skillId,
+          success: false,
+          displayResults: [],
+          diagnostics: [],
+          executionTimeMs: 0,
+          error: reason instanceof Error ? reason.message : String(reason),
+        });
+        const currentResult = currentSettled.status === 'fulfilled'
+          ? currentSettled.value
+          : rejectedResult(currentSettled.reason);
+        const refResult = referenceSettled.status === 'fulfilled'
+          ? referenceSettled.value
+          : rejectedResult(referenceSettled.reason);
         const compareDuration = Date.now() - compareStart;
+        const currentSuccess = currentResult.success === true;
+        const referenceSuccess = refResult.success === true;
+        const success = currentSuccess && referenceSuccess;
+        const failedSides = [
+          ...(!currentSuccess ? ['current' as const] : []),
+          ...(!referenceSuccess ? ['reference' as const] : []),
+        ];
 
         // Schema alignment: check which steps are comparable
         const currentStepIds = new Set((currentResult.displayResults || []).map(r => r.stepId));
@@ -6002,7 +6274,17 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
           }));
 
         const text = JSON.stringify({
-          success: true,
+          success,
+          ...(!success ? {
+            partial: currentSuccess !== referenceSuccess,
+            failedSides,
+            error: localize(
+              outputLanguage,
+              `双 Trace 对比未完成：${failedSides.map(side => side === 'current' ? '当前侧' : '参考侧').join('、')}执行失败。`,
+              `Dual-trace comparison did not complete: ${failedSides.join(' and ')} side execution failed.`,
+            ),
+            action_required: 'retry_compare_skill_with_valid_side_params',
+          } : {}),
           durationMs: compareDuration,
           parameterMapping: {
             referenceIdentityRemapped: referenceSharedParams.identityRemapped,
@@ -6039,17 +6321,38 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             comparableSteps,
             incompatibleSteps: incompatibleSteps.length > 0 ? incompatibleSteps : undefined,
           },
-          hint: localize(
-            outputLanguage,
-            '使用 execute_sql_on 深钻具体差异指标，或使用 fetch_artifact 获取详细数据。',
-            'Use execute_sql_on to drill into specific delta metrics, or fetch_artifact for detailed data.',
-          ),
+          hint: success
+            ? localize(
+                outputLanguage,
+                '使用 execute_sql_on 深钻具体差异指标，或使用 fetch_artifact 获取详细数据。',
+                'Use execute_sql_on to drill into specific delta metrics, or fetch_artifact for detailed data.',
+              )
+            : localize(
+                outputLanguage,
+                '修正失败侧的参数后重试 compare_skill；如果两侧分析窗口不同，请同时提供 currentParams 和 referenceParams。',
+                'Fix the failed-side parameters and retry compare_skill; provide both currentParams and referenceParams when the analysis windows differ.',
+              ),
         });
 
-        return { content: [{ type: 'text' as const, text: consumeWatchdogWarning(text + getReasoningNudge()) }] };
+        return {
+          content: [{ type: 'text' as const, text: consumeWatchdogWarning(text + getReasoningNudge()) }],
+          ...(!success ? { isError: true } : {}),
+        };
       } catch (e: any) {
         rethrowIfTraceProcessorQueryCancelled(e);
-        return { content: [{ type: 'text' as const, text: JSON.stringify({ success: false, error: e.message }) }] };
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              partial: false,
+              failedSides: ['current', 'reference'],
+              error: e.message,
+              action_required: 'retry_compare_skill_after_runtime_error',
+            }),
+          }],
+          isError: true,
+        };
       }
     },
   ) : null;

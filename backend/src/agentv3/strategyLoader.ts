@@ -69,6 +69,11 @@ export interface PlanMandatoryAspect {
   requiredExpectedCalls?: ExpectedCall[];
   /** At least one of these calls must be declared on a matching plan phase. */
   alternativeExpectedCalls?: ExpectedCall[];
+  /** Calls selected by detected context; every matching group is additive. */
+  conditionalRequiredExpectedCalls?: Array<{
+    triggerKeywords: string[];
+    requiredExpectedCalls: ExpectedCall[];
+  }>;
   /** When false, submit_plan must cover this aspect in the plan; waivers are ignored. */
   waivable?: boolean;
 }
@@ -96,6 +101,8 @@ export interface FinalReportContractRequirement {
   patterns: string[];
   /** AND-of-OR groups. Each inner group must match at least one pattern. */
   patternGroups: string[][];
+  /** Strategy-owned deterministic recovery copy for missing report structure. */
+  recoveryText: { zh: string[]; en: string[] };
   /** Defaults to true. Optional entries document nice-to-have structure. */
   required: boolean;
 }
@@ -316,6 +323,16 @@ function parseStrategyFile(filePath: string): StrategyDefinition | null {
         const triggerKeywords = Array.isArray(a.trigger_keywords)
           ? a.trigger_keywords as string[]
           : [];
+        const conditionalRequiredExpectedCalls = Array.isArray(a.conditional_required_expected_calls)
+          ? (a.conditional_required_expected_calls as Array<Record<string, unknown>>)
+              .map(group => ({
+                triggerKeywords: Array.isArray(group.trigger_keywords)
+                  ? group.trigger_keywords as string[]
+                  : [],
+                requiredExpectedCalls: parseExpectedCalls(group.required_expected_calls),
+              }))
+              .filter(group => group.triggerKeywords.length > 0 && group.requiredExpectedCalls.length > 0)
+          : [];
         return {
           id: (a.id as string) || '',
           matchKeywords: (a.match_keywords as string[]) || [],
@@ -323,6 +340,9 @@ function parseStrategyFile(filePath: string): StrategyDefinition | null {
           suggestion: (a.suggestion as string) || '',
           requiredExpectedCalls: parseExpectedCalls(a.required_expected_calls),
           alternativeExpectedCalls: parseExpectedCalls(a.required_expected_call_alternatives),
+          ...(conditionalRequiredExpectedCalls.length > 0
+            ? { conditionalRequiredExpectedCalls }
+            : {}),
           waivable: (a.waivable as boolean | undefined) ?? true,
         };
       }),
@@ -346,6 +366,15 @@ function parseStrategyFile(filePath: string): StrategyDefinition | null {
               .map(group => (group as unknown[]).filter(item => typeof item === 'string') as string[])
               .filter(group => group.length > 0)
             : [];
+          const rawRecoveryText = section.recovery_text as Record<string, unknown> | undefined;
+          const recoveryText = {
+            zh: Array.isArray(rawRecoveryText?.zh)
+              ? rawRecoveryText.zh.filter((line): line is string => typeof line === 'string')
+              : [],
+            en: Array.isArray(rawRecoveryText?.en)
+              ? rawRecoveryText.en.filter((line): line is string => typeof line === 'string')
+              : [],
+          };
           return {
             id: (section.id as string) || '',
             label: (section.label as string) || (section.id as string) || '',
@@ -353,6 +382,7 @@ function parseStrategyFile(filePath: string): StrategyDefinition | null {
             triggerPatterns,
             patterns,
             patternGroups,
+            recoveryText,
             required: (section.required as boolean | undefined) ?? true,
           };
         })
@@ -546,10 +576,13 @@ export function getStrategyFilePath(scene: string): string | undefined {
   return loadStrategies().get(scene)?.sourcePath;
 }
 
-/** Clear cached strategies and templates — useful for dev/test reloads. */
+const registryCache = new Map<string, unknown>();
+
+/** Clear cached strategies, templates, and registries — useful for dev/test reloads. */
 export function invalidateStrategyCache(): void {
   cache = null;
   templateCache.clear();
+  registryCache.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -574,6 +607,16 @@ export function loadPromptTemplate(name: string): string | undefined {
   const content = fs.readFileSync(filePath, 'utf-8').trim();
   templateCache.set(name, content);
   return content;
+}
+
+/** Load a structured YAML registry from `backend/strategies/<name>.registry.yaml`. */
+export function loadStrategyRegistry<T>(name: string): T | undefined {
+  if (registryCache.has(name) && !DEV_MODE) return registryCache.get(name) as T;
+  const filePath = path.join(STRATEGIES_DIR, `${name}.registry.yaml`);
+  if (!fs.existsSync(filePath)) return undefined;
+  const parsed = yaml.load(fs.readFileSync(filePath, 'utf-8')) as T;
+  registryCache.set(name, parsed);
+  return parsed;
 }
 
 /**

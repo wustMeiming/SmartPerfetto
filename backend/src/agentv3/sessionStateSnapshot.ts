@@ -30,6 +30,7 @@ import type { IdentityResolutionV1 } from '../types/identityContract';
 import type { CodeAwareMode } from '../services/codebase/codeAwareFeature';
 import type { CodeLookupSummary } from '../services/codebase/codeLookupLedger';
 import type { AgentRuntimeKind } from '../services/providerManager/types';
+import type {OutputLanguage} from './outputLanguage';
 
 export type ComparisonSourceKind = 'raw_trace_pair' | 'analysis_result_snapshots';
 
@@ -457,6 +458,8 @@ export interface SessionStateSnapshot {
   snapshotTimestamp: number;
   sessionId: string;
   traceId: string;
+  /** Presentation language pinned to this session/runtime conversation. */
+  outputLanguage?: OutputLanguage;
   /** Reference trace ID for comparison mode — enables session restoration in dual-trace context */
   referenceTraceId?: string;
   /** Source model for comparison mode. Raw dual-trace sessions use raw_trace_pair. */
@@ -522,6 +525,8 @@ export interface SessionStateSnapshot {
   agentRuntimeProviderSnapshotHash?: string | null;
   /** Append-only provider/runtime continuity breaks that forced fresh SDK context. */
   continuityBreaks?: ProviderContinuityBreak[];
+  /** Authorization partition for source/RAG continuation. */
+  analysisContextFingerprint?: string;
   /** Backend-session ancestry when a user-visible session had to bridge to a fresh backend session. */
   lineage?: SessionLineage;
   /** OpenAI Agents SDK history for cross-restart multi-turn continuation. */
@@ -538,7 +543,21 @@ export interface SessionStateSnapshot {
   codebaseSnapshot?: Array<{
     codebaseId: string;
     indexGeneration: number;
+    activeGeneration?: string;
+    contentFingerprint?: string;
+    indexedRevision?: string;
+    indexedDirty?: boolean;
+    commitProvenance?: 'clean_git_revision' | 'dirty_git_worktree' | 'content_only';
     consentHash?: string;
+  }>;
+  /** Explicit external knowledge allowlist and active provenance for this session. */
+  knowledgeSourceIds?: string[];
+  knowledgeSourceSnapshot?: Array<{
+    sourceId: string;
+    indexGeneration: number;
+    activeGeneration?: string;
+    contentFingerprint: string;
+    revision: string;
   }>;
   /** Append-only lookup ledger summary for this session. */
   codeLookupSummary?: CodeLookupSummary;
@@ -565,6 +584,8 @@ export interface SessionStateSnapshot {
  * that live in the AnalysisSession object.
  */
 export interface SessionFieldsForSnapshot {
+  /** Presentation language pinned to this session/runtime conversation. */
+  outputLanguage?: OutputLanguage;
   /** Reference trace ID for comparison mode session identity. */
   referenceTraceId?: string;
   /** Source model for comparison mode. */
@@ -588,14 +609,44 @@ export interface SessionFieldsForSnapshot {
   agentRuntimeProviderSnapshotHash?: string | null;
   /** Append-only provider/runtime continuity breaks that forced fresh SDK context. */
   continuityBreaks?: ProviderContinuityBreak[];
+  analysisContextFingerprint?: string;
   /** Backend-session ancestry when a user-visible session had to bridge to a fresh backend session. */
   lineage?: SessionLineage;
   codeAwareMode?: CodeAwareMode;
   codebaseIds?: string[];
   codebaseSnapshot?: SessionStateSnapshot['codebaseSnapshot'];
+  knowledgeSourceIds?: string[];
+  knowledgeSourceSnapshot?: SessionStateSnapshot['knowledgeSourceSnapshot'];
   codeLookupSummary?: CodeLookupSummary;
   runSequence: number;
   conversationOrdinal: number;
   activeRun?: SnapshotRunContext;
   lastRun?: SnapshotRunContext;
+}
+
+/** Third-party opaque transcripts are not durable for private source sessions. */
+export function sessionFieldsUsePrivateKnowledge(fields: SessionFieldsForSnapshot): boolean {
+  return Boolean(
+    (fields.codeAwareMode && fields.codeAwareMode !== 'off' && fields.codebaseIds?.length) ||
+    fields.knowledgeSourceIds?.length,
+  );
+}
+
+/**
+ * Private retrieval sessions persist only the verified product result and
+ * deterministic trace evidence. Intermediate model-authored state must not be
+ * replayable after a restart, regardless of the provider runtime in use.
+ */
+export function projectSessionFieldsForDurableSnapshot(
+  fields: SessionFieldsForSnapshot,
+): SessionFieldsForSnapshot {
+  if (!sessionFieldsUsePrivateKnowledge(fields)) return fields;
+  return {
+    ...fields,
+    comparisonReportSection: undefined,
+    conversationSteps: [],
+    agentDialogue: [],
+    agentResponses: [],
+    hypotheses: [],
+  };
 }

@@ -31,16 +31,27 @@ import * as path from 'path';
 import {Router, type Router as ExpressRouter} from 'express';
 
 import {authenticate, requireRequestContext} from '../middleware/auth';
-import {RagStore, getDefaultRagStore, type RagStoreSearchOptions} from '../services/ragStore';
-import {knowledgeScopeFromRequestContext} from '../services/scopedKnowledgeStore';
+import {
+  RagSearchInputError,
+  RagStore,
+  getDefaultRagStore,
+  validateRagSearchInput,
+  type RagStoreSearchOptions,
+} from '../services/ragStore';
+import {knowledgeScopeFromRequestContext, type KnowledgeScope} from '../services/scopedKnowledgeStore';
 import type {RagChunk, RagRetrievalResult, RagSourceKind} from '../types/sparkContracts';
 import {requireCodebaseScope} from '../services/auth/codebaseScopes';
-import {CodebaseRegistry, type CodebaseRef} from '../services/codebase/codebaseRegistry';
+import {
+  activeCodebaseGeneration,
+  CodebaseRegistry,
+  type CodebaseRef,
+} from '../services/codebase/codebaseRegistry';
 import {getDefaultCodebaseRegistry} from '../services/codebase/defaultCodebaseServices';
 import {PathSecurityGate, type PathPreviewResult} from '../services/codebase/pathSecurityGate';
 import {AppSourceIngester} from '../services/rag/appSourceIngester';
 import {AospSourceIngester} from '../services/rag/aospSourceIngester';
 import {KernelSourceIngester} from '../services/rag/kernelSourceIngester';
+import {resolveSourcePathPatterns} from '../services/rag/sourceFileSelection';
 import {SymbolResolver} from '../services/symbol/symbolResolver';
 import {codeAwareFeatureEnabled} from '../services/codebase/codeAwareFeature';
 import {
@@ -137,7 +148,7 @@ function sanitizePreview(preview: PathPreviewResult) {
     blocked: preview.blocked,
     ...(preview.blockedReason ? {blockedReason: preview.blockedReason} : {}),
     acceptedFileCount: preview.acceptedFiles.length,
-    skippedFileCount: preview.skippedFiles.length,
+    skippedFileCount: preview.skippedFileCount,
     acceptedFiles: preview.acceptedFiles.slice(0, 200),
     skippedFiles: preview.skippedFiles.slice(0, 200),
   };
@@ -169,6 +180,8 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
       new PathSecurityGate({
         allowlistEnvironmentVariable: 'SMARTPERFETTO_KNOWLEDGE_ROOTS',
         allowedExtensions: ['.md'],
+        maxFiles: 5_000,
+        maxTotalBytes: 64 * 1024 * 1024,
       }),
     );
   const backendRoot = path.resolve(__dirname, '../..');
@@ -177,7 +190,7 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
     skillsPath: path.join(backendRoot, 'skills'),
     fixtureManifestPath: path.join(backendRoot, 'skills/public-fixtures.yaml'),
   };
-  const symbolResolver = new SymbolResolver(s);
+  const symbolResolverFor = (scope: KnowledgeScope) => new SymbolResolver(s, scope, registry);
   const router = Router();
   router.use(authenticate);
 
@@ -203,7 +216,7 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
     const scope = knowledgeScopeFromRequestContext(requireRequestContext(req));
     const chunkId = routeParam(req.params.chunkId);
     const chunk = s.getChunk(chunkId, scope);
-    if (!chunk || chunk.kind === 'android_internals_wiki') {
+    if (!chunk || isSensitiveKnowledgeChunk(chunk)) {
       return res.status(404).json({
         success: false,
         error: `Chunk '${chunkId}' not found`,
@@ -232,19 +245,43 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
         error: '`query` (string) is required',
       });
     }
-    const result = s.search(query, {
-      ...(kinds ? {kinds} : {}),
-      ...(topK ? {topK} : {}),
-      ...(codebaseIds ? {codebaseIds} : {}),
-      ...(vendor ? {vendor} : {}),
-      ...(buildId ? {buildId} : {}),
-      ...(pathPrefix ? {pathPrefix} : {}),
-      ...(symbolExact ? {symbolExact} : {}),
-      ...(filePathExact ? {filePathExact} : {}),
-      ...(languages ? {languages} : {}),
-      scope,
-    });
-    res.json({success: true, result: sanitizeRetrieval(result)});
+    try {
+      validateRagSearchInput(query, {
+        ...(kinds !== undefined ? {kinds} : {}),
+        ...(topK !== undefined ? {topK} : {}),
+        ...(codebaseIds !== undefined ? {codebaseIds} : {}),
+        ...(languages !== undefined ? {languages} : {}),
+      });
+      const authorizedCodebases = codebaseIds?.map(id => registry.get(id, scope));
+      if (authorizedCodebases?.some(codebase => !codebase)) {
+        return res.status(404).json({success: false, error: 'One or more codebases were not found'});
+      }
+      const authorizedCodebaseIds = codebaseIds;
+      const result = s.search(query, {
+        ...(kinds !== undefined ? {kinds} : {}),
+        ...(topK !== undefined ? {topK} : {}),
+        ...(authorizedCodebaseIds ? {codebaseIds: authorizedCodebaseIds} : {}),
+        ...(authorizedCodebaseIds ? {
+          activeCodebaseGenerations: Object.fromEntries(authorizedCodebaseIds.map((codebaseId, index) => [
+            codebaseId,
+            activeCodebaseGeneration(authorizedCodebases![index]!),
+          ])),
+        } : {}),
+        ...(vendor ? {vendor} : {}),
+        ...(buildId ? {buildId} : {}),
+        ...(pathPrefix ? {pathPrefix} : {}),
+        ...(symbolExact ? {symbolExact} : {}),
+        ...(filePathExact ? {filePathExact} : {}),
+        ...(languages !== undefined ? {languages} : {}),
+        scope,
+      });
+      res.json({success: true, result: sanitizeRetrieval(result)});
+    } catch (error) {
+      if (error instanceof RagSearchInputError) {
+        return res.status(400).json({success: false, code: error.code, error: error.message});
+      }
+      throw error;
+    }
   });
 
   router.post('/android-internals/preview', requireCodebaseScope('codebase:read'), async (req, res) => {
@@ -261,12 +298,16 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
           blocked: true,
           blockedReason: preview.blockedReason,
           acceptedFileCount: preview.acceptedFiles.length,
-          skippedFileCount: preview.skippedFiles.length,
+          skippedFileCount: preview.skippedFileCount,
         },
       });
     }
     try {
-      const corpus = scanAndroidInternalsWiki(preview.rootRealpath);
+      const corpus = scanAndroidInternalsWiki(
+        preview.rootRealpath,
+        preview.acceptedFiles.map(file => file.relativePath),
+        androidInternalsWikiIngester.getSourceReadLimits(),
+      );
       const identity = inspectAndroidInternalsWikiIdentity(corpus);
       const statusCounts: Record<string, number> = {};
       for (const article of corpus.articles) {
@@ -278,7 +319,7 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
         preview: {
           blocked: false,
           acceptedFileCount: preview.acceptedFiles.length,
-          skippedFileCount: preview.skippedFiles.length,
+          skippedFileCount: preview.skippedFileCount,
           totalArticles: corpus.totalArticles,
           metadataErrorCount: corpus.articles.filter(article => !article.metadataValid).length,
           statusCounts,
@@ -321,7 +362,11 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
       });
     }
     try {
-      const corpus = scanAndroidInternalsWiki(preview.rootRealpath);
+      const corpus = scanAndroidInternalsWiki(
+        preview.rootRealpath,
+        preview.acceptedFiles.map(file => file.relativePath),
+        androidInternalsWikiIngester.getSourceReadLimits(),
+      );
       const identity = inspectAndroidInternalsWikiIdentity(corpus);
       const context = requireRequestContext(req);
       const scope = knowledgeScopeFromRequestContext(context);
@@ -464,7 +509,11 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
         if (preview.rootRealpath !== source.rootRealpath) {
           throw new Error('knowledge_root_realpath_drift');
         }
-        const corpus = scanAndroidInternalsWiki(preview.rootRealpath);
+        const corpus = scanAndroidInternalsWiki(
+          preview.rootRealpath,
+          preview.acceptedFiles.map(file => file.relativePath),
+          androidInternalsWikiIngester.getSourceReadLimits(),
+        );
         const acceptedPaths = new Set(
           preview.acceptedFiles.map(file => file.relativePath.split('\\').join('/')),
         );
@@ -501,11 +550,12 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
     },
   );
 
-  router.get('/codebases', requireCodebaseScope('codebase:read'), (_req, res) => {
+  router.get('/codebases', requireCodebaseScope('codebase:read'), (req, res) => {
+    const scope = knowledgeScopeFromRequestContext(requireRequestContext(req));
     res.json({
       success: true,
       featureEnabled: codeAwareFeatureEnabled(),
-      codebases: registry.list(),
+      codebases: registry.list(scope),
     });
   });
 
@@ -537,6 +587,30 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
     if (!rootPath || typeof rootPath !== 'string') {
       return res.status(400).json({success: false, error: '`rootPath` is required'});
     }
+    if (sendToProvider !== undefined && typeof sendToProvider !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        error: '`sendToProvider` must be an explicit boolean when provided',
+      });
+    }
+    let normalizedPathFilters: string[] | undefined;
+    let normalizedExcludeGlobs: string[] | undefined;
+    try {
+      normalizedPathFilters = resolveSourcePathPatterns(pathFilters, 'pathFilters');
+      normalizedExcludeGlobs = resolveSourcePathPatterns(excludeGlobs, 'excludeGlobs');
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (Array.isArray(symbolMapPaths) && symbolMapPaths.length > 0) {
+      return res.status(501).json({
+        success: false,
+        code: 'SYMBOL_ARTIFACT_INGESTION_NOT_CONFIGURED',
+        error: 'Native symbol-map artifact ingestion is not configured; source-derived symbol indexing remains available',
+      });
+    }
     const preview = await gate.preview(rootPath);
     if (preview.blocked) {
       return res.status(400).json({
@@ -555,11 +629,10 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
         ...(commitHash ? {commitHash} : {}),
         ...(vendor ? {vendor} : {}),
         ...(buildId ? {buildId} : {}),
-        ...(Array.isArray(pathFilters) ? {pathFilters} : {}),
-        ...(Array.isArray(excludeGlobs) ? {excludeGlobs} : {}),
-        ...(Array.isArray(symbolMapPaths) ? {symbolMapPaths} : {}),
+        ...(normalizedPathFilters ? {pathFilters: normalizedPathFilters} : {}),
+        ...(normalizedExcludeGlobs ? {excludeGlobs: normalizedExcludeGlobs} : {}),
         ...(licenseTag ? {licenseTag} : {}),
-        sendToProvider: Boolean(sendToProvider),
+        sendToProvider: sendToProvider ?? false,
         consentedBy: context.userId,
         tenantId: context.tenantId,
         workspaceId: context.workspaceId,
@@ -573,7 +646,8 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
 
   router.get('/codebases/:id', requireCodebaseScope('codebase:read'), (req, res) => {
     const codebaseId = routeParam(req.params.id);
-    const ref = registry.get(codebaseId);
+    const scope = knowledgeScopeFromRequestContext(requireRequestContext(req));
+    const ref = registry.get(codebaseId, scope);
     if (!ref) {
       return res.status(404).json({success: false, error: `Codebase '${codebaseId}' not found`});
     }
@@ -582,7 +656,8 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
 
   router.get('/codebases/:id/symbols', requireCodebaseScope('codebase:read'), (req, res) => {
     const codebaseId = routeParam(req.params.id);
-    const ref = registry.get(codebaseId);
+    const scope = knowledgeScopeFromRequestContext(requireRequestContext(req));
+    const ref = registry.get(codebaseId, scope);
     if (!ref) {
       return res.status(404).json({success: false, error: `Codebase '${codebaseId}' not found`});
     }
@@ -599,29 +674,39 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
       buildId: typeof req.query.buildId === 'string' ? req.query.buildId : undefined,
       topK: typeof req.query.topK === 'string' ? Number(req.query.topK) : undefined,
     };
-    const result = ref.kind === 'kernel_source'
-      ? symbolResolver.resolveKernel({
-          symbol,
-          vendor: ref.vendor,
-          ...common,
-        })
-      : ref.kind === 'aosp'
-        ? symbolResolver.resolveNative({
+    try {
+      const symbolResolver = symbolResolverFor(scope);
+      const result = ref.kind === 'kernel_source'
+        ? symbolResolver.resolveKernel({
             symbol,
+            vendor: ref.vendor,
             ...common,
           })
-        : symbolResolver.resolveApp({
-            symbol,
-            codebaseId,
-            buildId: common.buildId,
-            filePath: typeof req.query.filePath === 'string' ? req.query.filePath : undefined,
-          });
-    res.json({success: true, result});
+        : ref.kind === 'aosp' || ref.kind === 'oem_sdk'
+          ? symbolResolver.resolveNative({
+              symbol,
+              ...common,
+            })
+          : symbolResolver.resolveApp({
+              symbol,
+              codebaseId,
+              buildId: common.buildId,
+              topK: common.topK,
+              filePath: typeof req.query.filePath === 'string' ? req.query.filePath : undefined,
+            });
+      res.json({success: true, result});
+    } catch (error) {
+      if (error instanceof RagSearchInputError) {
+        return res.status(400).json({success: false, code: error.code, error: error.message});
+      }
+      throw error;
+    }
   });
 
   router.get('/codebases/:id/excerpt', requireCodebaseScope('codebase:read'), (req, res) => {
     const codebaseId = routeParam(req.params.id);
-    const ref = registry.get(codebaseId);
+    const scope = knowledgeScopeFromRequestContext(requireRequestContext(req));
+    const ref = registry.get(codebaseId, scope);
     if (!ref) {
       return res.status(404).json({success: false, error: `Codebase '${codebaseId}' not found`});
     }
@@ -629,9 +714,13 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
     if (!chunkId) {
       return res.status(400).json({success: false, error: '`chunkId` is required'});
     }
-    const scope = knowledgeScopeFromRequestContext(requireRequestContext(req));
     const chunk = s.getChunk(chunkId, scope);
-    if (!chunk || chunk.codebaseId !== codebaseId || !isCodeAwareChunk(chunk)) {
+    if (
+      !chunk ||
+      chunk.codebaseId !== codebaseId ||
+      !isCodeAwareChunk(chunk) ||
+      chunk.sourceGeneration !== activeCodebaseGeneration(ref)
+    ) {
       return res.status(404).json({success: false, error: `Code excerpt '${chunkId}' not found`});
     }
     const maxLines = typeof req.query.maxLines === 'string'
@@ -655,16 +744,17 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
 
   router.post('/codebases/:id/reindex', requireCodebaseScope('codebase:manage'), async (req, res) => {
     const codebaseId = routeParam(req.params.id);
-    const ref = registry.get(codebaseId);
+    const scope = knowledgeScopeFromRequestContext(requireRequestContext(req));
+    const ref = registry.get(codebaseId, scope);
     if (!ref) {
       return res.status(404).json({success: false, error: `Codebase '${codebaseId}' not found`});
     }
     try {
       const result = await (ref.kind === 'kernel_source'
-        ? kernelSourceIngester.ingest(codebaseId, req.body ?? {})
-        : ref.kind === 'aosp'
-          ? aospSourceIngester.ingest(codebaseId, req.body ?? {})
-          : appSourceIngester.ingest(codebaseId, req.body ?? {}));
+        ? kernelSourceIngester.ingest(codebaseId, {...(req.body ?? {}), scope})
+        : ref.kind === 'aosp' || ref.kind === 'oem_sdk'
+          ? aospSourceIngester.ingest(codebaseId, {...(req.body ?? {}), scope})
+          : appSourceIngester.ingest(codebaseId, {...(req.body ?? {}), scope}));
       res.json({success: true, result});
     } catch (error) {
       res.status(400).json({
@@ -676,7 +766,8 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
 
   router.get('/codebases/:id/audit', requireCodebaseScope('codebase:read'), (req, res) => {
     const codebaseId = routeParam(req.params.id);
-    const ref = registry.get(codebaseId);
+    const scope = knowledgeScopeFromRequestContext(requireRequestContext(req));
+    const ref = registry.get(codebaseId, scope);
     if (!ref) {
       return res.status(404).json({success: false, error: `Codebase '${codebaseId}' not found`});
     }
@@ -686,6 +777,11 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
         codebaseId: ref.codebaseId,
         kind: ref.kind,
         indexGeneration: ref.indexGeneration,
+        activeGeneration: activeCodebaseGeneration(ref),
+        contentFingerprint: ref.contentFingerprint,
+        indexedRevision: ref.indexedRevision,
+        indexedDirty: ref.indexedDirty,
+        commitProvenance: ref.commitProvenance,
         lastIngestAt: ref.lastIngestAt,
         lastIngestStatus: ref.lastIngestStatus,
         lastIngestError: ref.lastIngestError,
@@ -694,6 +790,83 @@ export function createRagAdminRoutes(store?: RagStore, services: RagAdminRouteSe
         redactionHitCount: ref.redactionHitCount ?? 0,
       },
     });
+  });
+
+  router.patch('/codebases/:id/consent', requireCodebaseScope('codebase:manage'), (req, res) => {
+    if (typeof req.body?.sendToProvider !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        error: '`sendToProvider` must be an explicit boolean',
+      });
+    }
+    const context = requireRequestContext(req);
+    const scope = knowledgeScopeFromRequestContext(context);
+    try {
+      const codebase = registry.setProviderConsent(
+        routeParam(req.params.id),
+        scope,
+        req.body.sendToProvider,
+        context.userId,
+      );
+      return res.json({success: true, codebase: sanitizeCodebase(codebase)});
+    } catch (error) {
+      return res.status(404).json({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  router.delete('/codebases/:id', requireCodebaseScope('codebase:manage'), async (req, res) => {
+    const codebaseId = routeParam(req.params.id);
+    const context = requireRequestContext(req);
+    const scope = knowledgeScopeFromRequestContext(context);
+    if (!registry.get(codebaseId, scope)) {
+      return res.json({
+        success: true,
+        codebaseId,
+        removedChunkCount: 0,
+        alreadyDeleted: true,
+      });
+    }
+    let deletionStarted = false;
+    try {
+      return await registry.withIngestLease(codebaseId, scope, lease => {
+        lease.beginDeletion(context.userId);
+        deletionStarted = true;
+        const removedChunkCount = s.removeCodebaseChunks(codebaseId, scope);
+        lease.assertHeld();
+        lease.deleteRegistration();
+        return res.json({success: true, codebaseId, removedChunkCount});
+      }, 'delete');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message === 'codebase_reindex_in_progress' ||
+        message === 'codebase_reindex_lease_lost'
+      ) {
+        return res.status(409).json({
+          success: false,
+          code: 'CODEBASE_BUSY',
+          error: 'Codebase indexing is in progress; retry deletion after it finishes',
+        });
+      }
+      if (message.includes('not found')) {
+        return res.json({
+          success: true,
+          codebaseId,
+          removedChunkCount: 0,
+          alreadyDeleted: true,
+        });
+      }
+      return res.status(500).json({
+        success: false,
+        code: deletionStarted ? 'CODEBASE_DELETE_INCOMPLETE' : 'CODEBASE_DELETE_FAILED',
+        error: deletionStarted
+          ? 'Codebase is retired from retrieval; retry deletion to finish physical cleanup'
+          : 'Codebase deletion failed',
+      });
+    }
   });
 
   return router;

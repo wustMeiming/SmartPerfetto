@@ -26,6 +26,7 @@ import { REPORT_CAUSAL_MAP_CSS, REPORT_CAUSAL_MAP_SCRIPT } from '../services/rep
 import { REPORT_LAYOUT_FIX_CSS, REPORT_LAYOUT_FIX_MARKER } from '../services/reportLayoutAssets';
 import { localize, parseOutputLanguage } from '../agentv3/outputLanguage';
 import { backendLogPath } from '../runtimePaths';
+import {WeightedLruMap} from '../services/weightedLruMap';
 import { resolveEnterpriseDataRoot } from '../services/traceMetadataStore';
 import { resolveEnterpriseRetentionExpiresAt } from '../services/enterpriseQuotaPolicyService';
 import {
@@ -42,6 +43,24 @@ import {
 const router = express.Router();
 
 const REPORTS_DIR = backendLogPath('reports');
+const REPORT_DOCUMENT_CSP = [
+  "sandbox allow-scripts",
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline'",
+  'img-src data:',
+  'font-src data:',
+  "connect-src 'none'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join('; ');
+
+function setReportDocumentSecurityHeaders(res: express.Response): void {
+  res.setHeader('Content-Security-Policy', REPORT_DOCUMENT_CSP);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+}
 
 // Ensure reports directory exists
 if (!fs.existsSync(REPORTS_DIR)) {
@@ -61,7 +80,14 @@ type PersistedReport = ResourceOwnerFields & {
   expiresAt?: number | null;
 };
 
-export const reportStore = new Map<string, PersistedReport>();
+const REPORT_CACHE_MAX_ENTRIES = 64;
+const REPORT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+
+export const reportStore = new WeightedLruMap<string, PersistedReport>(
+  REPORT_CACHE_MAX_ENTRIES,
+  REPORT_CACHE_MAX_BYTES,
+  report => Buffer.byteLength(report.html, 'utf8'),
+);
 
 interface ReportArtifactRow {
   id: string;
@@ -599,6 +625,7 @@ router.get('/:reportId/export', (req, res) => {
 
     const filename = `smartperfetto-${reportId}.html`;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    setReportDocumentSecurityHeaders(res);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
@@ -652,6 +679,7 @@ router.get('/:reportId', (req, res) => {
     }
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    setReportDocumentSecurityHeaders(res);
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');

@@ -37,7 +37,19 @@ npm run cli -- run --format json \
   "Find the startup bottleneck and map it to source code"
 ```
 
-If `--code-aware` or `--codebase-id` is omitted, analysis runs on the normal trace-only path; registered codebases are not automatically exposed to a session. `provider_send` sends snippets only when the codebase was registered with `--send-to-provider` and the current analysis also uses `--code-aware provider_send`.
+Registered codebases and knowledge sources are never exposed to a session automatically. The effective combinations are:
+
+| Current selection | Effective behavior |
+|---|---|
+| No IDs | Normal trace-only path; `fast` can remain lightweight |
+| `--codebase-id` only | Defaults to `metadata_only` and uses the full analysis runtime |
+| `--code-aware metadata_only` + codebase ID | Uses `CodeRef` metadata only, with the full runtime |
+| `--code-aware provider_send` + codebase ID | Sends filtered snippets only after dual consent, with the full runtime |
+| `--code-aware off` + codebase ID | Invalid input; the source selection is rejected instead of silently ignored |
+| `--knowledge-source-id` only | Uses the authorized private external RAG source and the full runtime |
+| Codebase ID + knowledge source ID | Uses source and external RAG together under the same privacy projection and full runtime |
+
+“Full runtime” means that an explicit `--analysis-mode fast` is resolved to `full` whenever source, private RAG, or a reference trace is selected, so capabilities are not silently dropped by a lightweight path. `provider_send` requires two independent authorizations: `--send-to-provider` at codebase registration and `--code-aware provider_send` for the current run.
 
 ## Supported Codebases
 
@@ -52,8 +64,10 @@ If `--code-aware` or `--codebase-id` is omitted, analysis runs on the normal tra
 
 - `metadata_only`: the model sees only `CodeRef` metadata, not source snippets.
 - `provider_send`: snippets can be sent only for codebases registered with `sendToProvider` consent.
+- Raw queries, intermediate reasoning, tool arguments, and retrieved text from private source/knowledge runs are not persisted to sessions, logs, reports, or exports. Claude local transcripts and OpenAI Responses storage are disabled, and cross-session pattern, verifier, and SQL-fix learning is neither read nor written. Final conclusions and deterministic trace evidence pass through one shared privacy projection; bounded in-process session context provides multi-turn continuity.
 - Legacy RAG chunks keep their existing behavior; `app_source`, `kernel_source`, or `registryOrigin=codebase_registry` chunks without codebase metadata fail closed.
 - Legacy `/api/rag/chunks/:id` and `/api/rag/search` return sanitized hash/length data for code-aware chunks, not source text.
+- Web UI “Delete codebase” revokes retrieval and provider consent before removing every indexed generation in the current scope; interrupted deletion is safe to retry. Local deletion cannot recall content already sent to a provider.
 - Patch proposals have three states: `verified`, `sketch`, and `unverified`. `sketch` and `unverified` never expose a copyable diff.
 
 ## Verification

@@ -9,10 +9,7 @@ function loadTraceType(repoRoot) {
   const normalizedRoot = path.resolve(repoRoot);
   if (cache.has(normalizedRoot)) return cache.get(normalizedRoot);
 
-  const protobufPath = require.resolve('protobufjs', {
-    paths: [path.join(normalizedRoot, 'backend')],
-  });
-  const protobuf = require(protobufPath);
+  const protobuf = require('protobufjs');
   const perfettoRoot = path.join(normalizedRoot, 'perfetto');
   const root = new protobuf.Root();
   root.resolvePath = (origin, target) => {

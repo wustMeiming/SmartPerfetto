@@ -10,6 +10,8 @@ import {
 } from '../traceProcessorProtobuf';
 import {
   normalizeTraceProcessorQueryPriority,
+  TraceProcessorSqlDeadlineExceededError,
+  TraceProcessorSqlQueueOverloadedError,
   TraceProcessorSqlWorker,
 } from '../traceProcessorSqlWorker';
 import { isTraceProcessorQueryCancelledError } from '../traceProcessorCancellation';
@@ -132,6 +134,53 @@ describe('TraceProcessorSqlWorker', () => {
 
     gates.get('SELECT second')!.resolve(encodedSqlResult('SELECT second'));
     await expect(second).resolves.toMatchObject({ rows: [['SELECT second']] });
+  });
+
+  it('bounds queued task count and retained request bytes', async () => {
+    const gate = deferred<Buffer>();
+    worker = new TraceProcessorSqlWorker({
+      processorId: 'processor-bounded',
+      traceId: 'trace-bounded',
+      port: 1,
+      forceInline: true,
+      maxQueuedTasks: 1,
+      maxQueuedBytes: 4,
+      rawExecutor: async () => gate.promise,
+    });
+
+    const running = worker.enqueueRaw(Buffer.from([1]));
+    await flushPromises();
+    const queued = worker.enqueueRaw(Buffer.from([2, 3, 4, 5]));
+    await expect(worker.enqueueRaw(Buffer.from([6]))).rejects.toBeInstanceOf(
+      TraceProcessorSqlQueueOverloadedError,
+    );
+    expect(worker.getStats()).toMatchObject({queuedP1: 1, queuedBytes: 4});
+
+    worker.destroy();
+    gate.resolve(Buffer.from([7]));
+    await expect(running).resolves.toEqual(Buffer.from([7]));
+    await expect(queued).rejects.toThrow(/destroyed/);
+    worker = null;
+  });
+
+  it('applies the query deadline while a task is waiting in the queue', async () => {
+    const gate = deferred<Buffer>();
+    worker = new TraceProcessorSqlWorker({
+      processorId: 'processor-deadline',
+      traceId: 'trace-deadline',
+      port: 1,
+      forceInline: true,
+      rawExecutor: async () => gate.promise,
+    });
+
+    const running = worker.enqueueRaw(Buffer.from([1]), {timeoutMs: 5_000});
+    await flushPromises();
+    const queued = worker.enqueueRaw(Buffer.from([2]), {timeoutMs: 10});
+    await expect(queued).rejects.toBeInstanceOf(TraceProcessorSqlDeadlineExceededError);
+    expect(worker.getStats()).toMatchObject({queuedP1: 0, queuedBytes: 0});
+
+    gate.resolve(Buffer.from([3]));
+    await expect(running).resolves.toEqual(Buffer.from([3]));
   });
 
   it('normalizes public priority names', () => {

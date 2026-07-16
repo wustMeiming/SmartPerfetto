@@ -11,6 +11,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import agentRoutes from '../routes/agentRoutes';
+import ragAdminRoutes from '../routes/ragAdminRoutes';
 import skillRoutes from '../routes/skillRoutes';
 import traceProcessorRoutes from '../routes/traceProcessorRoutes';
 import { getTraceProcessorService } from '../services/traceProcessorService';
@@ -29,6 +30,11 @@ import {
   DEFAULT_WORKSPACE_ID,
 } from '../middleware/auth';
 import { writeTraceMetadata } from '../services/traceMetadataStore';
+import {CodeLookupLedger} from '../services/codebase/codeLookupLedger';
+import {
+  privateProjectedSourceEventType,
+  successfulCodeLookupToolCounts,
+} from './agentSseVerificationEvidence';
 
 type CodeAwareMode = 'off' | 'metadata_only' | 'provider_send';
 type SmartAction = 'preview' | 'analyze';
@@ -38,8 +44,6 @@ interface VerifyOptions {
   referenceTracePath?: string;
   query: string;
   timeoutMs: number;
-  maxRounds: number;
-  confidenceThreshold: number;
   outputPath?: string;
   keepSession: boolean;
   keepTrace: boolean;
@@ -66,6 +70,12 @@ interface VerifyOptions {
   codeAwareMode?: CodeAwareMode;
   /** Registered codebases exposed to this verification run. */
   codebaseIds: string[];
+  /** Registered private knowledge sources exposed to this verification run. */
+  knowledgeSourceIds: string[];
+  /** Optional source root registered and indexed through the real admin API before analysis. */
+  setupCodebaseRoot?: string;
+  /** Optional Wiki root registered and indexed through the real admin API before analysis. */
+  setupKnowledgeRoot?: string;
   /**
    * undefined = use active Provider Manager profile if configured.
    * string = use that explicit provider.
@@ -106,6 +116,8 @@ interface VerifyOptions {
   allowCapabilityLimitedRuntime: boolean;
   /** Tool names that must be dispatched during the run. */
   requiredTools: string[];
+  /** Private lookup tools that must return at least one provenance-bearing chunk. */
+  requiredSuccessfulLookups: string[];
   /** Skill ids that must be dispatched through invoke_skill during the run. */
   requiredSkills: string[];
   tracePairLayout: TracePairLayout;
@@ -185,6 +197,7 @@ interface SseSummary {
   directSkillCompletedCount: number;
   directSkillFindingCount: number;
   toolCallCounts: Record<string, number>;
+  successfulLookupCounts: Record<string, number>;
   skillCallCounts: Record<string, number>;
 }
 
@@ -199,8 +212,6 @@ function printUsage(): void {
   console.log('  --reference-trace <path>          Reference trace path for raw dual-trace comparison');
   console.log('  --query <text>                    Analyze query (default: 分析滑动性能)');
   console.log('  --timeout-ms <number>             SSE timeout in ms (default: 600000)');
-  console.log('  --max-rounds <number>             Analysis max rounds (default: 3)');
-  console.log('  --confidence-threshold <number>   Analysis confidence threshold (default: 0.5)');
   console.log('  --mode <fast|full|auto|smart>     Override analysisMode, or use smart as shorthand for --preset smart');
   console.log('  --preset <smart>                  Forward preset to the backend');
   console.log('  --trace-context-json <json|@file> Forward frontend-style traceContext datasets');
@@ -215,6 +226,9 @@ function printUsage(): void {
   console.log('  --code-aware <off|metadata_only|provider_send>');
   console.log('                                      Forward codeAwareMode to the backend');
   console.log('  --codebase-id <id>                 Registered codebase id to expose; repeatable');
+  console.log('  --knowledge-source-id <id>         Registered private knowledge source id; repeatable');
+  console.log('  --setup-codebase-root <path>       Register and index an app-source root before analysis');
+  console.log('  --setup-knowledge-root <path>      Register and index an Android Internals Wiki root before analysis');
   console.log('  --provider-id <id|env|null>        Provider id, or env/null to ignore active providers');
   console.log('  --require-code-ref                 Require source-level code refs in conclusion/analysis_completed text');
   console.log('  --require-claim-verifier-ok        Require analysis_completed claim verifier to pass with no unsupported claims');
@@ -230,6 +244,7 @@ function printUsage(): void {
   console.log('  --follow-up-forbid-tool <name>     Fail if follow-up dispatches this tool; repeatable');
   console.log('  --forbid-degraded-fallback <name>  Fail if a degraded event with this fallback is emitted; repeatable');
   console.log('  --require-tool <name>              Require an agent_task_dispatched tool call; repeatable');
+  console.log('  --require-successful-lookup <name> Require a successful provenance-bearing private lookup; repeatable');
   console.log('  --require-skill <skillId>          Require an invoke_skill call for a specific skillId; repeatable');
   console.log('  --trace-pair-layout <horizontal|vertical>');
   console.log('                                      Dual-trace visual layout metadata (default: horizontal)');
@@ -291,13 +306,12 @@ function parseArgs(argv: string[]): VerifyOptions {
     tracePath: path.resolve(process.cwd(), DEFAULT_TRACE),
     query: DEFAULT_QUERY,
     timeoutMs: 600_000,
-    maxRounds: 3,
-    confidenceThreshold: 0.5,
     keepSession: false,
     keepTrace: false,
     forceRefresh: false,
     requireConclusionEvidence: false,
     codebaseIds: [],
+    knowledgeSourceIds: [],
     requireCodeRef: false,
     requireClaimVerifierOk: false,
     requireNonPartial: false,
@@ -313,6 +327,7 @@ function parseArgs(argv: string[]): VerifyOptions {
     requireQuickRun: false,
     allowCapabilityLimitedRuntime: false,
     requiredTools: [],
+    requiredSuccessfulLookups: [],
     requiredSkills: [],
     tracePairLayout: 'horizontal',
     tracePairWorkspaceOpen: false,
@@ -435,32 +450,6 @@ function parseArgs(argv: string[]): VerifyOptions {
         throw new Error(`Invalid --timeout-ms value: ${next}`);
       }
       options.timeoutMs = parsed;
-      i += 1;
-      continue;
-    }
-
-    if (arg === '--max-rounds') {
-      if (!next) {
-        throw new Error('--max-rounds requires a value');
-      }
-      const parsed = Number.parseInt(next, 10);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        throw new Error(`Invalid --max-rounds value: ${next}`);
-      }
-      options.maxRounds = parsed;
-      i += 1;
-      continue;
-    }
-
-    if (arg === '--confidence-threshold') {
-      if (!next) {
-        throw new Error('--confidence-threshold requires a value');
-      }
-      const parsed = Number.parseFloat(next);
-      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
-        throw new Error(`Invalid --confidence-threshold value: ${next}`);
-      }
-      options.confidenceThreshold = parsed;
       i += 1;
       continue;
     }
@@ -605,6 +594,33 @@ function parseArgs(argv: string[]): VerifyOptions {
       continue;
     }
 
+    if (arg === '--knowledge-source-id') {
+      if (!next) {
+        throw new Error('--knowledge-source-id requires a value');
+      }
+      options.knowledgeSourceIds.push(next);
+      i += 1;
+      continue;
+    }
+
+    if (arg === '--setup-codebase-root') {
+      if (!next) {
+        throw new Error('--setup-codebase-root requires a value');
+      }
+      options.setupCodebaseRoot = path.resolve(process.cwd(), next);
+      i += 1;
+      continue;
+    }
+
+    if (arg === '--setup-knowledge-root') {
+      if (!next) {
+        throw new Error('--setup-knowledge-root requires a value');
+      }
+      options.setupKnowledgeRoot = path.resolve(process.cwd(), next);
+      i += 1;
+      continue;
+    }
+
     if (arg === '--provider-id') {
       if (!next) {
         throw new Error('--provider-id requires a value');
@@ -673,6 +689,15 @@ function parseArgs(argv: string[]): VerifyOptions {
         throw new Error('--require-tool requires a value');
       }
       options.requiredTools.push(next);
+      i += 1;
+      continue;
+    }
+
+    if (arg === '--require-successful-lookup') {
+      if (!next) {
+        throw new Error('--require-successful-lookup requires a value');
+      }
+      options.requiredSuccessfulLookups.push(next);
       i += 1;
       continue;
     }
@@ -817,6 +842,7 @@ function createVerificationApp(): express.Express {
   });
 
   app.use('/api/agent/v1', agentRoutes);
+  app.use('/api/rag', ragAdminRoutes);
   app.use('/api/trace-processor', traceProcessorRoutes);
   app.use('/api/skills', skillRoutes);
 
@@ -829,6 +855,65 @@ function createVerificationApp(): express.Express {
   });
 
   return app;
+}
+
+async function postJsonOrThrow(
+  baseUrl: string,
+  route: string,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const response = await fetch(`${baseUrl}${route}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json() as Record<string, unknown>;
+  if (!response.ok || payload.success === false) {
+    throw new Error(`Context setup failed (${route}): ${JSON.stringify(payload)}`);
+  }
+  return payload;
+}
+
+async function setupAnalysisContext(baseUrl: string, options: VerifyOptions): Promise<void> {
+  if (options.setupCodebaseRoot) {
+    const registration = await postJsonOrThrow(baseUrl, '/api/rag/codebases/register', {
+      kind: 'app_source',
+      displayName: 'DeepSeek E2E App Source',
+      rootPath: options.setupCodebaseRoot,
+      sendToProvider: true,
+    });
+    const codebase = asRecord(registration.codebase);
+    const codebaseId = typeof codebase?.codebaseId === 'string' ? codebase.codebaseId : '';
+    if (!codebaseId) throw new Error('Context setup did not return a codebaseId');
+    await postJsonOrThrow(
+      baseUrl,
+      `/api/rag/codebases/${encodeURIComponent(codebaseId)}/reindex`,
+      {},
+    );
+    options.codebaseIds.push(codebaseId);
+    options.codeAwareMode ??= 'provider_send';
+  }
+
+  if (options.setupKnowledgeRoot) {
+    const registration = await postJsonOrThrow(baseUrl, '/api/rag/android-internals/sources', {
+      rootPath: options.setupKnowledgeRoot,
+      displayName: 'DeepSeek E2E Android Internals',
+      rightsAcknowledged: true,
+      sendToProvider: true,
+    });
+    const source = asRecord(registration.source);
+    const sourceId = typeof source?.sourceId === 'string' ? source.sourceId : '';
+    if (!sourceId) throw new Error('Context setup did not return a knowledge source id');
+    await postJsonOrThrow(
+      baseUrl,
+      `/api/rag/android-internals/sources/${encodeURIComponent(sourceId)}/reindex`,
+      {},
+    );
+    options.knowledgeSourceIds.push(sourceId);
+  }
+
+  options.codebaseIds = Array.from(new Set(options.codebaseIds));
+  options.knowledgeSourceIds = Array.from(new Set(options.knowledgeSourceIds));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -1099,6 +1184,7 @@ async function collectSseSummary(
     directSkillCompletedCount: 0,
     directSkillFindingCount: 0,
     toolCallCounts: {},
+    successfulLookupCounts: {},
     skillCallCounts: {},
   };
 
@@ -1168,9 +1254,16 @@ async function collectSseSummary(
 
           // --- agentv3 event counting ---
           switch (event) {
-            case 'progress':
+            case 'progress': {
               summary.progressCount += 1;
+              const sourceEventType = privateProjectedSourceEventType(payload);
+              if (sourceEventType === 'plan_submitted') {
+                summary.planSubmittedCount += 1;
+              } else if (sourceEventType === 'agent_response') {
+                summary.agentResponseCount += 1;
+              }
               break;
+            }
             case 'agent_task_dispatched':
               summary.agentTaskDispatchedCount += 1;
               if (typeof payload?.toolName === 'string') {
@@ -1387,6 +1480,7 @@ async function main(): Promise<void> {
   let sessionId = '';
 
   try {
+    await setupAnalysisContext(baseUrl, options);
     traceId = await traceProcessorService.loadTraceFromFilePath(options.tracePath);
     await writeTraceMetadata({
       id: traceId,
@@ -1432,8 +1526,6 @@ async function main(): Promise<void> {
         ...(options.traceContext ? { traceContext: options.traceContext } : {}),
         ...(options.selectionContext ? { selectionContext: options.selectionContext } : {}),
         options: {
-          maxRounds: options.maxRounds,
-          confidenceThreshold: options.confidenceThreshold,
           ...(options.preset ? { preset: options.preset } : {}),
           ...(options.smartAction ? { smartAction: options.smartAction } : {}),
           ...(options.smartSelection ? { smartSelection: options.smartSelection } : {}),
@@ -1441,6 +1533,9 @@ async function main(): Promise<void> {
           ...(options.analysisMode ? { analysisMode: options.analysisMode } : {}),
           ...(options.codeAwareMode ? { codeAwareMode: options.codeAwareMode } : {}),
           ...(options.codebaseIds.length > 0 ? { codebaseIds: options.codebaseIds } : {}),
+          ...(options.knowledgeSourceIds.length > 0
+            ? { knowledgeSourceIds: options.knowledgeSourceIds }
+            : {}),
           ...(tracePairContext ? { tracePairContext } : {}),
         },
       }),
@@ -1456,6 +1551,13 @@ async function main(): Promise<void> {
       requiredText: options.requiredText,
       forbiddenText: options.forbiddenText,
     });
+    const auditedLookupCounts = successfulCodeLookupToolCounts(
+      CodeLookupLedger.restore(sessionId, 12_000, 2).getEntries(),
+    );
+    sse.successfulLookupCounts = auditedLookupCounts;
+    for (const [toolName, count] of Object.entries(auditedLookupCounts)) {
+      sse.toolCallCounts[toolName] = (sse.toolCallCounts[toolName] ?? 0) + count;
+    }
 
     // Quick-mode analyses skip plan submission. Architecture detection can still
     // be emitted by the deterministic prepass before the lightweight agent path.
@@ -1544,6 +1646,12 @@ async function main(): Promise<void> {
     const requiredToolChecks = Object.fromEntries(
       options.requiredTools.map((toolName) => [`requiresTool:${toolName}`, (sse.toolCallCounts[toolName] ?? 0) > 0]),
     );
+    const requiredSuccessfulLookupChecks = Object.fromEntries(
+      options.requiredSuccessfulLookups.map((toolName) => [
+        `requiresSuccessfulLookup:${toolName}`,
+        (sse.successfulLookupCounts[toolName] ?? 0) > 0,
+      ]),
+    );
     const requiredSkillChecks = Object.fromEntries(
       options.requiredSkills.map((skillId) => [`requiresSkill:${skillId}`, (sse.skillCallCounts[skillId] ?? 0) > 0]),
     );
@@ -1581,6 +1689,7 @@ async function main(): Promise<void> {
       ...requiredTextChecks,
       ...forbiddenTextChecks,
       ...requiredToolChecks,
+      ...requiredSuccessfulLookupChecks,
       ...requiredSkillChecks,
       ...degradedFallbackChecks,
       ...dataEnvelopeChecks,
@@ -1599,6 +1708,7 @@ async function main(): Promise<void> {
       && Object.values(requiredTextChecks).every(Boolean)
       && Object.values(forbiddenTextChecks).every(Boolean)
       && Object.values(requiredToolChecks).every(Boolean)
+      && Object.values(requiredSuccessfulLookupChecks).every(Boolean)
       && Object.values(requiredSkillChecks).every(Boolean)
       && Object.values(degradedFallbackChecks).every(Boolean)
       && Object.values(dataEnvelopeChecks).every(Boolean)
@@ -1616,11 +1726,12 @@ async function main(): Promise<void> {
           ...(options.providerId !== undefined ? { providerId: options.providerId } : {}),
           ...(options.selectionContext ? { selectionContext: options.selectionContext } : {}),
           options: {
-            maxRounds: options.maxRounds,
-            confidenceThreshold: options.confidenceThreshold,
             ...(options.analysisMode ? { analysisMode: options.analysisMode } : {}),
             ...(options.codeAwareMode ? { codeAwareMode: options.codeAwareMode } : {}),
             ...(options.codebaseIds.length > 0 ? { codebaseIds: options.codebaseIds } : {}),
+            ...(options.knowledgeSourceIds.length > 0
+              ? { knowledgeSourceIds: options.knowledgeSourceIds }
+              : {}),
             ...(tracePairContext ? { tracePairContext } : {}),
           },
         }),
@@ -1687,6 +1798,11 @@ async function main(): Promise<void> {
       query: options.query,
       preset: options.preset,
       selectionContext: options.selectionContext,
+      analysisContext: {
+        codeAwareMode: options.codeAwareMode ?? 'off',
+        codebaseIds: options.codebaseIds,
+        knowledgeSourceIds: options.knowledgeSourceIds,
+      },
       traceId,
       referenceTraceId: referenceTraceId || undefined,
       tracePairContext,

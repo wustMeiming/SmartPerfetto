@@ -1431,6 +1431,10 @@ export interface RagChunk {
   attribution?: string;
   /** Exact corpus content identity used alongside a possibly dirty Git revision. */
   contentFingerprint?: string;
+  /** True when the source checkout contained changes beyond the recorded Git revision. */
+  sourceDirty?: boolean;
+  /** Tells consumers whether commitHash is clean, dirty-worktree context, or unavailable. */
+  commitProvenance?: 'clean_git_revision' | 'dirty_git_worktree' | 'content_only';
   /** Origin that decides legacy-vs-scoped-private filtering. Missing old values are backfilled by RagStore. */
   registryOrigin?: 'codebase_registry' | 'external_knowledge_registry' |
     'legacy_plan55' | 'plan44_memory' | 'plan54_cases';

@@ -127,6 +127,42 @@ describe('ProviderService', () => {
     });
   });
 
+  describe('endpoint credential boundary', () => {
+    it('does not forward a stored credential to a newly configured origin', () => {
+      const provider = svc.create({
+        ...validInput,
+        connection: {
+          apiKey: 'sk-existing-secret',
+          openaiBaseUrl: 'https://trusted.example/v1',
+        },
+      });
+
+      expect(() => svc.update(provider.id, {
+        connection: {openaiBaseUrl: 'https://attacker.example/v1'},
+      })).toThrow(/re-enter or clear credential field 'apiKey'/);
+      expect(svc.getRaw(provider.id)?.connection.openaiBaseUrl)
+        .toBe('https://trusted.example/v1');
+    });
+
+    it('allows an origin change only when credentials are explicitly replaced or cleared', () => {
+      const provider = svc.create({
+        ...validInput,
+        connection: {
+          apiKey: 'sk-existing-secret',
+          openaiBaseUrl: 'https://trusted.example/v1',
+        },
+      });
+
+      svc.update(provider.id, {
+        connection: {
+          openaiBaseUrl: 'https://replacement.example/v1',
+          apiKey: 'sk-replacement-secret',
+        },
+      });
+      expect(svc.getRaw(provider.id)?.connection.apiKey).toBe('sk-replacement-secret');
+    });
+  });
+
   describe('delete', () => {
     it('deletes inactive provider', () => {
       const p = svc.create(validInput);
@@ -476,8 +512,13 @@ describe('ProviderService', () => {
       expect(env.CLAUDE_MAX_TURNS).toBeUndefined();
     });
 
-    it('does not allow custom env overrides to flip the selected SDK runtime', () => {
-      const p = svc.create({
+    it.each([
+      ['SMARTPERFETTO_AGENT_RUNTIME', 'claude-agent-sdk'],
+      ['SMARTPERFETTO_OPENCODE_MCP_COMMAND_JSON', '["/bin/sh","-c","id"]'],
+      ['SMARTPERFETTO_OPENCODE_SDK_MODULE_PATH', '/tmp/hostile-sdk.mjs'],
+      ['NODE_OPTIONS', '--require=/tmp/hostile.cjs'],
+    ])('rejects process-control custom env override %s', (key, value) => {
+      expect(() => svc.create({
         ...validInput,
         type: 'custom',
         models: { primary: 'custom-openai-main', light: 'custom-openai-light' },
@@ -488,15 +529,10 @@ describe('ProviderService', () => {
         },
         custom: {
           envOverrides: {
-            SMARTPERFETTO_AGENT_RUNTIME: 'claude-agent-sdk',
+            [key]: value,
           },
         },
-      });
-
-      const env = svc.getEnvForProvider(p.id)!;
-
-      expect(env.SMARTPERFETTO_AGENT_RUNTIME).toBe('openai-agents-sdk');
-      expect(env.OPENAI_MODEL).toBe('custom-openai-main');
+      })).toThrow(`Custom provider env override is not allowed: ${key}`);
     });
   });
 

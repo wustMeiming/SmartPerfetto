@@ -8,6 +8,10 @@ import path from 'path';
 import { ENTERPRISE_FEATURE_FLAG_ENV } from '../../config';
 import { sessionContextManager } from '../../agent/context/enhancedSessionContext';
 import { ENTERPRISE_DB_PATH_ENV, openEnterpriseDb } from '../../services/enterpriseDb';
+import {
+  ENTERPRISE_MIGRATION_CUTOVER_CONFIRMED_ENV,
+  ENTERPRISE_MIGRATION_PHASE_ENV,
+} from '../../services/enterpriseMigration';
 import { getProviderService, resetProviderService } from '../../services/providerManager';
 import { saveClaudeSessionMapToRuntimeSnapshots } from '../../services/runtimeSnapshotStore';
 import type { TraceProcessorService } from '../../services/traceProcessorService';
@@ -23,6 +27,8 @@ const claudeSdkMock = require('@anthropic-ai/claude-agent-sdk') as {
 const originalEnv = {
   enterprise: process.env[ENTERPRISE_FEATURE_FLAG_ENV],
   enterpriseDbPath: process.env[ENTERPRISE_DB_PATH_ENV],
+  migrationPhase: process.env[ENTERPRISE_MIGRATION_PHASE_ENV],
+  cutoverConfirmed: process.env[ENTERPRISE_MIGRATION_CUTOVER_CONFIRMED_ENV],
   providerDataDirOverride: process.env.PROVIDER_DATA_DIR_OVERRIDE,
   precompactThreshold: process.env.CLAUDE_PRECOMPACT_THRESHOLD,
   precompactWarnEnabled: process.env.CLAUDE_PRECOMPACT_WARN_ENABLED,
@@ -56,6 +62,8 @@ beforeEach(async () => {
   dbPath = path.join(tmpDir, 'enterprise.sqlite');
   process.env[ENTERPRISE_FEATURE_FLAG_ENV] = 'true';
   process.env[ENTERPRISE_DB_PATH_ENV] = dbPath;
+  process.env[ENTERPRISE_MIGRATION_PHASE_ENV] = 'cutover';
+  process.env[ENTERPRISE_MIGRATION_CUTOVER_CONFIRMED_ENV] = 'true';
   process.env.PROVIDER_DATA_DIR_OVERRIDE = tmpDir;
   resetProviderService();
 });
@@ -66,9 +74,13 @@ afterEach(async () => {
   sessionContextManager.remove('session-quick');
   sessionContextManager.remove('session-quick-focus-evidence');
   sessionContextManager.remove('session-quick-selection-trace-fact');
+  sessionContextManager.remove('session-language-quick');
+  sessionContextManager.remove('session-language-full');
   sessionContextManager.remove('session-provider');
   restoreEnvValue(ENTERPRISE_FEATURE_FLAG_ENV, originalEnv.enterprise);
   restoreEnvValue(ENTERPRISE_DB_PATH_ENV, originalEnv.enterpriseDbPath);
+  restoreEnvValue(ENTERPRISE_MIGRATION_PHASE_ENV, originalEnv.migrationPhase);
+  restoreEnvValue(ENTERPRISE_MIGRATION_CUTOVER_CONFIRMED_ENV, originalEnv.cutoverConfirmed);
   restoreEnvValue('PROVIDER_DATA_DIR_OVERRIDE', originalEnv.providerDataDirOverride);
   restoreEnvValue('CLAUDE_PRECOMPACT_THRESHOLD', originalEnv.precompactThreshold);
   restoreEnvValue('CLAUDE_PRECOMPACT_WARN_ENABLED', originalEnv.precompactWarnEnabled);
@@ -648,6 +660,61 @@ describe('ClaudeRuntime enterprise runtime_snapshots session map', () => {
     }
   });
 
+  it('does not persist provider resume or intermediate model state for private source sessions', () => {
+    const now = 1_700_000_000_000;
+    const runtime = new ClaudeRuntime({} as any, {
+      enableVerification: false,
+      enableSubAgents: false,
+    });
+    (runtime as any).sessionMap.set('session-private', {
+      sdkSessionId: 'PRIVATE_PROVIDER_SESSION_CANARY',
+      updatedAt: now,
+      mode: 'full',
+    });
+    (runtime as any).sessionNotes.set('session-private', [{content: 'PRIVATE_NOTE_CANARY'}]);
+    (runtime as any).sessionPlans.set('session-private', {
+      current: {
+        phases: [],
+        successCriteria: 'PRIVATE_PLAN_CANARY',
+        submittedAt: now,
+        toolCallLog: [{
+          toolName: 'submit_hypothesis',
+          timestamp: now,
+          inputSummary: 'PRIVATE_TOOL_ARGUMENT_CANARY',
+        }],
+      },
+      history: [],
+    });
+    (runtime as any).sessionHypotheses.set('session-private', [{statement: 'PRIVATE_TITLE_ONLY_CANARY'}]);
+
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      const snapshot = runtime.takeSnapshot('session-private', 'trace-a', {
+        codeAwareMode: 'provider_send',
+        codebaseIds: ['private-app'],
+        conversationSteps: [{content: {text: 'PRIVATE_STEP_CANARY'}}] as any,
+        queryHistory: [],
+        conclusionHistory: [],
+        agentDialogue: [{content: 'PRIVATE_DIALOGUE_CANARY'}] as any,
+        agentResponses: [{response: 'PRIVATE_RESPONSE_CANARY'}] as any,
+        dataEnvelopes: [],
+        hypotheses: [{description: 'PRIVATE_HYPOTHESIS_CANARY'}],
+        runSequence: 0,
+        conversationOrdinal: 0,
+      });
+
+      expect(snapshot.sdkSessionId).toBeUndefined();
+      expect(snapshot.analysisNotes).toEqual([]);
+      expect(snapshot.analysisPlan).toBeNull();
+      expect(snapshot.planHistory).toEqual([]);
+      expect(snapshot.claudeHypotheses).toBeUndefined();
+      expect(snapshot.artifacts).toBeUndefined();
+      expect(JSON.stringify(snapshot)).not.toContain('PRIVATE_');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('persists fresh comparison SDK session mappings into snapshots', () => {
     const now = 1_700_000_000_000;
     const runtime = new ClaudeRuntime({} as any, {
@@ -782,12 +849,54 @@ describe('ClaudeRuntime enterprise runtime_snapshots session map', () => {
     const calls = claudeSdkMock.__getQueryCalls();
     expect(calls).toHaveLength(1);
     expect(calls[0].options.resume).toBeUndefined();
+    expect(calls[0].options.persistSession).toBe(false);
     expect(calls[0].options.allowedTools).toContain('mcp__smartperfetto__fetch_artifact');
     expect(calls[0].prompt).toContain('上一轮回答：主要包名是 com.example.app。');
     expect((runtime as any).sessionMap.get('session-quick')).toEqual(expect.objectContaining({
       sdkSessionId: 'full-sdk-session',
       mode: 'full',
     }));
+  });
+
+  it('uses the request language throughout the quick path without mutating runtime defaults', async () => {
+    const runtime = new ClaudeRuntime({
+      query: async () => ({columns: ['cnt'], rows: [[0]]}),
+    } as any, {
+      outputLanguage: 'zh-CN',
+      enableVerification: false,
+      enableSubAgents: false,
+    });
+    (runtime as any).architectureCache.set('trace-language-quick', {
+      type: 'STANDARD',
+      confidence: 0.9,
+      evidence: [],
+    });
+    const updates: any[] = [];
+    runtime.on('update', update => updates.push(update));
+    claudeSdkMock.__setQueryImplementation(async function* () {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'sdk-language-quick',
+        num_turns: 1,
+        result: 'The current app is com.example.app.',
+      };
+    });
+
+    await runtime.analyze(
+      'Explain the current app briefly',
+      'session-language-quick',
+      'trace-language-quick',
+      {analysisMode: 'fast', outputLanguage: 'en', packageName: 'com.example.app'},
+    );
+
+    const [call] = claudeSdkMock.__getQueryCalls();
+    expect(JSON.stringify(call.options.systemPrompt)).toContain('English');
+    const progress = updates.filter(update => update.type === 'progress')
+      .map(update => String(update.content?.message ?? '')).join('\n');
+    expect(progress).toContain('Fast Q&A mode');
+    expect(progress).not.toContain('快速问答模式');
+    expect((runtime as any).config.outputLanguage).toBe('zh-CN');
   });
 
   it('emits focus evidence for auto-detected app-scoped direct quick facts', async () => {
@@ -1345,6 +1454,144 @@ describe('ClaudeRuntime enterprise runtime_snapshots session map', () => {
     expect(boundaryIndex).toBeGreaterThan(0);
     expect(blocks.slice(0, boundaryIndex).join('\n\n')).toContain('SmartPerfetto');
     expect(blocks.slice(boundaryIndex + 1).join('\n\n')).toContain('用户选区上下文');
+    expect(call.options.persistSession).toBe(true);
+  });
+
+  it('uses the request language throughout the full path without mutating runtime defaults', async () => {
+    const runtime = new ClaudeRuntime({
+      query: async () => ({columns: ['cnt'], rows: [[0]]}),
+      getTrace: () => ({traceOs: 'android', traceFormat: 'perfetto'}),
+    } as any, {
+      outputLanguage: 'zh-CN',
+      enableVerification: false,
+      enableSubAgents: false,
+    });
+    (runtime as any).architectureCache.set('trace-language-full', {
+      type: 'STANDARD',
+      confidence: 0.9,
+      evidence: [],
+    });
+    const updates: any[] = [];
+    runtime.on('update', update => updates.push(update));
+    claudeSdkMock.__setQueryImplementation(async function* () {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'sdk-language-full',
+        num_turns: 1,
+        result: [
+          '# Performance Analysis Report',
+          '',
+          '## Overall Conclusion',
+          '',
+          'The selected interval is stable based on the collected evidence.',
+          '',
+          '## Key Evidence Chain',
+          '',
+          '- The trace query completed successfully.',
+          '',
+          '## Recommendations',
+          '',
+          '- Continue monitoring the selected interval.',
+        ].join('\n'),
+      };
+    });
+
+    await runtime.analyze(
+      'Analyze the selected interval',
+      'session-language-full',
+      'trace-language-full',
+      {
+        analysisMode: 'full',
+        outputLanguage: 'en',
+        packageName: 'com.example.app',
+        selectionContext: {kind: 'area', startNs: 100, endNs: 200} as any,
+      },
+    );
+
+    const [call] = claudeSdkMock.__getQueryCalls();
+    expect(JSON.stringify(call.options.systemPrompt)).toContain(
+      'All user-facing answers, reports, phase summaries',
+    );
+    const progress = updates.filter(update => update.type === 'progress')
+      .map(update => String(update.content?.message ?? '')).join('\n');
+    expect(progress).toContain('Starting analysis with');
+    expect(progress).not.toContain('开始分析');
+    expect((runtime as any).config.outputLanguage).toBe('zh-CN');
+  });
+
+  it('keeps private full-mode Claude transcripts ephemeral and out of resume maps', async () => {
+    const sessionId = 'session-private-sdk';
+    const runtime = new ClaudeRuntime({
+      query: async () => ({columns: ['cnt'], rows: [[0]]}),
+      getTrace: () => ({traceOs: 'android', traceFormat: 'perfetto'}),
+    } as any, {
+      enableVerification: false,
+      enableSubAgents: false,
+    });
+    (runtime as any).architectureCache.set('trace-private-sdk', {
+      type: 'STANDARD',
+      confidence: 0.9,
+      evidence: [],
+    });
+    sessionContextManager.getOrCreate(sessionId, 'trace-private-sdk').addTurn(
+      '上一轮私有问题',
+      {
+        primaryGoal: '上一轮私有问题',
+        aspects: [],
+        expectedOutputType: 'diagnosis',
+        complexity: 'complex',
+        followUpType: 'initial',
+      },
+      {
+        agentId: 'claude-agent',
+        success: true,
+        findings: [],
+        confidence: 0.8,
+        message: 'PRIVATE_LOCAL_CONTINUITY_CANARY',
+      },
+      [],
+    );
+    claudeSdkMock.__setQueryImplementation(async function* () {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        session_id: 'sdk-private-session-canary',
+        num_turns: 1,
+        result: [
+          '## 综合结论',
+          '私有源码分析已完成。',
+          '',
+          '## 关键证据链',
+          '- 仅使用本轮授权上下文。',
+          '',
+          '## 优化建议',
+          '- 修正私有源码中的热点路径。',
+        ].join('\n'),
+      };
+    });
+
+    try {
+      const result = await runtime.analyze('分析私有源码热点', sessionId, 'trace-private-sdk', {
+        analysisMode: 'full',
+        codeAwareMode: 'metadata_only',
+        codebaseIds: ['private-app'],
+        tenantId: 'tenant-private',
+        workspaceId: 'workspace-private',
+        userId: 'user-private',
+      });
+
+      expect(result.success).toBe(true);
+      const [call] = claudeSdkMock.__getQueryCalls();
+      expect(call.options.persistSession).toBe(false);
+      expect(call.options.resume).toBeUndefined();
+      expect(call.prompt).toContain('PRIVATE_LOCAL_CONTINUITY_CANARY');
+      expect(runtime.getSdkSessionId(sessionId)).toBeUndefined();
+      expect(JSON.stringify(Array.from((runtime as any).sessionMap.values())))
+        .not.toContain('sdk-private-session-canary');
+    } finally {
+      sessionContextManager.remove(sessionId);
+    }
   });
 
   it('keeps unsupported runtime prompt cache capabilities on the full system prompt string', () => {

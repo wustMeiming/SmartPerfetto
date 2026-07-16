@@ -12,6 +12,7 @@ import {
   getSnapshotRuntimeProviderId,
   getSnapshotRuntimeProviderSnapshotHash,
   normalizeSessionStateSnapshot,
+  projectSessionFieldsForDurableSnapshot,
   type SessionStateSnapshot,
 } from '../../agentv3/sessionStateSnapshot';
 import type { AgentRuntimeKind } from '../../services/providerManager/types';
@@ -69,6 +70,30 @@ const LEGACY_OPENAI_RUNTIME_MIRROR_FIELDS = [
 ] as const satisfies readonly (keyof SessionStateSnapshot)[];
 
 describe('SessionStateSnapshot runtime state inventory', () => {
+  it('removes model-authored intermediate state from private durable fields', () => {
+    const projected = projectSessionFieldsForDurableSnapshot({
+      codeAwareMode: 'provider_send',
+      codebaseIds: ['private-app'],
+      conversationSteps: [{content: {text: 'PRIVATE_STEP_CANARY'}}] as any,
+      queryHistory: [],
+      conclusionHistory: [],
+      agentDialogue: [{content: 'PRIVATE_DIALOGUE_CANARY'}] as any,
+      agentResponses: [{response: 'PRIVATE_RESPONSE_CANARY'}] as any,
+      dataEnvelopes: [],
+      hypotheses: [{description: 'PRIVATE_HYPOTHESIS_CANARY'}],
+      comparisonReportSection: {markdown: 'PRIVATE_COMPARISON_CANARY'} as any,
+      runSequence: 1,
+      conversationOrdinal: 1,
+    });
+
+    expect(projected.conversationSteps).toEqual([]);
+    expect(projected.agentDialogue).toEqual([]);
+    expect(projected.agentResponses).toEqual([]);
+    expect(projected.hypotheses).toEqual([]);
+    expect(projected.comparisonReportSection).toBeUndefined();
+    expect(JSON.stringify(projected)).not.toContain('PRIVATE_');
+  });
+
   it('keeps snapshot v1 runtime kind aligned with public Provider Manager values', () => {
     expect(runtimeKindMatchesM10PublicRuntimeContract).toBe(true);
     expect(snapshotRuntimeKindMatchesProviderManager).toBe(true);

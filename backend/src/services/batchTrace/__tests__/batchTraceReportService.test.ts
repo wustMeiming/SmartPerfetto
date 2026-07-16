@@ -95,7 +95,7 @@ function run(): BatchTraceRunV1 {
 
 describe('batch trace report domain analysis', () => {
   it('renders escaped heap cluster status, quality, evidence, limitations, and failures', () => {
-    const html = renderBatchTraceHtmlReport(run());
+    const html = renderBatchTraceHtmlReport(run(), 'en');
 
     expect(html).toContain('Heap Path Cluster Analysis');
     expect(html).toContain('Silhouette');
@@ -105,6 +105,18 @@ describe('batch trace report domain analysis', () => {
     expect(html).toContain('batch_source_rows_truncated:2');
     expect(html).toContain('&lt;query failed&gt;');
     expect(html).toContain('Rejected rows:</strong> 1');
+  });
+
+  it('renders report chrome in the selected language without translating stable data', () => {
+    const html = renderBatchTraceHtmlReport(run(), 'zh-CN');
+
+    expect(html).toContain('<html lang="zh-CN">');
+    expect(html).toContain('批量轨迹分析');
+    expect(html).toContain('堆内存路径聚类分析');
+    expect(html).toContain('部分完成');
+    expect(html).toContain('轨迹序号 9');
+    expect(html).toContain('data-status="partial"');
+    expect(html).toContain('android_heap_dominator_path_extract');
   });
 
   it('preserves the typed domain envelope in JSON artifacts', () => {

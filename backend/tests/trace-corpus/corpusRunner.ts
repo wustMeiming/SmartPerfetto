@@ -19,16 +19,25 @@ type CorpusExpectation = {
   id: string;
   type: 'skill' | 'strategy';
   target: string;
-  mode?: 'semantic' | 'graceful_empty' | 'unavailable' | 'definition';
+  mode?: 'semantic' | 'execution' | 'graceful_empty' | 'unavailable' | 'definition';
   source_file?: string;
   parameters?: Record<string, unknown>;
   required_steps?: string[];
   semantic_step?: string;
+  min_rows?: number;
+  max_rows?: number;
+  assertions?: CorpusValueAssertion[];
   limitation_reason?: string;
   expected_error?: string;
   required_marker?: string;
   query?: string;
   expected_strategy?: string;
+};
+
+type CorpusValueAssertion = {
+  column: string;
+  operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'matches';
+  value: string | number | boolean | null;
 };
 
 type CorpusCase = {
@@ -71,6 +80,59 @@ export function resolveParameterTokens(
       typeof value === 'string' && tokenValues.has(value) ? tokenValues.get(value) : value,
     ]),
   );
+}
+
+function assertionMatches(actual: unknown, assertion: CorpusValueAssertion): boolean {
+  switch (assertion.operator) {
+    case 'eq': return actual === assertion.value;
+    case 'ne': return actual !== assertion.value;
+    case 'contains': return String(actual ?? '').includes(String(assertion.value ?? ''));
+    case 'matches': return new RegExp(String(assertion.value ?? '')).test(String(actual ?? ''));
+    case 'gt':
+    case 'gte':
+    case 'lt':
+    case 'lte': {
+      const left = Number(actual);
+      const right = Number(assertion.value);
+      if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+      if (assertion.operator === 'gt') return left > right;
+      if (assertion.operator === 'gte') return left >= right;
+      if (assertion.operator === 'lt') return left < right;
+      return left <= right;
+    }
+  }
+  return false;
+}
+
+export function assertExpectationRows(
+  rows: unknown[],
+  expectation: Pick<CorpusExpectation, 'target' | 'semantic_step' | 'min_rows' | 'max_rows' | 'assertions'>,
+): void {
+  const minRows = expectation.min_rows ?? 1;
+  if (rows.length < minRows) {
+    throw new Error(`result step returned ${rows.length} row(s), expected at least ${minRows}: ${expectation.semantic_step ?? expectation.target}`);
+  }
+  if (expectation.max_rows !== undefined && rows.length > expectation.max_rows) {
+    throw new Error(`result step returned ${rows.length} row(s), expected at most ${expectation.max_rows}: ${expectation.semantic_step ?? expectation.target}`);
+  }
+  const assertions = expectation.assertions ?? [];
+  if (assertions.length > 0) {
+    const matched = rows.some((row) =>
+      !!row &&
+      typeof row === 'object' &&
+      assertions.every(assertion =>
+        assertionMatches((row as Record<string, unknown>)[assertion.column], assertion),
+      ),
+    );
+    if (!matched) {
+      const contract = assertions
+        .map(assertion => `${assertion.column} ${assertion.operator} ${JSON.stringify(assertion.value)}`)
+        .join(' AND ');
+      throw new Error(
+        `no single result row satisfies ${contract}: ${expectation.semantic_step ?? expectation.target}`,
+      );
+    }
+  }
 }
 
 async function loadTokenContext(evaluator: SkillEvaluator): Promise<TokenContext> {
@@ -161,9 +223,7 @@ async function runSkillExpectation(
   if (expectation.mode === 'unavailable') {
     throw new Error(`unavailable expectation unexpectedly executed successfully: ${semanticStep}`);
   }
-  if (semanticResult.data.length === 0) {
-    throw new Error(`semantic step returned no rows: ${semanticStep ?? requiredSteps.join(', ')}`);
-  }
+  assertExpectationRows(semanticResult.data, expectation);
 }
 
 async function runStrategyExpectation(

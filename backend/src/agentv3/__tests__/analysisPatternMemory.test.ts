@@ -28,6 +28,7 @@ let mockNegativePatternFileRaw: string | undefined;
 let mockQuickPatternFileRaw: string | undefined;
 let mockCorruptBackups: Array<{ src: string; dest: string }> = [];
 const originalEnterprise = process.env.SMARTPERFETTO_ENTERPRISE;
+const originalMigrationPhase = process.env.SMARTPERFETTO_ENTERPRISE_MIGRATION_PHASE;
 
 // Temporary storage for atomic write simulation (writeFile to .tmp, then rename)
 let tmpWriteBuffer: Map<string, string> = new Map();
@@ -100,6 +101,16 @@ jest.mock('fs', () => {
   };
 });
 
+jest.mock('../../services/filesystemRegistryLock', () => ({
+  withFilesystemRegistryLockAsync: jest.fn(
+    async (
+      _storagePath: string,
+      _busyError: string,
+      operation: (lease: {assertHeld(): void}) => Promise<unknown>,
+    ) => operation({assertHeld: () => {}}),
+  ),
+}));
+
 import {
   extractTraceFeatures,
   extractKeyInsights,
@@ -132,6 +143,7 @@ beforeEach(() => {
   // Disable the real SQLite supersede store for fs-mocked tests; PR9b's
   // own integration tests cover the live store behaviour.
   setSupersedeStoreForTesting(null);
+  process.env.SMARTPERFETTO_ENTERPRISE_MIGRATION_PHASE = 'legacy';
 });
 
 afterEach(() => {
@@ -139,6 +151,11 @@ afterEach(() => {
     delete process.env.SMARTPERFETTO_ENTERPRISE;
   } else {
     process.env.SMARTPERFETTO_ENTERPRISE = originalEnterprise;
+  }
+  if (originalMigrationPhase === undefined) {
+    delete process.env.SMARTPERFETTO_ENTERPRISE_MIGRATION_PHASE;
+  } else {
+    process.env.SMARTPERFETTO_ENTERPRISE_MIGRATION_PHASE = originalMigrationPhase;
   }
 });
 
@@ -898,19 +915,27 @@ describe('promoteQuickPatternIfMatching', () => {
 });
 
 describe('applyFeedbackToPattern state machine', () => {
+  const feedbackScope = {
+    tenantId: 'default-dev-tenant',
+    workspaceId: 'default-workspace',
+  };
   const baseEntry = {
     id: 'p1', traceFeatures: ['arch:STANDARD'], sceneType: 'scrolling',
     keyInsights: ['x'], confidence: 0.7, matchCount: 0,
+    provenance: {
+      sourceTenantId: feedbackScope.tenantId,
+      sourceWorkspaceId: feedbackScope.workspaceId,
+    },
   };
 
   it('returns null when patternId not found', async () => {
-    const result = await applyFeedbackToPattern('missing', 'positive');
+    const result = await applyFeedbackToPattern('missing', 'positive', feedbackScope);
     expect(result).toBeNull();
   });
 
   it('flips provisional → confirmed on positive feedback', async () => {
     mockPatterns = [{ ...baseEntry, status: 'provisional', createdAt: Date.now() }];
-    const status = await applyFeedbackToPattern('p1', 'positive');
+    const status = await applyFeedbackToPattern('p1', 'positive', feedbackScope);
     expect(status).toBe('confirmed');
     expect(mockPatterns[0].status).toBe('confirmed');
     expect(mockPatterns[0].lastFeedbackAt).toBeDefined();
@@ -918,7 +943,7 @@ describe('applyFeedbackToPattern state machine', () => {
 
   it('flips provisional → rejected on negative feedback', async () => {
     mockPatterns = [{ ...baseEntry, status: 'provisional', createdAt: Date.now() }];
-    const status = await applyFeedbackToPattern('p1', 'negative');
+    const status = await applyFeedbackToPattern('p1', 'negative', feedbackScope);
     expect(status).toBe('rejected');
   });
 
@@ -928,7 +953,7 @@ describe('applyFeedbackToPattern state machine', () => {
       ...baseEntry, status: 'confirmed', createdAt: t0 - 1000,
       firstFeedbackAt: t0, lastFeedbackAt: t0,
     }];
-    const status = await applyFeedbackToPattern('p1', 'negative', t0 + 5_000);
+    const status = await applyFeedbackToPattern('p1', 'negative', feedbackScope, t0 + 5_000);
     expect(status).toBe('rejected');
   });
 
@@ -938,7 +963,7 @@ describe('applyFeedbackToPattern state machine', () => {
       ...baseEntry, status: 'confirmed', createdAt: t0 - 1000,
       firstFeedbackAt: t0, lastFeedbackAt: t0,
     }];
-    const status = await applyFeedbackToPattern('p1', 'negative', t0 + 60 * 60 * 1000); // 1h later
+    const status = await applyFeedbackToPattern('p1', 'negative', feedbackScope, t0 + 60 * 60 * 1000); // 1h later
     expect(status).toBe('disputed');
   });
 
@@ -948,21 +973,32 @@ describe('applyFeedbackToPattern state machine', () => {
       ...baseEntry, status: 'confirmed', createdAt: t0 - 1000,
       firstFeedbackAt: t0, lastFeedbackAt: t0,
     }];
-    const status = await applyFeedbackToPattern('p1', 'negative', t0 + 48 * 60 * 60 * 1000); // 2 days later
+    const status = await applyFeedbackToPattern('p1', 'negative', feedbackScope, t0 + 48 * 60 * 60 * 1000); // 2 days later
     expect(status).toBe('disputed_late');
   });
 
   it('rejected entries stay rejected regardless of subsequent positives', async () => {
     mockPatterns = [{ ...baseEntry, status: 'rejected', createdAt: Date.now() }];
-    const status = await applyFeedbackToPattern('p1', 'positive');
+    const status = await applyFeedbackToPattern('p1', 'positive', feedbackScope);
     expect(status).toBe('rejected');
   });
 
   it('finds patterns across positive / quick / negative buckets', async () => {
     mockQuickPatterns = [{ ...baseEntry, id: 'q1', status: 'provisional', createdAt: Date.now() }];
-    const status = await applyFeedbackToPattern('q1', 'positive');
+    const status = await applyFeedbackToPattern('q1', 'positive', feedbackScope);
     expect(status).toBe('confirmed');
     expect(mockQuickPatterns[0].status).toBe('confirmed');
+  });
+
+  it('does not mutate a matching id owned by another tenant', async () => {
+    mockPatterns = [{...baseEntry, status: 'provisional', createdAt: Date.now()}];
+    const status = await applyFeedbackToPattern('p1', 'negative', {
+      tenantId: 'tenant-b',
+      workspaceId: feedbackScope.workspaceId,
+    });
+
+    expect(status).toBeNull();
+    expect(mockPatterns[0].status).toBe('provisional');
   });
 });
 

@@ -61,7 +61,7 @@ For Docker runs, check:
 
 - The repository-root `.env` exists. Local source runs use `backend/.env`; Docker uses root `.env`.
 - `ANTHROPIC_API_KEY`, or `ANTHROPIC_BASE_URL` plus `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`, is configured for Claude-compatible providers.
-- `/health` reports the expected `aiEngine.credentialSource`. If it is `provider-manager`, the active Provider Manager profile overrides `.env`.
+- Authenticated `/api/runtime-health` reports the expected `aiEngine.credentialSource`. If it is `provider-manager`, the active Provider Manager profile overrides `.env`. Public `/health` does not expose credential diagnostics.
 - Docker has enough memory and disk.
 
 ## macOS Blocks trace_processor_shell

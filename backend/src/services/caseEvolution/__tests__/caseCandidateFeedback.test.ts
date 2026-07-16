@@ -31,7 +31,7 @@ afterEach(() => {
 function candidate(candidateId = 'cand-feedback-1'): CaseCandidate {
   return {
     candidateId,
-    schemaVersion: 'case_candidate@1',
+    schemaVersion: 'case_candidate@2',
     provenance: {
       sourceSessionId: 'session-1',
       sourceAnalysisRunId: 'run-1',
@@ -41,6 +41,7 @@ function candidate(candidateId = 'cand-feedback-1'): CaseCandidate {
       engine: 'claude',
       sceneType: 'scrolling',
       architectureType: 'unknown',
+      originScope: {tenantId: 'default-dev-tenant', workspaceId: 'default-workspace'},
     },
     cluster: {
       scene: 'scrolling',
@@ -138,6 +139,7 @@ describe('recordCaseCandidateFeedback', () => {
       receivedAt: 5_000,
       outbox,
       library,
+      knowledgeScope: {tenantId: 'default-dev-tenant', workspaceId: 'default-workspace'},
     });
 
     expect(result).toMatchObject({ added: false, reason: 'mis_tap' });
@@ -156,6 +158,7 @@ describe('recordCaseCandidateFeedback', () => {
         receivedAt: 20_000,
         outbox,
         library,
+        knowledgeScope: {tenantId: 'default-dev-tenant', workspaceId: 'default-workspace'},
       }).added).toBe(true);
     }
 
@@ -178,10 +181,27 @@ describe('recordCaseCandidateFeedback', () => {
         receivedAt: 20_000,
         outbox,
         library,
+        knowledgeScope: {tenantId: 'default-dev-tenant', workspaceId: 'default-workspace'},
       });
     }
 
     expect(outbox.getCandidate('cand-feedback-1')?.state).toBe('rejected');
     expect(library.getCase('learned:cand-feedback')?.status).toBe('private');
+  });
+
+  it('rejects feedback from another tenant before mutating counters', () => {
+    seedReviewedCase();
+    const result = recordCaseCandidateFeedback({
+      candidateId: 'cand-feedback-1',
+      sourceSessionId: 'cross-tenant',
+      rating: 'positive',
+      receivedAt: 20_000,
+      outbox,
+      library,
+      knowledgeScope: {tenantId: 'tenant-b', workspaceId: 'default-workspace'},
+    });
+
+    expect(result).toEqual({added: false, reason: 'scope_mismatch'});
+    expect(outbox.getCandidate('cand-feedback-1')?.supportingEvidence).toBe(0);
   });
 });

@@ -17,6 +17,21 @@ import {
 } from '../types/multiTraceComparison';
 import { openEnterpriseDb } from './enterpriseDb';
 import { createAnalysisResultSnapshotRepository } from './analysisResultSnapshotStore';
+import {parseOutputLanguage} from '../agentv3/outputLanguage';
+import type {OutputLanguage} from '../agentv3/outputLanguage';
+import {
+  privateAnalysisQueryMessage,
+  projectPrivateAnalysisReceipt,
+  projectPrivateClaimSupport,
+  projectPrivateClaimVerification,
+  projectPrivateConclusion,
+  projectPrivateDataEnvelopes,
+  projectPrivateIdentityResolutions,
+  projectPrivateStructuredValue,
+  projectPrivateTerminationMessage,
+  projectPrivateTerminationReason,
+  projectPrivateUiActionProposals,
+} from './security/privateAnalysisProjection';
 
 export interface CompletedAnalysisSnapshotInput {
   tenantId?: string;
@@ -41,9 +56,18 @@ export interface CompletedAnalysisSnapshotInput {
   analysisReceipt?: import('../types/dataContract').AnalysisReceiptV1;
   uiActionProposals?: import('../types/dataContract').UiActionProposalV1[];
   createdAt?: number;
+  /** Apply the non-resumable private-source persistence projection. */
+  privateKnowledge?: boolean;
+  /** Language pinned to the originating analysis session. */
+  outputLanguage?: OutputLanguage;
+  /** Canonical scene derived before any private query/evidence projection. */
+  sceneType?: AnalysisResultSceneType;
 }
 
-function inferSceneType(query: string, envelopes: DataEnvelope[] = []): AnalysisResultSceneType {
+export function resolveAnalysisResultSceneType(
+  query: string,
+  envelopes: DataEnvelope[] = [],
+): AnalysisResultSceneType {
   const text = [
     query,
     ...envelopes.flatMap(env => [
@@ -412,7 +436,7 @@ export function buildCompletedAnalysisResultSnapshot(
   }
 
   const createdAt = input.createdAt ?? Date.now();
-  const sceneType = inferSceneType(input.query, input.dataEnvelopes);
+  const sceneType = input.sceneType ?? resolveAnalysisResultSceneType(input.query, input.dataEnvelopes);
   const headline = firstNonEmptyLine(input.conclusion)
     || input.terminationMessage
     || 'Analysis completed';
@@ -547,12 +571,47 @@ function ensureSnapshotParentGraph(
 export function persistCompletedAnalysisResultSnapshot(
   input: CompletedAnalysisSnapshotInput,
 ): AnalysisResultSnapshot | null {
-  const snapshot = buildCompletedAnalysisResultSnapshot(input);
+  const outputLanguage = input.outputLanguage
+    ?? parseOutputLanguage(process.env.SMARTPERFETTO_OUTPUT_LANGUAGE);
+  const durableInput: CompletedAnalysisSnapshotInput = input.privateKnowledge
+    ? {
+        ...input,
+        query: privateAnalysisQueryMessage(outputLanguage),
+        traceLabel: input.traceId,
+        conclusion: projectPrivateConclusion({
+          sessionId: input.sessionId,
+          conclusion: input.conclusion,
+          success: true,
+          language: outputLanguage,
+        }),
+        conclusionContract: input.conclusionContract
+          ? projectPrivateStructuredValue(input.sessionId, input.conclusionContract)
+          : undefined,
+        claimSupport: projectPrivateClaimSupport(input.sessionId, input.claimSupport),
+        claimVerificationResult: projectPrivateClaimVerification(
+          input.sessionId,
+          input.claimVerificationResult,
+        ),
+        identityResolutions: projectPrivateIdentityResolutions(
+          input.sessionId,
+          input.identityResolutions,
+        ),
+        terminationReason: projectPrivateTerminationReason(input.terminationReason),
+        terminationMessage: projectPrivateTerminationMessage(input.terminationMessage, outputLanguage),
+        analysisReceipt: projectPrivateAnalysisReceipt(input.analysisReceipt),
+        uiActionProposals: projectPrivateUiActionProposals(
+          input.sessionId,
+          input.uiActionProposals,
+        ),
+        dataEnvelopes: projectPrivateDataEnvelopes(input.sessionId, input.dataEnvelopes || []),
+      }
+    : input;
+  const snapshot = buildCompletedAnalysisResultSnapshot(durableInput);
   if (!snapshot) return null;
 
   const db = openEnterpriseDb();
   try {
-    ensureSnapshotParentGraph(db, input, snapshot.createdAt);
+    ensureSnapshotParentGraph(db, durableInput, snapshot.createdAt);
     return createAnalysisResultSnapshotRepository(db).createSnapshot(snapshot);
   } finally {
     db.close();

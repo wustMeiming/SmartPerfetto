@@ -27,6 +27,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import {backendLogPath} from '../runtimePaths';
+import {withFilesystemRegistryLock} from './filesystemRegistryLock';
+import {tokenizeRagText} from './rag/searchTokens';
 
 import {
   type RagChunk,
@@ -38,12 +40,17 @@ import {
 import {
   enterpriseKnowledgeDbWritesEnabled,
   enterpriseKnowledgeStoreEnabled,
+  countScopedRagRecords,
   legacyKnowledgeFilesystemWritesEnabled,
   type KnowledgeScope,
   getScopedKnowledgeRecord,
+  getScopedRagStats,
   listScopedKnowledgeRecords,
   removeScopedKnowledgeRecord,
-  upsertScopedKnowledgeRecord,
+  removeScopedKnowledgeRecords,
+  removeScopedRagRecords,
+  searchScopedRagKnowledgeRecords,
+  upsertScopedKnowledgeRecords,
 } from './scopedKnowledgeStore';
 
 /** Source kinds that require a `license` field at ingestion time. */
@@ -79,6 +86,19 @@ interface StorageEnvelope {
 
 const KNOWLEDGE_KIND = 'rag_chunk';
 const RAG_ROW_SCOPE_PREFIX = 'rag:';
+export const DEFAULT_LOCAL_RAG_SEARCH_MAX_CHUNKS = 20_000;
+export const DEFAULT_LOCAL_RAG_SEARCH_MAX_BYTES = 64 * 1024 * 1024;
+export const MAX_RAG_SEARCH_TOP_K = 100;
+export const MAX_RAG_SEARCH_QUERY_BYTES = 8 * 1024;
+export const MAX_RAG_SEARCH_FILTER_ITEMS = 100;
+
+export interface RagStoreLimits {
+  localSearchMaxChunks?: number;
+  localSearchMaxBytes?: number;
+  /** Hard cap for the complete legacy JSON store before it is read or written. */
+  localStorageMaxChunks?: number;
+  localStorageMaxBytes?: number;
+}
 
 export interface RagStoreSearchOptions {
   /** Maximum hits returned. Defaults to 5. */
@@ -99,6 +119,8 @@ export interface RagStoreSearchOptions {
   knowledgeSourceIds?: string[];
   /** Active generation per allowed private knowledge source. */
   activeSourceGenerations?: Record<string, string>;
+  /** Active generation per allowed registered codebase. */
+  activeCodebaseGenerations?: Record<string, string>;
 }
 
 export interface RagStoreListOptions {
@@ -118,37 +140,15 @@ export type RagStoreStats = Record<
  * can match a phrase embedded in a longer sentence without a segmenter or
  * provider dependency. The token set is intersected with the query token set
  * to score chunks. */
-function tokenize(text: string): string[] {
-  const tokens: string[] = [];
-  const normalized = text.normalize('NFKC').toLowerCase();
-  for (const match of normalized.matchAll(/[\p{L}\p{N}_]+/gu)) {
-    const runs: Array<{han: boolean; value: string}> = [];
-    for (const character of Array.from(match[0])) {
-      const han = /^\p{Script=Han}$/u.test(character);
-      const previous = runs[runs.length - 1];
-      if (previous?.han === han) previous.value += character;
-      else runs.push({han, value: character});
-    }
-    for (const run of runs) {
-      if (!run.han) {
-        if (run.value.length >= 2) tokens.push(run.value);
-        continue;
-      }
-      const characters = Array.from(run.value);
-      if (characters.length === 1) tokens.push(run.value);
-      for (let index = 0; index < characters.length - 1; index++) {
-        tokens.push(`${characters[index]}${characters[index + 1]}`);
-      }
-    }
-  }
-  return tokens;
+function isPrivateKnowledgeChunk(chunk: RagChunk): boolean {
+  return chunk.kind === 'android_internals_wiki' || chunk.registryOrigin === 'codebase_registry';
 }
 
-function isPrivateKnowledgeChunk(chunk: RagChunk): boolean {
+function isExternalPrivateKnowledgeChunk(chunk: RagChunk): boolean {
   return chunk.kind === 'android_internals_wiki';
 }
 
-function privateKnowledgeScopeFingerprint(scope?: KnowledgeScope): string | undefined {
+export function privateKnowledgeScopeFingerprint(scope?: KnowledgeScope): string | undefined {
   if (!scope?.tenantId || !scope.workspaceId || !scope.userId) return undefined;
   return createHash('sha256')
     .update(`${scope.tenantId}\0${scope.workspaceId}\0${scope.userId}`)
@@ -158,6 +158,16 @@ function privateKnowledgeScopeFingerprint(scope?: KnowledgeScope): string | unde
 function privateKnowledgeVisibleInScope(chunk: RagChunk, scope?: KnowledgeScope): boolean {
   if (!isPrivateKnowledgeChunk(chunk)) return true;
   const fingerprint = privateKnowledgeScopeFingerprint(scope);
+  if (
+    chunk.registryOrigin === 'codebase_registry' &&
+    !chunk.knowledgeScopeFingerprint
+  ) {
+    return fingerprint === privateKnowledgeScopeFingerprint({
+      tenantId: 'default-dev-tenant',
+      workspaceId: 'default-workspace',
+      userId: 'dev-user-123',
+    });
+  }
   return Boolean(fingerprint && chunk.knowledgeScopeFingerprint === fingerprint);
 }
 
@@ -209,7 +219,17 @@ function normalizeChunkForStorage(chunk: RagChunk): RagChunk {
 }
 
 function backfillChunk(chunk: RagChunk): RagChunk {
-  if (isPrivateKnowledgeChunk(chunk) && !chunk.knowledgeScopeFingerprint) {
+  if (chunk.registryOrigin === 'codebase_registry' && !chunk.knowledgeScopeFingerprint) {
+    return {
+      ...chunk,
+      knowledgeScopeFingerprint: privateKnowledgeScopeFingerprint({
+        tenantId: 'default-dev-tenant',
+        workspaceId: 'default-workspace',
+        userId: 'dev-user-123',
+      }),
+    };
+  }
+  if (isExternalPrivateKnowledgeChunk(chunk) && !chunk.knowledgeScopeFingerprint) {
     return {
       ...chunk,
       unsupportedReason: chunk.unsupportedReason ?? 'pre_scope_private_knowledge_chunk',
@@ -229,10 +249,9 @@ function backfillChunk(chunk: RagChunk): RagChunk {
 }
 
 /**
- * Local file-backed RAG store. Single instance per storage path is
- * enough for M0 — concurrent writers in the same process serialize via
- * the synchronous persistence path; cross-process writers are not
- * supported (caller's responsibility to coordinate).
+ * Local file-backed RAG store. Writers coordinate through the shared
+ * filesystem registry lock and merge pending mutations with the latest
+ * on-disk state before each atomic replacement.
  */
 export class RagStore {
   private readonly storagePath: string;
@@ -240,31 +259,184 @@ export class RagStore {
   private readonly pendingUpserts = new Set<string>();
   private readonly pendingDeletes = new Set<string>();
   private loaded = false;
+  private loadedStorageSignature: string | undefined;
+  private readonly serializedChunkBytes = new Map<string, number>();
+  private serializedChunkBytesTotal = 0;
+  private readonly localSearchMaxChunks: number;
+  private readonly localSearchMaxBytes: number;
+  private readonly localStorageMaxChunks: number;
+  private readonly localStorageMaxBytes: number;
 
-  constructor(storagePath: string) {
+  constructor(storagePath: string, limits: RagStoreLimits = {}) {
     this.storagePath = storagePath;
+    this.localSearchMaxChunks = limits.localSearchMaxChunks ?? DEFAULT_LOCAL_RAG_SEARCH_MAX_CHUNKS;
+    this.localSearchMaxBytes = limits.localSearchMaxBytes ?? DEFAULT_LOCAL_RAG_SEARCH_MAX_BYTES;
+    this.localStorageMaxChunks = limits.localStorageMaxChunks ?? this.localSearchMaxChunks;
+    this.localStorageMaxBytes = limits.localStorageMaxBytes ?? this.localSearchMaxBytes;
+    for (const [name, value] of Object.entries({
+      localSearchMaxChunks: this.localSearchMaxChunks,
+      localSearchMaxBytes: this.localSearchMaxBytes,
+      localStorageMaxChunks: this.localStorageMaxChunks,
+      localStorageMaxBytes: this.localStorageMaxBytes,
+    })) {
+      if (!Number.isInteger(value) || value < 1) {
+        throw new Error(`${name} must be a positive integer`);
+      }
+    }
   }
 
   /** Idempotently load the on-disk store into memory. */
   load(): void {
-    if (this.loaded) return;
-    this.loaded = true;
-    if (!fs.existsSync(this.storagePath)) return;
+    const signature = this.storageSignature();
+    if (this.loaded && signature === this.loadedStorageSignature) return;
+    const pendingUpserts = new Map<string, RagChunk>();
+    for (const chunkId of this.pendingUpserts) {
+      const chunk = this.chunks.get(chunkId);
+      if (chunk) pendingUpserts.set(chunkId, chunk);
+    }
+    const diskChunks = new Map<string, RagChunk>();
+    if (!fs.existsSync(this.storagePath)) {
+      this.replaceWithPendingMutations(pendingUpserts);
+      this.loaded = true;
+      this.loadedStorageSignature = signature;
+      return;
+    }
     try {
+      this.assertStorageFileWithinBudget();
       const raw = fs.readFileSync(this.storagePath, 'utf-8');
       const parsed = JSON.parse(raw) as StorageEnvelope;
       if ((parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2) || !Array.isArray(parsed.chunks)) {
         // Schema mismatch: leave in-memory empty; do not delete the file
         // so the operator can inspect it.
+        this.replaceWithPendingMutations(pendingUpserts);
+        this.loaded = true;
+        this.loadedStorageSignature = signature;
         return;
       }
+      this.assertChunkCountWithinBudget(parsed.chunks.length);
       for (const c of parsed.chunks) {
-        this.chunks.set(c.chunkId, backfillChunk(c));
+        diskChunks.set(c.chunkId, backfillChunk(c));
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof LocalRagStorageBudgetError) throw error;
       // Corrupted JSON: same policy as schema mismatch — empty cache,
       // file preserved for inspection.
+      this.replaceWithPendingMutations(pendingUpserts);
+      this.loaded = true;
+      this.loadedStorageSignature = signature;
+      return;
     }
+    for (const chunkId of this.pendingDeletes) diskChunks.delete(chunkId);
+    for (const [chunkId, chunk] of pendingUpserts) diskChunks.set(chunkId, chunk);
+    this.chunks.clear();
+    for (const [chunkId, chunk] of diskChunks) this.chunks.set(chunkId, chunk);
+    this.rebuildSerializedChunkAccounting();
+    this.loaded = true;
+    this.loadedStorageSignature = signature;
+  }
+
+  private replaceWithPendingMutations(pendingUpserts: ReadonlyMap<string, RagChunk>): void {
+    this.chunks.clear();
+    for (const [chunkId, chunk] of pendingUpserts) {
+      if (!this.pendingDeletes.has(chunkId)) this.chunks.set(chunkId, chunk);
+    }
+    this.rebuildSerializedChunkAccounting();
+  }
+
+  private storageSignature(): string {
+    try {
+      const stat = fs.statSync(this.storagePath);
+      return `${stat.mtimeMs}:${stat.size}:${stat.ino}`;
+    } catch {
+      return 'missing';
+    }
+  }
+
+  private assertStorageFileWithinBudget(): void {
+    const fileSize = fs.statSync(this.storagePath).size;
+    if (fileSize > this.localStorageMaxBytes) {
+      throw new LocalRagStorageBudgetError(
+        `file size ${fileSize} exceeds ${this.localStorageMaxBytes} bytes`,
+      );
+    }
+  }
+
+  private assertChunkCountWithinBudget(chunkCount: number): void {
+    if (chunkCount > this.localStorageMaxChunks) {
+      throw new LocalRagStorageBudgetError(
+        `chunk count ${chunkCount} exceeds ${this.localStorageMaxChunks}`,
+      );
+    }
+  }
+
+  private serializeWithinStorageBudget(chunks: readonly RagChunk[]): string {
+    this.assertChunkCountWithinBudget(chunks.length);
+    const serialized = JSON.stringify({schemaVersion: 2, chunks});
+    const serializedBytes = Buffer.byteLength(serialized, 'utf8');
+    if (serializedBytes > this.localStorageMaxBytes) {
+      throw new LocalRagStorageBudgetError(
+        `serialized size ${serializedBytes} exceeds ${this.localStorageMaxBytes} bytes`,
+      );
+    }
+    return serialized;
+  }
+
+  private serializedChunkSize(chunk: RagChunk): number {
+    return Buffer.byteLength(JSON.stringify(chunk), 'utf8');
+  }
+
+  private serializedEnvelopeSize(chunkCount: number, chunkBytes: number): number {
+    return Buffer.byteLength('{"schemaVersion":2,"chunks":[]}', 'utf8') +
+      chunkBytes + Math.max(0, chunkCount - 1);
+  }
+
+  private rebuildSerializedChunkAccounting(): void {
+    this.serializedChunkBytes.clear();
+    this.serializedChunkBytesTotal = 0;
+    for (const [chunkId, chunk] of this.chunks) {
+      const bytes = this.serializedChunkSize(chunk);
+      this.serializedChunkBytes.set(chunkId, bytes);
+      this.serializedChunkBytesTotal += bytes;
+    }
+  }
+
+  private assertNormalizedChunksWithinStorageBudget(chunks: readonly RagChunk[]): void {
+    let chunkCount = this.chunks.size;
+    let chunkBytes = this.serializedChunkBytesTotal;
+    const proposedSizes = new Map<string, number>();
+    for (const chunk of chunks) {
+      const previousBytes = proposedSizes.has(chunk.chunkId)
+        ? proposedSizes.get(chunk.chunkId)
+        : this.serializedChunkBytes.get(chunk.chunkId);
+      const nextBytes = this.serializedChunkSize(chunk);
+      if (previousBytes === undefined) chunkCount += 1;
+      else chunkBytes -= previousBytes;
+      chunkBytes += nextBytes;
+      proposedSizes.set(chunk.chunkId, nextBytes);
+    }
+    this.assertChunkCountWithinBudget(chunkCount);
+    const serializedBytes = this.serializedEnvelopeSize(chunkCount, chunkBytes);
+    if (serializedBytes > this.localStorageMaxBytes) {
+      throw new LocalRagStorageBudgetError(
+        `serialized size ${serializedBytes} exceeds ${this.localStorageMaxBytes} bytes`,
+      );
+    }
+  }
+
+  private setLocalChunk(chunk: RagChunk): void {
+    const previousBytes = this.serializedChunkBytes.get(chunk.chunkId);
+    if (previousBytes !== undefined) this.serializedChunkBytesTotal -= previousBytes;
+    const nextBytes = this.serializedChunkSize(chunk);
+    this.serializedChunkBytes.set(chunk.chunkId, nextBytes);
+    this.serializedChunkBytesTotal += nextBytes;
+    this.chunks.set(chunk.chunkId, chunk);
+  }
+
+  private deleteLocalChunk(chunkId: string): boolean {
+    if (!this.chunks.delete(chunkId)) return false;
+    this.serializedChunkBytesTotal -= this.serializedChunkBytes.get(chunkId) ?? 0;
+    this.serializedChunkBytes.delete(chunkId);
+    return true;
   }
 
   /**
@@ -273,41 +445,57 @@ export class RagStore {
    * to the operator rather than silently dropping the chunk.
    */
   addChunk(chunk: RagChunk, scope?: KnowledgeScope): void {
-    this.load();
-    let normalized = normalizeChunkForStorage(chunk);
-    if (LICENSE_REQUIRED_KINDS.has(chunk.kind) && !chunk.license) {
-      throw new Error(
-        `License required for source kind '${chunk.kind}' but missing on chunk '${chunk.chunkId}'`,
-      );
-    }
-    if (isPrivateKnowledgeChunk(normalized)) {
-      const scopeFingerprint = privateKnowledgeScopeFingerprint(scope);
-      if (!scopeFingerprint) {
-        throw new Error(`Private knowledge chunk '${chunk.chunkId}' requires tenant/workspace/user scope`);
+    this.addChunks([chunk], scope);
+  }
+
+  /** Add one generation with bounded enterprise writes and one cache load. */
+  addChunks(chunks: readonly RagChunk[], scope?: KnowledgeScope): void {
+    if (chunks.length === 0) return;
+    const filesystemWritesEnabled = legacyKnowledgeFilesystemWritesEnabled();
+    if (filesystemWritesEnabled) this.load();
+    const normalizedChunks = chunks.map(chunk => {
+      let normalized = normalizeChunkForStorage(chunk);
+      if (LICENSE_REQUIRED_KINDS.has(chunk.kind) && !chunk.license) {
+        throw new Error(
+          `License required for source kind '${chunk.kind}' but missing on chunk '${chunk.chunkId}'`,
+        );
       }
-      if (
-        normalized.registryOrigin !== 'external_knowledge_registry' ||
-        !normalized.knowledgeSourceId ||
-        !normalized.sourceGeneration
-      ) {
-        throw new Error(`Private knowledge chunk '${chunk.chunkId}' requires source registry metadata`);
+      if (isPrivateKnowledgeChunk(normalized)) {
+        const scopeFingerprint = privateKnowledgeScopeFingerprint(scope);
+        if (!scopeFingerprint) {
+          throw new Error(`Private knowledge chunk '${chunk.chunkId}' requires tenant/workspace/user scope`);
+        }
+        if (
+          isExternalPrivateKnowledgeChunk(normalized) && (
+            normalized.registryOrigin !== 'external_knowledge_registry' ||
+            !normalized.knowledgeSourceId ||
+            !normalized.sourceGeneration
+          )
+        ) {
+          throw new Error(`Private knowledge chunk '${chunk.chunkId}' requires source registry metadata`);
+        }
+        normalized = {...normalized, knowledgeScopeFingerprint: scopeFingerprint};
       }
-      normalized = {...normalized, knowledgeScopeFingerprint: scopeFingerprint};
-    }
-    if (legacyKnowledgeFilesystemWritesEnabled()) {
-      this.chunks.set(normalized.chunkId, normalized);
-      this.pendingUpserts.add(normalized.chunkId);
-      this.pendingDeletes.delete(normalized.chunkId);
+      return normalized;
+    });
+    if (filesystemWritesEnabled) {
+      this.assertNormalizedChunksWithinStorageBudget(normalizedChunks);
     }
     if (enterpriseKnowledgeDbWritesEnabled()) {
-      upsertScopedKnowledgeRecord(
-        KNOWLEDGE_KIND,
-        normalized.chunkId,
-        ragRowScope(normalized.kind),
-        normalized,
-        scope,
-        {createdAt: normalized.indexedAt, updatedAt: normalized.indexedAt},
-      );
+      upsertScopedKnowledgeRecords(normalizedChunks.map(normalized => ({
+        kind: KNOWLEDGE_KIND,
+        externalId: normalized.chunkId,
+        rowScope: ragRowScope(normalized.kind),
+        record: normalized,
+        options: {createdAt: normalized.indexedAt, updatedAt: normalized.indexedAt},
+      })), scope);
+    }
+    if (filesystemWritesEnabled) {
+      for (const normalized of normalizedChunks) {
+        this.setLocalChunk(normalized);
+        this.pendingUpserts.add(normalized.chunkId);
+        this.pendingDeletes.delete(normalized.chunkId);
+      }
     }
   }
 
@@ -322,7 +510,7 @@ export class RagStore {
       const existing = this.chunks.get(chunkId);
       const had = Boolean(existing && privateKnowledgeVisibleInScope(existing, scope));
       if (had) {
-        this.chunks.delete(chunkId);
+        this.deleteLocalChunk(chunkId);
         this.pendingDeletes.add(chunkId);
         this.pendingUpserts.delete(chunkId);
       }
@@ -334,7 +522,150 @@ export class RagStore {
 
   /** Remove all staged and active generations belonging to one private source. */
   removeKnowledgeSourceChunks(sourceId: string, scope?: KnowledgeScope): number {
-    return this.removeKnowledgeSourceChunksMatching(sourceId, scope, () => true);
+    const enterpriseRemoved = enterpriseKnowledgeDbWritesEnabled()
+      ? removeScopedRagRecords(scope, {
+          knowledgeSourceId: sourceId,
+          scopeFingerprint: privateKnowledgeScopeFingerprint(scope),
+        })
+      : 0;
+    const legacyRemoved = this.removeKnowledgeSourceChunksMatching(sourceId, scope, () => true, true);
+    return Math.max(enterpriseRemoved, legacyRemoved);
+  }
+
+  /** Remove every staged, active, and superseded generation for one codebase. */
+  removeCodebaseChunks(codebaseId: string, scope?: KnowledgeScope): number {
+    const enterpriseRemoved = enterpriseKnowledgeDbWritesEnabled()
+      ? removeScopedRagRecords(scope, {
+          codebaseId,
+          scopeFingerprint: privateKnowledgeScopeFingerprint(scope),
+        })
+      : 0;
+    const legacyRemoved = this.removeCodebaseChunksMatching(
+      codebaseId,
+      scope,
+      () => true,
+      true,
+    );
+    return Math.max(enterpriseRemoved, legacyRemoved);
+  }
+
+  removeCodebaseChunksExceptGeneration(
+    codebaseId: string,
+    activeGeneration: string,
+    scope?: KnowledgeScope,
+  ): number {
+    const enterpriseRemoved = enterpriseKnowledgeDbWritesEnabled()
+      ? removeScopedRagRecords(scope, {
+          codebaseId,
+          excludeSourceGeneration: activeGeneration,
+          scopeFingerprint: privateKnowledgeScopeFingerprint(scope),
+        })
+      : 0;
+    const legacyRemoved = this.removeCodebaseChunksMatching(
+      codebaseId,
+      scope,
+      chunk => chunk.sourceGeneration !== activeGeneration,
+      true,
+    );
+    return Math.max(enterpriseRemoved, legacyRemoved);
+  }
+
+  /** Keep only the chunks staged by the lease that just became active. */
+  removeCodebaseChunksExceptIds(
+    codebaseId: string,
+    activeChunkIds: readonly string[],
+    scope?: KnowledgeScope,
+  ): number {
+    const keep = new Set(activeChunkIds);
+    return this.removeCodebaseChunksMatching(
+      codebaseId,
+      scope,
+      chunk => !keep.has(chunk.chunkId),
+    );
+  }
+
+  removeCodebaseChunkIds(
+    codebaseId: string,
+    chunkIds: readonly string[],
+    scope?: KnowledgeScope,
+  ): number {
+    const enterpriseRemoved = enterpriseKnowledgeDbWritesEnabled()
+      ? removeScopedKnowledgeRecords(KNOWLEDGE_KIND, chunkIds, scope)
+      : 0;
+    const remove = new Set(chunkIds);
+    const legacyRemoved = this.removeCodebaseChunksMatching(
+      codebaseId,
+      scope,
+      chunk => remove.has(chunk.chunkId),
+      true,
+    );
+    return Math.max(enterpriseRemoved, legacyRemoved);
+  }
+
+  countCodebaseGenerationChunks(
+    codebaseId: string,
+    sourceGeneration: string,
+    scope?: KnowledgeScope,
+  ): number {
+    if (enterpriseKnowledgeStoreEnabled()) {
+      return countScopedRagRecords(scope, {
+        codebaseId,
+        sourceGeneration,
+        scopeFingerprint: privateKnowledgeScopeFingerprint(scope),
+      });
+    }
+    return this.listChunks({scope}).filter(chunk =>
+      chunk.codebaseId === codebaseId &&
+      chunk.registryOrigin === 'codebase_registry' &&
+      chunk.sourceGeneration === sourceGeneration).length;
+  }
+
+  private removeCodebaseChunksMatching(
+    codebaseId: string,
+    scope: KnowledgeScope | undefined,
+    shouldRemove: (chunk: RagChunk) => boolean,
+    skipEnterprise = false,
+  ): number {
+    const removedIds = new Set<string>();
+    if (enterpriseKnowledgeDbWritesEnabled() && !skipEnterprise) {
+      const chunks = listScopedKnowledgeRecords<RagChunk>(
+        KNOWLEDGE_KIND,
+        scope,
+        {rowScopePrefix: RAG_ROW_SCOPE_PREFIX, includeSystem: true},
+      ).map(row => row.record);
+      const enterpriseChunkIds = chunks.filter(chunk => {
+        if (
+          chunk.codebaseId !== codebaseId ||
+          chunk.registryOrigin !== 'codebase_registry' ||
+          !privateKnowledgeVisibleInScope(chunk, scope) ||
+          !shouldRemove(chunk)
+        ) return false;
+        return true;
+      }).map(chunk => chunk.chunkId);
+      if (enterpriseChunkIds.length > 0) {
+        removeScopedKnowledgeRecords(KNOWLEDGE_KIND, enterpriseChunkIds, scope);
+        for (const chunkId of enterpriseChunkIds) removedIds.add(chunkId);
+      }
+    }
+    if (legacyKnowledgeFilesystemWritesEnabled()) {
+      this.load();
+      let changed = false;
+      for (const [chunkId, chunk] of this.chunks) {
+        if (
+          chunk.codebaseId !== codebaseId ||
+          chunk.registryOrigin !== 'codebase_registry' ||
+          !privateKnowledgeVisibleInScope(chunk, scope) ||
+          !shouldRemove(chunk)
+        ) continue;
+        this.deleteLocalChunk(chunkId);
+        this.pendingDeletes.add(chunkId);
+        this.pendingUpserts.delete(chunkId);
+        removedIds.add(chunkId);
+        changed = true;
+      }
+      if (changed) this.persist();
+    }
+    return removedIds.size;
   }
 
   /** Remove an exact pre-activation snapshot without touching later generations. */
@@ -343,13 +674,17 @@ export class RagStore {
     chunkIds: readonly string[],
     scope?: KnowledgeScope,
   ): number {
-    let removed = 0;
-    for (const chunkId of new Set(chunkIds)) {
-      const chunk = this.getChunk(chunkId, scope);
-      if (chunk?.knowledgeSourceId !== sourceId) continue;
-      if (this.removeChunk(chunkId, scope)) removed++;
-    }
-    return removed;
+    const enterpriseRemoved = enterpriseKnowledgeDbWritesEnabled()
+      ? removeScopedKnowledgeRecords(KNOWLEDGE_KIND, chunkIds, scope)
+      : 0;
+    const remove = new Set(chunkIds);
+    const legacyRemoved = this.removeKnowledgeSourceChunksMatching(
+      sourceId,
+      scope,
+      chunk => remove.has(chunk.chunkId),
+      true,
+    );
+    return Math.max(enterpriseRemoved, legacyRemoved);
   }
 
   /** Remove staged and superseded generations after a new generation is active. */
@@ -358,34 +693,64 @@ export class RagStore {
     activeGeneration: string,
     scope?: KnowledgeScope,
   ): number {
-    return this.removeKnowledgeSourceChunksMatching(
+    const enterpriseRemoved = enterpriseKnowledgeDbWritesEnabled()
+      ? removeScopedRagRecords(scope, {
+          knowledgeSourceId: sourceId,
+          excludeSourceGeneration: activeGeneration,
+          scopeFingerprint: privateKnowledgeScopeFingerprint(scope),
+        })
+      : 0;
+    const legacyRemoved = this.removeKnowledgeSourceChunksMatching(
       sourceId,
       scope,
       chunk => chunk.sourceGeneration !== activeGeneration,
+      true,
     );
+    return Math.max(enterpriseRemoved, legacyRemoved);
+  }
+
+  countKnowledgeSourceGenerationChunks(
+    sourceId: string,
+    sourceGeneration: string,
+    scope?: KnowledgeScope,
+  ): number {
+    if (enterpriseKnowledgeStoreEnabled()) {
+      return countScopedRagRecords(scope, {
+        knowledgeSourceId: sourceId,
+        sourceGeneration,
+        scopeFingerprint: privateKnowledgeScopeFingerprint(scope),
+      });
+    }
+    return this.listChunks({scope}).filter(chunk =>
+      chunk.knowledgeSourceId === sourceId &&
+      chunk.registryOrigin === 'external_knowledge_registry' &&
+      chunk.sourceGeneration === sourceGeneration).length;
   }
 
   private removeKnowledgeSourceChunksMatching(
     sourceId: string,
     scope: KnowledgeScope | undefined,
     shouldRemove: (chunk: RagChunk) => boolean,
+    skipEnterprise = false,
   ): number {
     const removedIds = new Set<string>();
-    if (enterpriseKnowledgeDbWritesEnabled()) {
+    if (enterpriseKnowledgeDbWritesEnabled() && !skipEnterprise) {
       const chunks = listScopedKnowledgeRecords<RagChunk>(
         KNOWLEDGE_KIND,
         scope,
         {rowScopePrefix: RAG_ROW_SCOPE_PREFIX, includeSystem: true},
       ).map(row => row.record);
-      for (const chunk of chunks) {
+      const enterpriseChunkIds = chunks.filter(chunk => {
         if (
           chunk.knowledgeSourceId !== sourceId ||
           !privateKnowledgeVisibleInScope(chunk, scope) ||
           !shouldRemove(chunk)
-        ) continue;
-        if (removeScopedKnowledgeRecord(KNOWLEDGE_KIND, chunk.chunkId, scope)) {
-          removedIds.add(chunk.chunkId);
-        }
+        ) return false;
+        return true;
+      }).map(chunk => chunk.chunkId);
+      if (enterpriseChunkIds.length > 0) {
+        removeScopedKnowledgeRecords(KNOWLEDGE_KIND, enterpriseChunkIds, scope);
+        for (const chunkId of enterpriseChunkIds) removedIds.add(chunkId);
       }
     }
     if (legacyKnowledgeFilesystemWritesEnabled()) {
@@ -397,7 +762,7 @@ export class RagStore {
           !privateKnowledgeVisibleInScope(chunk, scope) ||
           !shouldRemove(chunk)
         ) continue;
-        this.chunks.delete(chunkId);
+        this.deleteLocalChunk(chunkId);
         this.pendingDeletes.add(chunkId);
         this.pendingUpserts.delete(chunkId);
         removedIds.add(chunkId);
@@ -425,8 +790,9 @@ export class RagStore {
 
   /** List chunks for rebuild/maintenance callers without changing search semantics. */
   listChunks(opts: RagStoreListOptions = {}): RagChunk[] {
-    this.load();
-    let chunks = enterpriseKnowledgeStoreEnabled()
+    const enterpriseStore = enterpriseKnowledgeStoreEnabled();
+    if (!enterpriseStore) this.load();
+    let chunks = enterpriseStore
       ? listScopedKnowledgeRecords<RagChunk>(
           KNOWLEDGE_KIND,
           opts.scope,
@@ -448,9 +814,20 @@ export class RagStore {
 
   /** Per-kind chunk counts plus the freshest indexedAt seen for each. */
   getStats(scope?: KnowledgeScope): RagStoreStats {
-    this.load();
+    const enterpriseStore = enterpriseKnowledgeStoreEnabled();
+    if (!enterpriseStore) this.load();
     const stats = emptyStats();
-    const chunks = enterpriseKnowledgeStoreEnabled()
+    if (enterpriseStore) {
+      for (const row of getScopedRagStats(scope, privateKnowledgeScopeFingerprint(scope))) {
+        if (!ALL_RAG_SOURCE_KINDS.includes(row.kind as RagSourceKind)) continue;
+        stats[row.kind as RagSourceKind] = {
+          chunkCount: row.chunkCount,
+          ...(row.lastIndexedAt === undefined ? {} : {lastIndexedAt: row.lastIndexedAt}),
+        };
+      }
+      return stats;
+    }
+    const chunks = enterpriseStore
       ? listScopedKnowledgeRecords<RagChunk>(
           KNOWLEDGE_KIND,
           scope,
@@ -480,15 +857,61 @@ export class RagStore {
    * apart from "the infrastructure refused to answer".
    */
   search(query: string, opts: RagStoreSearchOptions = {}): RagRetrievalResult {
-    this.load();
-    const topK = opts.topK ?? 5;
+    const topK = normalizeRagSearchInput(query, opts);
     const kindFilter = opts.kinds ? new Set(opts.kinds) : null;
-    const chunks = enterpriseKnowledgeStoreEnabled()
-      ? listScopedKnowledgeRecords<RagChunk>(
-          KNOWLEDGE_KIND,
-          opts.scope,
-          {rowScopePrefix: RAG_ROW_SCOPE_PREFIX, includeSystem: true},
-        ).map(row => row.record)
+    const enterpriseSearchEnabled = enterpriseKnowledgeStoreEnabled();
+    if (!enterpriseSearchEnabled) {
+      try {
+        this.load();
+      } catch (error) {
+        if (!(error instanceof LocalRagStorageBudgetError)) throw error;
+        const unsupportedReason = `${error.code}: ${error.message}; ` +
+          'reduce or quarantine the local knowledge store, or enable the enterprise knowledge store';
+        return {
+          ...makeSparkProvenance({source: 'ragStore.search', unsupportedReason}),
+          query,
+          results: [],
+          probed: opts.kinds ? [...opts.kinds] : [...ALL_RAG_SOURCE_KINDS],
+          retrievedAt: Date.now(),
+        };
+      }
+    }
+    const codebaseSelectionRequested = opts.codebaseIds !== undefined;
+    const knowledgeSelectionRequested = opts.knowledgeSourceIds !== undefined;
+    const enterpriseSelection = codebaseSelectionRequested && knowledgeSelectionRequested
+      ? 'none'
+      : codebaseSelectionRequested
+        ? 'codebase'
+        : knowledgeSelectionRequested
+          ? 'knowledge'
+          : 'public';
+    const enterpriseSearch = enterpriseSearchEnabled
+      ? searchScopedRagKnowledgeRecords<RagChunk>(KNOWLEDGE_KIND, opts.scope, {
+          rowScopes: opts.kinds?.map(ragRowScope),
+          selection: enterpriseSelection,
+          codebaseGenerations: opts.codebaseIds?.flatMap(id => {
+            const generation = opts.activeCodebaseGenerations?.[id];
+            return generation ? [{id, generation}] : [];
+          }),
+          knowledgeSourceGenerations: opts.knowledgeSourceIds?.flatMap(id => {
+            const generation = opts.activeSourceGenerations?.[id];
+            return generation ? [{id, generation}] : [];
+          }),
+          scopeFingerprint: privateKnowledgeScopeFingerprint(opts.scope),
+          queryTokens: tokenizeRagText(query),
+          candidateLimit: Math.max(200, Math.min(2_000, topK * 50)),
+          vendor: opts.vendor,
+          buildId: opts.buildId,
+          pathPrefix: opts.pathPrefix,
+          symbolExact: opts.symbolExact,
+          filePathExact: opts.filePathExact,
+          languages: opts.languages?.filter((language): language is NonNullable<RagChunk['language']> =>
+            Boolean(language)),
+          includeSystem: true,
+        })
+      : undefined;
+    const chunks = enterpriseSearch
+      ? enterpriseSearch.records.map(row => row.record)
       : Array.from(this.chunks.values());
     const codebaseFilter = opts.codebaseIds ? new Set(opts.codebaseIds) : null;
     const knowledgeSourceFilter = opts.knowledgeSourceIds
@@ -498,15 +921,26 @@ export class RagStore {
 
     const probed = opts.kinds
       ? [...opts.kinds]
-      : Array.from(new Set(chunks.map(c => c.kind)));
+      : enterpriseSearch
+        ? [...ALL_RAG_SOURCE_KINDS]
+        : Array.from(new Set(chunks.map(c => c.kind)));
 
-    const queryTokens = new Set(tokenize(query));
+    const queryTokens = new Set(tokenizeRagText(query));
     const candidates: Array<{chunk: RagChunk; score: number; tier: number}> = [];
     let eligibleSeen = 0;
+    let eligibleBytes = 0;
 
     for (const chunk of chunks) {
       if (!privateKnowledgeVisibleInScope(chunk, opts.scope)) continue;
-      if (isPrivateKnowledgeChunk(chunk) && !knowledgeSourceFilter) continue;
+      if (isExternalPrivateKnowledgeChunk(chunk) && !knowledgeSourceFilter) continue;
+      if (chunk.registryOrigin === 'codebase_registry') {
+        const activeGeneration = chunk.codebaseId
+          ? opts.activeCodebaseGenerations?.[chunk.codebaseId]
+          : undefined;
+        if (!activeGeneration) continue;
+        if (chunk.sourceGeneration && chunk.sourceGeneration !== activeGeneration) continue;
+        if (!chunk.sourceGeneration && activeGeneration !== 'codebase_1') continue;
+      }
       if (kindFilter && !kindFilter.has(chunk.kind)) continue;
       if (chunk.unsupportedReason) continue;
       if (codebaseFilter && (!chunk.codebaseId || !codebaseFilter.has(chunk.codebaseId))) continue;
@@ -525,11 +959,34 @@ export class RagStore {
       if (opts.filePathExact && (chunk.filePath ?? chunk.uri) !== opts.filePathExact) continue;
       if (languageFilter && (!chunk.language || !languageFilter.has(chunk.language))) continue;
       eligibleSeen++;
+      if (!enterpriseSearch) {
+        eligibleBytes += Buffer.byteLength([
+          chunk.snippet,
+          chunk.title ?? '',
+          chunk.symbol ?? '',
+          chunk.filePath ?? '',
+        ].join('\0'), 'utf8');
+        if (
+          eligibleSeen > this.localSearchMaxChunks ||
+          eligibleBytes > this.localSearchMaxBytes
+        ) {
+          const unsupportedReason =
+            'local_rag_search_budget_exceeded: selected knowledge exceeds the local JSON search budget; ' +
+            'select fewer codebases/knowledge sources or enable the enterprise knowledge store';
+          return {
+            ...makeSparkProvenance({source: 'ragStore.search', unsupportedReason}),
+            query,
+            results: [],
+            probed,
+            retrievedAt: Date.now(),
+          };
+        }
+      }
       const chunkTokens = new Set([
-        ...tokenize(chunk.snippet),
-        ...tokenize(chunk.title ?? ''),
-        ...tokenize(chunk.symbol ?? ''),
-        ...tokenize(chunk.filePath ?? ''),
+        ...tokenizeRagText(chunk.snippet),
+        ...tokenizeRagText(chunk.title ?? ''),
+        ...tokenizeRagText(chunk.symbol ?? ''),
+        ...tokenizeRagText(chunk.filePath ?? ''),
       ]);
       let overlap = 0;
       for (const t of queryTokens) {
@@ -553,9 +1010,15 @@ export class RagStore {
     }));
 
     let unsupportedReason: string | undefined;
-    if (chunks.length === 0) {
+    const indexEmpty = enterpriseSearch
+      ? !enterpriseSearch.indexHasRows
+      : chunks.length === 0;
+    const noEligibleChunks = enterpriseSearch
+      ? !enterpriseSearch.eligibleHasRows
+      : eligibleSeen === 0;
+    if (indexEmpty) {
       unsupportedReason = 'index empty';
-    } else if (eligibleSeen === 0) {
+    } else if (noEligibleChunks) {
       // Either every chunk in the probed kinds is blocked, or the kind
       // filter excluded every chunk. Both deserve a clear signal so the
       // agent does not invent content.
@@ -588,17 +1051,31 @@ export class RagStore {
   /** Atomic write: temp file + rename so a crashed process leaves the
    * existing on-disk file intact. */
   private persist(): void {
+    withFilesystemRegistryLock(
+      this.storagePath,
+      'rag_store_busy',
+      () => this.persistUnlocked(),
+    );
+  }
+
+  private persistUnlocked(): void {
     const dir = path.dirname(this.storagePath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, {recursive: true});
     const merged = new Map<string, RagChunk>();
     if (fs.existsSync(this.storagePath)) {
       try {
+        this.assertStorageFileWithinBudget();
         const parsed = JSON.parse(fs.readFileSync(this.storagePath, 'utf8')) as StorageEnvelope;
-        if ((parsed.schemaVersion === 1 || parsed.schemaVersion === 2) && Array.isArray(parsed.chunks)) {
-          for (const chunk of parsed.chunks) merged.set(chunk.chunkId, backfillChunk(chunk));
+        if ((parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2) || !Array.isArray(parsed.chunks)) {
+          throw new Error('unsupported_schema');
         }
-      } catch {
-        // Match load(): an unreadable legacy file contributes no merge base.
+        this.assertChunkCountWithinBudget(parsed.chunks.length);
+        for (const chunk of parsed.chunks) merged.set(chunk.chunkId, backfillChunk(chunk));
+      } catch (error) {
+        if (error instanceof LocalRagStorageBudgetError) throw error;
+        throw new Error(
+          `rag_store_invalid_storage_requires_recovery:${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
     for (const chunkId of this.pendingDeletes) merged.delete(chunkId);
@@ -606,21 +1083,75 @@ export class RagStore {
       const chunk = this.chunks.get(chunkId);
       if (chunk) merged.set(chunkId, chunk);
     }
+    const serialized = this.serializeWithinStorageBudget(Array.from(merged.values()));
     this.chunks.clear();
     for (const [chunkId, chunk] of merged) this.chunks.set(chunkId, chunk);
+    this.rebuildSerializedChunkAccounting();
     // Per-process unique tmp suffix — Codex round E P1#5 cross-process
     // collision guard. Single-process is the documented contract, but a
     // unique suffix costs nothing and removes the foot-gun.
     const tmp = `${this.storagePath}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
-    const envelope: StorageEnvelope = {
-      schemaVersion: 2,
-      chunks: Array.from(merged.values()),
-    };
-    fs.writeFileSync(tmp, JSON.stringify(envelope, null, 2), 'utf-8');
+    fs.writeFileSync(tmp, serialized, 'utf-8');
     fs.renameSync(tmp, this.storagePath);
+    this.loadedStorageSignature = this.storageSignature();
     this.pendingUpserts.clear();
     this.pendingDeletes.clear();
   }
+}
+
+class LocalRagStorageBudgetError extends Error {
+  readonly code = 'local_rag_storage_budget_exceeded';
+
+  constructor(detail: string) {
+    super(detail);
+    this.name = 'LocalRagStorageBudgetError';
+  }
+}
+
+export class RagSearchInputError extends Error {
+  readonly code = 'invalid_rag_search_input';
+
+  constructor(detail: string) {
+    super(detail);
+    this.name = 'RagSearchInputError';
+  }
+}
+
+export function validateRagSearchInput(query: string, opts: RagStoreSearchOptions): void {
+  normalizeRagSearchInput(query, opts);
+}
+
+function normalizeRagSearchInput(query: string, opts: RagStoreSearchOptions): number {
+  if (typeof query !== 'string' || !query.trim()) {
+    throw new RagSearchInputError('query must be a non-empty string');
+  }
+  if (Buffer.byteLength(query, 'utf8') > MAX_RAG_SEARCH_QUERY_BYTES) {
+    throw new RagSearchInputError(
+      `query exceeds the ${MAX_RAG_SEARCH_QUERY_BYTES}-byte search limit`,
+    );
+  }
+  for (const [name, value] of Object.entries({
+    kinds: opts.kinds,
+    codebaseIds: opts.codebaseIds,
+    languages: opts.languages,
+    knowledgeSourceIds: opts.knowledgeSourceIds,
+  })) {
+    if (value === undefined) continue;
+    if (!Array.isArray(value)) {
+      throw new RagSearchInputError(`${name} must be an array`);
+    }
+    if (value.length > MAX_RAG_SEARCH_FILTER_ITEMS) {
+      throw new RagSearchInputError(
+        `${name} exceeds the ${MAX_RAG_SEARCH_FILTER_ITEMS}-item search limit`,
+      );
+    }
+  }
+
+  const requestedTopK = opts.topK ?? 5;
+  if (!Number.isFinite(requestedTopK) || !Number.isInteger(requestedTopK) || requestedTopK < 1) {
+    throw new RagSearchInputError('topK must be a positive integer');
+  }
+  return Math.min(requestedTopK, MAX_RAG_SEARCH_TOP_K);
 }
 
 /** Whether the given source kind needs a `license` field at ingest time. */

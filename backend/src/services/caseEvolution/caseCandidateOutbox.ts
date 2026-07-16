@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { backendDataPath } from '../../runtimePaths';
 import type { CaseCandidate, CaseCandidateReview, CaseCandidateState } from '../../types/caseEvolution';
+import {resolveKnowledgeScope} from '../scopedKnowledgeStore';
 
 export interface CaseCandidateOutboxOptions {
   dbPath?: string;
@@ -61,7 +62,7 @@ export interface AddCandidateFeedbackResult {
   reason?: 'duplicate' | 'error';
 }
 
-const SCHEMA_VERSION_LATEST = 1;
+const SCHEMA_VERSION_LATEST = 2;
 const DEFAULT_LEASE_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 
@@ -98,9 +99,8 @@ function initializeMigrationsTable(db: Database.Database): void {
 function applyPendingMigrations(db: Database.Database): void {
   const appliedRows = db.prepare('SELECT version FROM schema_migrations').all() as Array<{version: number}>;
   const applied = new Set(appliedRows.map(row => row.version));
-  if (applied.has(SCHEMA_VERSION_LATEST)) return;
-
-  const tx = db.transaction(() => {
+  if (!applied.has(1)) {
+    const createSchema = db.transaction(() => {
     db.exec(`
       CREATE TABLE case_candidates (
         candidate_id TEXT PRIMARY KEY,
@@ -151,11 +151,76 @@ function applyPendingMigrations(db: Database.Database): void {
       CREATE INDEX idx_feedback_candidate ON candidate_feedback(candidate_id);
     `);
     db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(
-      SCHEMA_VERSION_LATEST,
+      1,
       Date.now(),
     );
+    });
+    createSchema();
+  }
+  if (!applied.has(2)) migrateLegacyCandidateScopes(db);
+}
+
+function migrateLegacyCandidateScopes(db: Database.Database): void {
+  const defaultScope = resolveKnowledgeScope();
+  const rows = db.prepare(`
+    SELECT candidate_id, dedupe_key, payload_json
+    FROM case_candidates
+    ORDER BY candidate_id
+  `).all() as Array<{candidate_id: string; dedupe_key: string; payload_json: string}>;
+
+  const migrate = db.transaction(() => {
+    const update = db.prepare(`
+      UPDATE case_candidates
+      SET payload_json = ?, dedupe_key = ?, updated_at = ?
+      WHERE candidate_id = ?
+    `);
+    for (const row of rows) {
+      let payload: any;
+      try {
+        payload = JSON.parse(row.payload_json);
+      } catch (error) {
+        throw new Error(
+          `Cannot migrate case candidate ${row.candidate_id}: invalid payload_json: ${(error as Error).message}`,
+        );
+      }
+      const provenance = payload?.provenance;
+      const cluster = payload?.cluster;
+      if (
+        !provenance ||
+        typeof provenance.traceContentHash !== 'string' ||
+        typeof provenance.sceneType !== 'string' ||
+        !cluster ||
+        typeof cluster.rootCause !== 'string'
+      ) {
+        throw new Error(
+          `Cannot migrate case candidate ${row.candidate_id}: legacy provenance is incomplete`,
+        );
+      }
+
+      const originScope = provenance.originScope;
+      const hasValidScope = originScope &&
+        typeof originScope.tenantId === 'string' && originScope.tenantId.trim() &&
+        typeof originScope.workspaceId === 'string' && originScope.workspaceId.trim();
+      if (!hasValidScope) {
+        provenance.originScope = {
+          tenantId: defaultScope.tenantId,
+          workspaceId: defaultScope.workspaceId,
+        };
+      }
+      payload.schemaVersion = 'case_candidate@2';
+      const scope = provenance.originScope as {tenantId: string; workspaceId: string};
+      const dedupeKey = [
+        scope.tenantId,
+        scope.workspaceId,
+        provenance.traceContentHash,
+        provenance.sceneType,
+        cluster.rootCause,
+      ].join('::');
+      update.run(JSON.stringify(payload), dedupeKey, Date.now(), row.candidate_id);
+    }
+    db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(2, Date.now());
   });
-  tx();
+  migrate();
 }
 
 function rowToCandidate(row: Record<string, unknown>): LeasedCaseCandidate {

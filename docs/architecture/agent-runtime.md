@@ -166,7 +166,7 @@ provider/runtime identity 都必须按 comparison identity 读写。
 
 ## 健康检查
 
-`GET /health` 的 `aiEngine.runtime` 会显示实际选择的 runtime：
+带鉴权的 `GET /api/runtime-health` 中，`aiEngine.runtime` 会显示实际选择的 runtime；公开 `GET /health` 只返回存活状态与版本：
 
 ```json
 {

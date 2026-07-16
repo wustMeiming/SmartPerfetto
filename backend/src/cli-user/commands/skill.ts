@@ -22,13 +22,15 @@ export interface SkillCommandArgs {
 
 export async function runSkillCommand(args: SkillCommandArgs): Promise<number> {
   const tracePath = path.resolve(args.trace);
-  bootstrap({ envFile: args.envFile, sessionDir: args.sessionDir, requireLlm: false });
   const format = args.format ?? 'text';
-  const service = new CliAnalyzeService();
+  const lifecycle: { service?: CliAnalyzeService } = {};
 
   try {
     const params = parseParams(args.params);
     const { traceId, result } = await withConsoleLogToStderr(format !== 'text', async () => {
+      bootstrap({ envFile: args.envFile, sessionDir: args.sessionDir, requireLlm: false });
+      const service = new CliAnalyzeService();
+      lifecycle.service = service;
       await ensureSkillRegistryInitialized();
       const skill = skillRegistry.getSkill(args.skillId);
       if (!skill) {
@@ -63,7 +65,7 @@ export async function runSkillCommand(args: SkillCommandArgs): Promise<number> {
     writeError(format, (err as Error).message);
     return 1;
   } finally {
-    await service.shutdown();
+    await lifecycle.service?.shutdown();
   }
 }
 

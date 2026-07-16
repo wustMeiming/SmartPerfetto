@@ -89,11 +89,13 @@ export async function runCaptureAndroidCommand(args: CaptureAndroidCommandArgs):
   const { paths } = bootstrap({ envFile: args.envFile, sessionDir: args.sessionDir, requireLlm: false });
   const format = args.format ?? 'text';
   const outPath = path.resolve(args.out);
-  let service: CliAnalyzeService | undefined;
+  const lifecycle: { service?: CliAnalyzeService } = {};
 
   try {
     if (args.analyze) {
-      assertAnalysisRuntimeReady({ aiFeature: 'capture_analyze' });
+      await withConsoleLogToStderr(format !== 'text', async () => {
+        assertAnalysisRuntimeReady({ aiFeature: 'capture_analyze' });
+      });
     }
     const configInput = resolveAndroidConfigInput(args);
     if (format === 'text') {
@@ -135,11 +137,12 @@ export async function runCaptureAndroidCommand(args: CaptureAndroidCommandArgs):
     printPreflightWarnings(format, capture);
 
     const renderer = createRenderer({ verbose: args.verbose, useColor: !args.noColor, format });
-    service = new CliAnalyzeService();
     const query = args.query?.trim() || DEFAULT_ANALYSIS_QUERY;
     let exitCode = 0;
     await withConsoleLogToStderr(renderer.format !== 'text', async () => {
-      const turn = await startSession({ paths, service: service!, renderer }, {
+      const service = new CliAnalyzeService();
+      lifecycle.service = service;
+      const turn = await startSession({ paths, service, renderer }, {
         tracePath: capture.out,
         query,
         analysisMode: args.analysisMode,
@@ -158,7 +161,7 @@ export async function runCaptureAndroidCommand(args: CaptureAndroidCommandArgs):
     printError(format, (err as Error).message);
     return 1;
   } finally {
-    await service?.shutdown();
+    await lifecycle.service?.shutdown();
   }
 }
 

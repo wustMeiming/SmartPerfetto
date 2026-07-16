@@ -10,14 +10,18 @@ The default backend address is `http://localhost:3000`. Set
 Authorization: Bearer <token>
 ```
 
+`SMARTPERFETTO_API_KEY` is the deployment-operator credential. Enterprise
+users should use durable API keys with explicit roles and scopes.
+
 ## Health
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | Backend status, runtime, model configuration, auth status |
-| `GET` | `/debug` | Development diagnostics and legacy API usage snapshot |
+| `GET` | `/health` | Public minimal liveness status and version |
+| `GET` | `/api/runtime-health` | Authenticated `runtime:manage` diagnostics for runtime, model, and AI policy |
+| `GET` | `/api/debug` | Authenticated `runtime:manage` development diagnostics and legacy API snapshot |
 
-`/health` returns top-level `aiPolicy` and mirrors `aiEnabled` plus
+`/api/runtime-health` returns top-level `aiPolicy` and mirrors `aiEnabled` plus
 `disabledReason` under `aiEngine` so the frontend and CLI can decide whether
 model-backed analysis is allowed. When `aiPolicy.aiEnabled=false`, trace
 upload/read, SQL, reports, Provider configuration/switching, and deterministic
@@ -57,6 +61,17 @@ Upload example:
 ```bash
 curl -F "file=@trace.pftrace" http://localhost:3000/api/traces/upload
 ```
+
+The list returns the newest 100 records by default. Use `limit=1..200` and the
+opaque `nextCursor` from the previous response:
+
+```http
+GET /api/traces?limit=100&cursor=<nextCursor>
+```
+
+Clients must not parse or synthesize cursors. In `/api/traces/stats`,
+`traces.metadataCount` is the total visible persisted trace count for the
+workspace, while `traces.count` is the number active in the current process.
 
 ## Workspace-scoped APIs
 
@@ -272,8 +287,8 @@ new run in the same session receives `409 CANCELLATION_IN_PROGRESS` until the
 cancelled runtime exits, preventing old-run cleanup or continuity state from
 affecting the replacement run.
 
-The terminal `analysis_completed` event can include `analysisReceipt`,
-`traceConfigProposal`, and `uiActionProposals`. `uiActionProposals` only
+The terminal `analysis_completed` event can include `analysisReceipt` and
+`uiActionProposals`. `uiActionProposals` only
 contains safe UI proposals derived from DataEnvelope evidence and column click
 metadata, such as navigating to a time range, opening an evidence table, or
 pinning evidence. Clients must execute them only after an explicit user click;
@@ -409,6 +424,17 @@ Base path: `/api/rag`
 | `GET` | `/codebases/:id/excerpt` | Read an indexed excerpt |
 | `POST` | `/codebases/:id/reindex` | Reindex |
 | `GET` | `/codebases/:id/audit` | Index audit |
+| `PATCH` | `/codebases/:id/consent` | Explicitly grant or revoke provider-send consent |
+| `DELETE` | `/codebases/:id` | Retire the registration and remove every staged, active, and superseded generation in the current scope |
+
+Codebase deletion is a retryable two-phase lifecycle. Under the ingest lease,
+the backend first marks the registration `deleting`, revokes provider consent,
+and disconnects its active generation. It then removes every indexed chunk and
+the registration. Concurrent reindex returns `409 CODEBASE_BUSY`. Interrupted
+physical cleanup returns `500 CODEBASE_DELETE_INCOMPLETE`; the codebase is
+already non-retrievable and cannot be reauthorized or reindexed, and repeating
+the same `DELETE` resumes cleanup. An already deleted or out-of-scope ID returns
+idempotent success without revealing another tenant/workspace/user registration.
 
 See [Android Internals External Knowledge](../getting-started/android-internals-knowledge.en.md)
 for path allowlisting, the CC rights acknowledgement, revocable consent,
@@ -416,6 +442,10 @@ request-scoped `options.knowledgeSourceIds`, and Docker mounts. Private Wiki
 chunks are completely absent from ordinary `/chunks/:id` and `/search` reads;
 only the dedicated source/audit management endpoints return prose-free metadata
 inside the current scope.
+
+See [Private Analysis Context Architecture](../architecture/private-analysis-context.en.md)
+for the source/RAG request matrix, authorization fingerprint, and private-output
+boundary.
 
 ## Analysis Result Comparison API
 

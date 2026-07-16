@@ -70,7 +70,7 @@ import traceConfigProposalRoutes from './routes/traceConfigProposalRoutes';
 import skillPackRoutes from './routes/skillPackRoutes';
 import batchTraceRoutes from './routes/batchTraceRoutes';
 import traceProcessorProxyRoutes, { handleTraceProcessorProxyUpgrade } from './routes/traceProcessorProxyRoutes';
-import {authenticate} from './middleware/auth';
+import {authenticate, requireRequestContext} from './middleware/auth';
 import { collectEnvCredentialSources } from './agentRuntime/envCredentialSources';
 import { buildRuntimeHealthPayload } from './agentRuntime/runtimeHealth';
 import {
@@ -86,6 +86,14 @@ import {
   bindWorkspaceRouteContext,
   requireWorkspaceRouteContext,
 } from './middleware/workspaceRouteContext';
+import {
+  isCorsOriginAllowed,
+  isLoopbackRequestHostname,
+  normalizeCorsOrigins,
+} from './security/requestOriginPolicy';
+import {rejectEnterpriseUnscopedApi} from './middleware/enterpriseRouteBoundary';
+import {hasRbacPermission, sendForbidden} from './services/rbac';
+import {getSmartPerfettoVersion} from './version';
 
 // Import cleanup utilities
 import { TraceProcessorFactory, killOrphanProcessors } from './services/workingTraceProcessor';
@@ -98,31 +106,19 @@ import { startPatternMemoryAutoConfirmSweep } from './agentv3/analysisPatternMem
 const app = express();
 const PORT = serverConfig.port;
 const NODE_ENV = serverConfig.nodeEnv;
-const corsAllowedOrigins = new Set(
-  serverConfig.corsOrigins.map((origin) => origin.replace(/\/+$/, '')),
-);
+const corsAllowedOrigins = normalizeCorsOrigins(serverConfig.corsOrigins);
 const workspaceRouteContextMiddleware: express.RequestHandler[] = [
   bindWorkspaceRouteContext,
   authenticate,
   requireWorkspaceRouteContext,
 ];
 
-function isCorsOriginAllowed(requestOrigin: string): boolean {
-  try {
-    const url = new URL(requestOrigin);
-    const normalized = `${url.protocol}//${url.host}`;
-    return corsAllowedOrigins.has(normalized) || url.port === String(serverConfig.frontendPort);
-  } catch {
-    return false;
-  }
-}
-
-// Middleware — dynamic CORS: allow configured origins and the active Perfetto frontend port.
+// Middleware — exact-origin CORS. Port-only matching permits DNS rebinding.
 app.use(cors({
   origin: (requestOrigin: string | undefined, callback: (err: Error | null, allow?: boolean | string) => void) => {
     // No Origin header (server-to-server, curl, etc.) → allow
     if (!requestOrigin) return callback(null, true);
-    if (isCorsOriginAllowed(requestOrigin)) return callback(null, true);
+    if (isCorsOriginAllowed(requestOrigin, corsAllowedOrigins)) return callback(null, true);
     callback(new Error(`CORS blocked: ${requestOrigin}`));
   },
   credentials: true,
@@ -131,13 +127,52 @@ app.use(cors({
 app.use(express.json({ limit: serverConfig.bodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: serverConfig.bodyLimit }));
 
+// In keyless local mode, reject Host-header DNS rebinding even though the
+// process itself listens only on loopback by default.
+app.use('/api', (req, res, next) => {
+  const keylessLocalMode = !process.env.SMARTPERFETTO_API_KEY && !resolveFeatureConfig(process.env).enterprise;
+  if (keylessLocalMode && !isLoopbackRequestHostname(req.hostname)) {
+    res.status(403).json({success: false, error: 'Untrusted Host in local keyless mode'});
+    return;
+  }
+  next();
+});
+
+// Authentication is the default for the complete API surface. OIDC/session
+// bootstrap endpoints own their public-vs-authenticated decisions internally.
+app.use('/api', (req, res, next) => {
+  if (req.path === '/auth' || req.path.startsWith('/auth/')) {
+    next();
+    return;
+  }
+  authenticate(req, res, next);
+});
+
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
+  res.json({status: 'OK', version: getSmartPerfettoVersion()});
+});
+
+function requireRuntimeDiagnosticsPermission(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+): void {
+  const context = requireRequestContext(req);
+  if (!hasRbacPermission(context, 'runtime:manage')) {
+    sendForbidden(res, 'Runtime diagnostics require runtime:manage permission');
+    return;
+  }
+  next();
+}
+
+// Detailed runtime and caller telemetry stays behind the authenticated API
+// boundary and an explicit runtime-management permission.
+app.get('/api/runtime-health', requireRuntimeDiagnosticsPermission, (_req, res) => {
   res.json(buildRuntimeHealthPayload());
 });
 
-// Debug endpoint to check env vars
-app.get('/debug', (req, res) => {
+app.get('/api/debug', requireRuntimeDiagnosticsPermission, (_req, res) => {
   const legacyUsage = getLegacyApiUsageSnapshot(10);
   res.json({
     aiCredentialSources: collectEnvCredentialSources(process.env, 'health'),
@@ -209,12 +244,12 @@ app.use(
   ),
   simpleTraceRoutes,
 );
-app.use('/api/perfetto', perfettoLocalRoutes);
-app.use('/api/sessions', sessionRoutes);
-app.use('/api/perfetto-sql', perfettoSqlRoutes);
+app.use('/api/perfetto', rejectEnterpriseUnscopedApi, perfettoLocalRoutes);
+app.use('/api/sessions', rejectEnterpriseUnscopedApi, sessionRoutes);
+app.use('/api/perfetto-sql', rejectEnterpriseUnscopedApi, perfettoSqlRoutes);
 app.use('/api/export', exportRoutes);
-app.use('/api/template-analysis', templateAnalysisRoutes);
-app.use('/api/skills', skillRoutes);
+app.use('/api/template-analysis', rejectEnterpriseUnscopedApi, templateAnalysisRoutes);
+app.use('/api/skills', rejectEnterpriseUnscopedApi, skillRoutes);
 app.use('/api/admin/runtime', enterpriseRuntimeDashboardRoutes);
 app.use('/api/admin', skillAdminRoutes);
 app.use('/api/admin', strategyAdminRoutes);
@@ -242,8 +277,8 @@ app.use(
   ),
   providerRoutes,
 );
-app.use('/api/flamegraph', flamegraphRoutes);
-app.use('/api/critical-path', criticalPathRoutes);
+app.use('/api/flamegraph', rejectEnterpriseUnscopedApi, flamegraphRoutes);
+app.use('/api/critical-path', rejectEnterpriseUnscopedApi, criticalPathRoutes);
 app.use('/api/baselines', baselineRoutes);
 app.use('/api/ci', authenticate, ciGateRoutes);
 app.use('/api/tp', traceProcessorProxyRoutes);
@@ -352,8 +387,8 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Start server
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+const server = app.listen(PORT, serverConfig.bindHost, () => {
+  console.log(`🚀 Server running on ${serverConfig.bindHost}:${PORT}`);
   console.log(`📊 Environment: ${NODE_ENV}`);
   console.log(`🔗 API URL: http://localhost:${PORT}/api`);
   console.log(`❤️  Health check: http://localhost:${PORT}/health`);

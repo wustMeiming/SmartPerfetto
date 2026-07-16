@@ -115,7 +115,7 @@ function main(argv) {
     const validation = validateCatalog(parsed.repoRoot);
     console.log(`Skills: ${validation.coverage.covered.skills.length}/${targets.skills.length}`);
     console.log(`Strategies: ${validation.coverage.covered.strategies.length}/${targets.strategies.length}`);
-    console.log(`Skill quality: semantic=${validation.coverage.quality.semantic.length}, graceful-empty=${validation.coverage.quality.graceful_empty.length}, unavailable=${validation.coverage.quality.unavailable.length}, definition=${validation.coverage.quality.definition.length}`);
+    console.log(`Skill quality: semantic=${validation.coverage.quality.semantic.length}, execution=${validation.coverage.quality.execution.length}, graceful-empty=${validation.coverage.quality.graceful_empty.length}, unavailable=${validation.coverage.quality.unavailable.length}, definition=${validation.coverage.quality.definition.length}`);
     if (!validation.ok) {
       printIssues(validation);
       return 1;

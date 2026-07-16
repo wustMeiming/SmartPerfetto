@@ -7,6 +7,10 @@ import {
   resolveProviderAgentRuntime,
   sharedKeyShouldUseClaudeAuthToken,
 } from './providerRuntimeMatrix';
+import {
+  requestProviderEndpoint,
+  type ProviderEndpointResponse,
+} from './providerEndpointRequest';
 
 const TEST_REQUEST_TIMEOUT_MS = 10000;
 const TEST_TOTAL_TIMEOUT_MS = 15000;
@@ -428,7 +432,7 @@ function resolveOllamaInstalledModel(
 }
 
 async function providerFailureFromResponse(
-  res: Response,
+  res: ProviderEndpointResponse,
   protocolLabel: string,
 ): Promise<Omit<TestResult, 'latencyMs'>> {
   if (res.status === 401) {
@@ -462,12 +466,16 @@ function responseErrorMessage(body: any): string | undefined {
 
 // --- Utilities ---
 
-async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<ProviderEndpointResponse> {
   const controller = new AbortController();
   const timeoutMs = getTimeoutMs('PROVIDER_TEST_REQUEST_TIMEOUT_MS', TEST_REQUEST_TIMEOUT_MS);
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await requestProviderEndpoint(
+      url,
+      {...init, signal: controller.signal},
+      timeoutMs,
+    );
   } catch (err: any) {
     if (err.name === 'AbortError') {
       throw new Error(`Connection timed out after ${timeoutMs / 1000}s`);
@@ -484,7 +492,7 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
   }
 }
 
-async function safeJson(res: Response): Promise<any> {
+async function safeJson(res: ProviderEndpointResponse): Promise<any> {
   try {
     const body = await readResponseTextWithTimeout(res);
     if (!body) return null;
@@ -494,7 +502,7 @@ async function safeJson(res: Response): Promise<any> {
   }
 }
 
-async function readResponseTextWithTimeout(res: Response): Promise<string | null> {
+async function readResponseTextWithTimeout(res: ProviderEndpointResponse): Promise<string | null> {
   const timeoutMs = getTimeoutMs('PROVIDER_TEST_RESPONSE_BODY_TIMEOUT_MS', TEST_RESPONSE_BODY_TIMEOUT_MS);
   return withTimeout(
     res.text(),
@@ -506,9 +514,9 @@ async function readResponseTextWithTimeout(res: Response): Promise<string | null
   );
 }
 
-function cancelResponseBody(res: Response): void {
+function cancelResponseBody(res: ProviderEndpointResponse): void {
   try {
-    void res.body?.cancel();
+    res.cancelBody();
   } catch {
     // Best-effort cleanup only; the caller will return a normal test failure.
   }

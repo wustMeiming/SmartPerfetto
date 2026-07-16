@@ -5,7 +5,9 @@
 import type { CaseNode } from '../../types/sparkContracts';
 import { CaseLibrary } from '../caseLibrary';
 import type { KnowledgeScope } from '../scopedKnowledgeStore';
+import {resolveKnowledgeScope} from '../scopedKnowledgeStore';
 import type { CaseCandidateOutboxHandle } from './caseCandidateOutbox';
+import {caseCandidateKnowledgeScope} from './caseCandidateBuilder';
 
 export interface RecordCaseCandidateFeedbackInput {
   candidateId: string;
@@ -21,7 +23,7 @@ export interface RecordCaseCandidateFeedbackInput {
 
 export interface RecordCaseCandidateFeedbackResult {
   added: boolean;
-  reason?: 'missing_candidate' | 'mis_tap' | 'duplicate' | 'error';
+  reason?: 'missing_candidate' | 'scope_mismatch' | 'mis_tap' | 'duplicate' | 'error';
   supported?: boolean;
   rejected?: boolean;
 }
@@ -34,6 +36,17 @@ export function recordCaseCandidateFeedback(
 ): RecordCaseCandidateFeedbackResult {
   const candidate = input.outbox.getCandidate(input.candidateId);
   if (!candidate) return { added: false, reason: 'missing_candidate' };
+  const candidateScope = caseCandidateKnowledgeScope(candidate.candidate);
+  if (!candidateScope || !input.knowledgeScope) {
+    return {added: false, reason: 'scope_mismatch'};
+  }
+  const requestedScope = resolveKnowledgeScope(input.knowledgeScope);
+  if (
+    candidateScope.tenantId !== requestedScope.tenantId ||
+    candidateScope.workspaceId !== requestedScope.workspaceId
+  ) {
+    return {added: false, reason: 'scope_mismatch'};
+  }
   const receivedAt = input.receivedAt ?? Date.now();
   const receivedWithinMs = input.surfacedAt === undefined ? undefined : receivedAt - input.surfacedAt;
   if (receivedWithinMs !== undefined && receivedWithinMs < TEN_SECONDS_MS) {
@@ -55,11 +68,11 @@ export function recordCaseCandidateFeedback(
   const updated = input.outbox.getCandidate(input.candidateId);
   if (!updated) return { added: true };
   const library = input.library;
-  if (library) syncLearnedCaseMarker(library, updated, input.knowledgeScope);
+  if (library) syncLearnedCaseMarker(library, updated, candidateScope);
 
   if (updated.contradictingEvidence >= 2) {
     input.outbox.markRejected(input.candidateId, 'negative case feedback threshold reached');
-    if (library) demoteLearnedCasePrivate(library, updated, input.knowledgeScope);
+    if (library) demoteLearnedCasePrivate(library, updated, candidateScope);
     return { added: true, rejected: true };
   }
 

@@ -8,6 +8,7 @@ import path from 'path';
 import { ENTERPRISE_FEATURE_FLAG_ENV } from '../../../config';
 import { ENTERPRISE_DB_PATH_ENV, openEnterpriseDb } from '../../enterpriseDb';
 import { listEnterpriseAuditEvents } from '../../enterpriseAuditService';
+import {ENTERPRISE_MIGRATION_PHASE_ENV} from '../../enterpriseMigration';
 import {
   SECRET_STORE_DIR_ENV,
   SECRET_STORE_MASTER_KEY_ENV,
@@ -20,6 +21,7 @@ const originalEnv = {
   enterpriseDbPath: process.env[ENTERPRISE_DB_PATH_ENV],
   secretStoreDir: process.env[SECRET_STORE_DIR_ENV],
   secretStoreMasterKey: process.env[SECRET_STORE_MASTER_KEY_ENV],
+  migrationPhase: process.env[ENTERPRISE_MIGRATION_PHASE_ENV],
 };
 
 interface ProviderCredentialRow {
@@ -93,6 +95,7 @@ beforeEach(async () => {
   process.env[ENTERPRISE_DB_PATH_ENV] = dbPath;
   process.env[SECRET_STORE_DIR_ENV] = secretDir;
   process.env[SECRET_STORE_MASTER_KEY_ENV] = Buffer.alloc(32, 3).toString('base64');
+  process.env[ENTERPRISE_MIGRATION_PHASE_ENV] = 'retired';
   svc = new ProviderService(path.join(tmpDir, 'providers.json'));
 });
 
@@ -101,6 +104,7 @@ afterEach(async () => {
   restoreEnvValue(ENTERPRISE_DB_PATH_ENV, originalEnv.enterpriseDbPath);
   restoreEnvValue(SECRET_STORE_DIR_ENV, originalEnv.secretStoreDir);
   restoreEnvValue(SECRET_STORE_MASTER_KEY_ENV, originalEnv.secretStoreMasterKey);
+  restoreEnvValue(ENTERPRISE_MIGRATION_PHASE_ENV, originalEnv.migrationPhase);
   if (tmpDir) {
     await fs.rm(tmpDir, { recursive: true, force: true });
     tmpDir = undefined;
@@ -173,6 +177,39 @@ describe('enterprise provider store', () => {
       .toContain('sk-enterprise-pi-json');
     expect(svc.getEnvForProvider(openCodeProvider.id, scope('user-a'))!.SMARTPERFETTO_OPENCODE_MODEL_JSON)
       .toContain('sk-enterprise-opencode-json');
+  });
+
+  it('encrypts custom header and environment values outside policy_json', async () => {
+    const provider = svc.create({
+      ...input,
+      name: 'Enterprise Custom',
+      category: 'custom',
+      type: 'custom',
+      connection: {
+        agentRuntime: 'openai-agents-sdk',
+        openaiBaseUrl: 'https://gateway.example/v1',
+      },
+      custom: {
+        headers: {Authorization: 'Bearer custom-header-secret'},
+        envOverrides: {
+          OPENAI_API_KEY: 'custom-env-secret',
+          OPENAI_BASE_URL: 'https://override.example/v1',
+        },
+      },
+    }, scope('user-a'));
+
+    const row = readProviderRows().find(item => item.id === provider.id)!;
+    expect(row.policy_json).not.toContain('custom-header-secret');
+    expect(row.policy_json).not.toContain('custom-env-secret');
+    expect(row.policy_json).not.toContain('https://override.example/v1');
+    const encrypted = await fs.readFile(path.join(secretDir, 'provider-secrets.enc.json'), 'utf-8');
+    expect(encrypted).not.toContain('custom-header-secret');
+    expect(encrypted).not.toContain('custom-env-secret');
+
+    const raw = svc.getRaw(provider.id, scope('user-a'))!;
+    expect(raw.custom?.headers?.Authorization).toBe('Bearer custom-header-secret');
+    expect(svc.getEnvForProvider(provider.id, scope('user-a'))?.OPENAI_API_KEY)
+      .toBe('custom-env-secret');
   });
 
   it('keeps personal provider activation isolated by user scope', () => {

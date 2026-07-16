@@ -262,6 +262,16 @@ describe('verifyHeuristic', () => {
         expect.stringContaining('VRR'),
         expect.stringContaining('(学习) Learned VSync warning'),
       ]);
+
+      const privateIssues = verifyHeuristic(
+        [],
+        'VSync alignment misalign and VSync 对齐异常严重',
+        'pipeline',
+        false,
+      ).filter(issue => issue.type === 'known_misdiagnosis');
+      expect(privateIssues.map(issue => issue.message)).toEqual([
+        expect.stringContaining('VRR'),
+      ]);
     });
   });
 

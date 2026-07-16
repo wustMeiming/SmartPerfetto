@@ -247,6 +247,8 @@ export type AgentRuntimeAnalysisResult = AnalysisResult;
 // =============================================================================
 
 export interface AnalysisOptions {
+  /** Request/session-pinned presentation language. */
+  outputLanguage?: import('../../agentv3/outputLanguage').OutputLanguage;
   traceProcessorService?: any;
   packageName?: string;
   timeRange?: { start: number | string; end: number | string };
@@ -337,6 +339,8 @@ export interface AnalysisOptions {
   codebaseIds?: string[];
   /** Explicit external knowledge-source allowlist for this analysis session. */
   knowledgeSourceIds?: string[];
+  /** Internal non-secret partition for source/RAG capability continuity. */
+  analysisContextFingerprint?: string;
 
   /**
    * Enterprise persistence scope supplied by the route layer.

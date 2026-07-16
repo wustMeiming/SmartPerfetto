@@ -18,6 +18,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
+import {diagnosticLogIdentity} from '../../../utils/logger';
 import { createSdkEnv, getSdkBinaryOption } from './claudeConfig';
 import type { Finding, StreamingUpdate } from '../../../agent/types';
 import type { VerificationResult, VerificationIssue, AnalysisPlanV3, Hypothesis, ToolCallRecord } from '../../../agentv3/types';
@@ -104,8 +105,11 @@ function compileStrategyMisdiagnosisPatterns(sceneType?: SceneType): CompiledMis
  * Build combined misdiagnosis patterns from strategy frontmatter + learned.
  * Learned patterns are converted to regex on-the-fly from stored keywords.
  */
-function getKnownMisdiagnosisPatterns(sceneType?: SceneType): CompiledMisdiagnosisPattern[] {
-  const learned = loadLearnedPatterns();
+function getKnownMisdiagnosisPatterns(
+  sceneType?: SceneType,
+  allowPersistentLearning = true,
+): CompiledMisdiagnosisPattern[] {
+  const learned = allowPersistentLearning ? loadLearnedPatterns() : [];
   const cutoff = Date.now() - LEARNED_PATTERN_TTL_MS;
 
   const learnedAsPatterns = learned
@@ -193,6 +197,7 @@ export function verifyHeuristic(
   findings: Finding[],
   conclusion: string,
   sceneType?: SceneType,
+  allowPersistentLearning = true,
 ): VerificationIssue[] {
   const issues: VerificationIssue[] = [];
 
@@ -219,7 +224,7 @@ export function verifyHeuristic(
 
   // Check 3: Known misdiagnosis pattern matching (strategy frontmatter + learned, P2-G14)
   const fullText = conclusion + ' ' + findings.map(f => `${f.title} ${f.description}`).join(' ');
-  for (const pattern of getKnownMisdiagnosisPatterns(sceneType)) {
+  for (const pattern of getKnownMisdiagnosisPatterns(sceneType, allowPersistentLearning)) {
     if (pattern.pattern.test(fullText)) {
       issues.push({
         type: pattern.type,
@@ -962,8 +967,9 @@ ${conclusionPreview}${truncationNote}
         permissionMode: 'bypassPermissions' as const,
         allowDangerouslySkipPermissions: true,
         env: sdkEnv,
+        persistSession: false,
         stderr: (data: string) => {
-          console.warn(`[ClaudeVerifier] SDK stderr: ${data.trimEnd()}`);
+          console.warn(`[ClaudeVerifier] SDK stderr: ${diagnosticLogIdentity(data.trimEnd())}`);
         },
         ...getSdkBinaryOption(sdkEnv),
       },
@@ -1259,6 +1265,8 @@ export async function verifyConclusion(
     query?: string;
     /** Suppress user-facing progress when the caller will defer non-blocking issues to final gates. */
     emitIssueProgress?: boolean;
+    /** Allow global/cross-session learned verifier patterns to be read and updated. */
+    allowPersistentLearning?: boolean;
   } = {},
 ): Promise<VerificationResult> {
   const startTime = Date.now();
@@ -1266,7 +1274,13 @@ export async function verifyConclusion(
   const outputLanguage = options.outputLanguage ?? DEFAULT_OUTPUT_LANGUAGE;
 
   // Layer 1: Heuristic checks
-  const heuristicIssues = verifyHeuristic(findings, conclusion, sceneType);
+  const allowPersistentLearning = options.allowPersistentLearning !== false;
+  const heuristicIssues = verifyHeuristic(
+    findings,
+    conclusion,
+    sceneType,
+    allowPersistentLearning,
+  );
 
   // Layer 2: Plan adherence check
   const planIssues = verifyPlanAdherence(plan ?? null);
@@ -1332,7 +1346,7 @@ export async function verifyConclusion(
   const passed = allIssues.filter(i => i.severity === 'error').length === 0;
 
   // P2-G14: Learn from LLM verification results (fire-and-forget)
-  if (llmIssues && llmIssues.length > 0) {
+  if (allowPersistentLearning && llmIssues && llmIssues.length > 0) {
     try { learnFromVerificationResults(llmIssues, findings); } catch { /* non-fatal */ }
   }
 

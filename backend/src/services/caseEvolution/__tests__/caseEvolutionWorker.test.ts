@@ -15,6 +15,10 @@ import {
   CaseEvolutionWorker,
   __testing,
 } from '../caseEvolutionWorker';
+import type {
+  IngestReviewedCaseCandidateOptions,
+  IngestReviewedCaseCandidateResult,
+} from '../caseCandidateIngester';
 
 let outbox: CaseCandidateOutboxHandle;
 let tempDir: string;
@@ -32,7 +36,7 @@ afterEach(() => {
 function candidate(candidateId = 'cand-worker-1'): CaseCandidate {
   return {
     candidateId,
-    schemaVersion: 'case_candidate@1',
+    schemaVersion: 'case_candidate@2',
     provenance: {
       sourceSessionId: 'session-1',
       sourceAnalysisRunId: 'run-1',
@@ -42,6 +46,7 @@ function candidate(candidateId = 'cand-worker-1'): CaseCandidate {
       engine: 'claude',
       sceneType: 'scrolling',
       architectureType: 'unknown',
+      originScope: {tenantId: 'default-dev-tenant', workspaceId: 'default-workspace'},
     },
     cluster: {
       scene: 'scrolling',
@@ -203,8 +208,34 @@ describe('CaseEvolutionWorker', () => {
       candidate: expect.objectContaining({candidateId: 'cand-worker-1'}),
       review: expect.objectContaining({candidateId: 'cand-worker-1'}),
       sidecarRelativePath: undefined,
+      knowledgeScope: {tenantId: 'default-dev-tenant', workspaceId: 'default-workspace'},
     }));
     expect(outbox.getCandidate('cand-worker-1')?.learnedCaseId).toBe('learned:cand-worker-1');
+  });
+
+  it('rejects legacy unscoped rows before review or ingestion', async () => {
+    const legacy = candidate() as any;
+    delete legacy.provenance.originScope;
+    outbox.enqueue(legacy, {dedupeKey: 'legacy-unscoped'});
+    const executeReview = executeOk();
+    const ingestReviewedCandidate = jest.fn<
+      (input: IngestReviewedCaseCandidateOptions) => IngestReviewedCaseCandidateResult
+    >();
+    const worker = new CaseEvolutionWorker({
+      outbox,
+      executeReview,
+      ingestReviewedCandidate,
+      config: {captureEnabled: true, reviewEnabled: true, ingestEnabled: true},
+    });
+
+    await worker.tick();
+
+    expect(executeReview).not.toHaveBeenCalled();
+    expect(ingestReviewedCandidate).not.toHaveBeenCalled();
+    expect(outbox.getCandidate(legacy.candidateId)).toMatchObject({
+      state: 'rejected',
+      lastError: 'candidate is missing a valid immutable origin scope',
+    });
   });
 
   it('rejects schema/content validation failures permanently', async () => {

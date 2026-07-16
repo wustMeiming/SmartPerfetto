@@ -239,7 +239,8 @@ describe('SkillAnalysisAdapter layered conversion', () => {
 
   it('maps detected vendor ids consistently with available vendor profiles', async () => {
     const queryMock = jest.fn() as any;
-    queryMock.mockResolvedValue({
+    queryMock.mockResolvedValueOnce({rows: []});
+    queryMock.mockResolvedValueOnce({
       rows: [['pixel']],
     });
     const traceProcessorMock = {

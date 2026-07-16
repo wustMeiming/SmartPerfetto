@@ -7,7 +7,7 @@ import type {
   RagRetrievalResult,
   RagSourceKind,
 } from '../../types/sparkContracts';
-import type {CodebaseRegistry} from '../codebase/codebaseRegistry';
+import {activeCodebaseGeneration, type CodebaseRegistry} from '../codebase/codebaseRegistry';
 import type {CodeLookupLedger} from '../codebase/codeLookupLedger';
 import {redactSecrets} from '../security/secretPatterns';
 import {registerCodeAwareLookupForEcho} from '../security/codeAwareOutputRegistry';
@@ -35,8 +35,11 @@ export interface SanitizedRagHit {
     attribution?: string;
     sourceStatus?: string;
     sourceConfidence?: string;
+    verifiedAt?: number;
     lastVerifiedAgainst?: string;
     contentFingerprint?: string;
+    sourceDirty?: boolean;
+    commitProvenance?: RagChunk['commitProvenance'];
   };
   snippet?: string;
   unsupportedReason?: string;
@@ -110,6 +113,27 @@ function metadata(chunk: RagChunk): SanitizedRagHit['metadata'] {
     ...(chunk.sourceConfidence ? {sourceConfidence: chunk.sourceConfidence} : {}),
     ...(chunk.lastVerifiedAgainst ? {lastVerifiedAgainst: chunk.lastVerifiedAgainst} : {}),
     ...(chunk.contentFingerprint ? {contentFingerprint: chunk.contentFingerprint} : {}),
+    ...(chunk.sourceDirty !== undefined ? {sourceDirty: chunk.sourceDirty} : {}),
+    ...(chunk.commitProvenance ? {commitProvenance: chunk.commitProvenance} : {}),
+  };
+}
+
+function privateKnowledgeMetadata(chunk: RagChunk): SanitizedRagHit['metadata'] {
+  const sourceStatus = chunk.sourceStatus?.toLowerCase();
+  const sourceConfidence = chunk.sourceConfidence?.toLowerCase();
+  const verifiedAt = Number.isFinite(chunk.verifiedAt) && Number(chunk.verifiedAt) >= 0
+    ? Number(chunk.verifiedAt)
+    : undefined;
+  return {
+    kind: chunk.kind,
+    ...(chunk.knowledgeSourceId ? {knowledgeSourceId: chunk.knowledgeSourceId} : {}),
+    ...(chunk.sourceGeneration ? {sourceGeneration: chunk.sourceGeneration} : {}),
+    ...((sourceStatus === 'finalized' || sourceStatus === 'verified') ? {sourceStatus} : {}),
+    ...((sourceConfidence === 'low' || sourceConfidence === 'medium' || sourceConfidence === 'high')
+      ? {sourceConfidence}
+      : {}),
+    ...(verifiedAt !== undefined ? {verifiedAt} : {}),
+    ...(chunk.contentFingerprint ? {contentFingerprint: chunk.contentFingerprint} : {}),
   };
 }
 
@@ -177,7 +201,7 @@ export async function filterRagLookup(
         hits.push({
           chunkId: hit.chunkId,
           score: hit.score,
-          metadata: metadata(chunk),
+          metadata: privateKnowledgeMetadata(chunk),
           unsupportedReason: blockedReason,
         });
         ctx.ledger?.record({
@@ -200,7 +224,7 @@ export async function filterRagLookup(
         hits.push({
           chunkId: hit.chunkId,
           score: hit.score,
-          metadata: metadata(chunk),
+          metadata: privateKnowledgeMetadata(chunk),
           unsupportedReason: 'budget_exceeded',
           redactedCount: redacted.redactedCount,
         });
@@ -219,7 +243,7 @@ export async function filterRagLookup(
       hits.push({
         chunkId: hit.chunkId,
         score: hit.score,
-        metadata: metadata(chunk),
+        metadata: privateKnowledgeMetadata(chunk),
         snippet: redacted.text,
         redactedCount: redacted.redactedCount,
       });
@@ -227,6 +251,8 @@ export async function filterRagLookup(
         turn: ctx.turn,
         ts: Date.now(),
         toolName: ctx.toolName,
+        knowledgeSourceId: chunk.knowledgeSourceId,
+        sourceGeneration: chunk.sourceGeneration,
         chunkIds: [chunk.chunkId],
         consentApplied: true,
         tokensSpent: tokens,
@@ -255,7 +281,9 @@ export async function filterRagLookup(
       continue;
     }
 
-    const ref = chunk.codebaseId ? ctx.codebaseRegistry?.get(chunk.codebaseId) : undefined;
+    const ref = chunk.codebaseId
+      ? ctx.codebaseRegistry?.get(chunk.codebaseId, ctx.knowledgeScope)
+      : undefined;
     if (!chunk.codebaseId || !ref) {
       hits.push({
         chunkId: hit.chunkId,
@@ -273,6 +301,20 @@ export async function filterRagLookup(
         tokensSpent: 0,
         outcome: 'rejected',
         legacyPath: false,
+      });
+      continue;
+    }
+
+    const activeGeneration = activeCodebaseGeneration(ref);
+    if (
+      (chunk.sourceGeneration && chunk.sourceGeneration !== activeGeneration) ||
+      (!chunk.sourceGeneration && ref.indexGeneration > 1)
+    ) {
+      hits.push({
+        chunkId: hit.chunkId,
+        score: hit.score,
+        metadata: metadata(chunk),
+        unsupportedReason: 'inactive_source_generation',
       });
       continue;
     }

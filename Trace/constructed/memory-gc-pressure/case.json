@@ -80,7 +80,7 @@
         "id": "execute-android_bitmap_memory_per_process",
         "type": "skill",
         "target": "android_bitmap_memory_per_process",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/android_bitmap_memory_per_process.skill.yaml",
         "parameters": {},
         "required_steps": [
@@ -103,13 +103,26 @@
           "dominator_paths"
         ],
         "semantic_step": "dominator_paths",
+        "min_rows": 1,
+        "assertions": [
+          {
+            "column": "path",
+            "operator": "contains",
+            "value": "LeakContainer"
+          },
+          {
+            "column": "retained_size_bytes",
+            "operator": "gte",
+            "value": 12582912
+          }
+        ],
         "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
       },
       {
         "id": "execute-android_heap_graph_leak_candidates",
         "type": "skill",
         "target": "android_heap_graph_leak_candidates",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/android_heap_graph_leak_candidates.skill.yaml",
         "parameters": {
           "lifecycle_slice_prefix": "SI$",
@@ -126,7 +139,7 @@
         "id": "execute-android_heap_graph_summary",
         "type": "skill",
         "target": "android_heap_graph_summary",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/android_heap_graph_summary.skill.yaml",
         "parameters": {
           "max_rows": 30
@@ -141,7 +154,7 @@
         "id": "execute-android_memory_v57_ai_diagnostics",
         "type": "skill",
         "target": "android_memory_v57_ai_diagnostics",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/composite/android_memory_v57_ai_diagnostics.skill.yaml",
         "parameters": {
           "min_size_mb": 1,
@@ -202,7 +215,7 @@
         "id": "execute-linux_process_rss_swap_timeline",
         "type": "skill",
         "target": "linux_process_rss_swap_timeline",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/linux_process_rss_swap_timeline.skill.yaml",
         "parameters": {},
         "required_steps": [
@@ -215,7 +228,7 @@
         "id": "execute-lmk_analysis",
         "type": "skill",
         "target": "lmk_analysis",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/composite/lmk_analysis.skill.yaml",
         "parameters": {},
         "required_steps": [
@@ -229,7 +242,7 @@
         "id": "execute-lmk_kill_attribution",
         "type": "skill",
         "target": "lmk_kill_attribution",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/lmk_kill_attribution.skill.yaml",
         "parameters": {},
         "required_steps": [
@@ -250,7 +263,7 @@
         "id": "execute-memory_analysis",
         "type": "skill",
         "target": "memory_analysis",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/composite/memory_analysis.skill.yaml",
         "parameters": {
           "gc_count_critical": 100,
@@ -269,7 +282,7 @@
         "id": "execute-memory_growth_detector",
         "type": "skill",
         "target": "memory_growth_detector",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/memory_growth_detector.skill.yaml",
         "parameters": {
           "growth_warning_mb": 50,
@@ -289,7 +302,7 @@
         "id": "execute-memory_module",
         "type": "skill",
         "target": "memory_module",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/modules/hardware/memory_module.skill.yaml",
         "parameters": {},
         "required_steps": [
@@ -302,7 +315,7 @@
         "id": "execute-memory_pressure_in_range",
         "type": "skill",
         "target": "memory_pressure_in_range",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/memory_pressure_in_range.skill.yaml",
         "parameters": {
           "start_ts": "${trace_start}",
@@ -318,7 +331,7 @@
         "id": "execute-memory_rss_high_watermark",
         "type": "skill",
         "target": "memory_rss_high_watermark",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/memory_rss_high_watermark.skill.yaml",
         "parameters": {
           "top_n": 30
@@ -347,7 +360,7 @@
         "id": "execute-oom_adjuster_score_timeline",
         "type": "skill",
         "target": "oom_adjuster_score_timeline",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/oom_adjuster_score_timeline.skill.yaml",
         "parameters": {},
         "required_steps": [

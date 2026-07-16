@@ -28,6 +28,13 @@ import {
 } from '../io/sessionStore';
 import { upsertSession } from '../io/indexJson';
 import { appendTranscriptTurn } from '../io/transcriptWriter';
+import {parseOutputLanguage} from '../../agentv3/outputLanguage';
+import {
+  privateAnalysisFailureMessage,
+  privateAnalysisQueryMessage,
+  projectPrivateAnalysisResult,
+} from '../../services/security/privateAnalysisProjection';
+import {sanitizeCodeAwareText} from '../../services/security/codeAwareOutputRegistry';
 
 export interface CommitTurnInput {
   paths: CliPaths;
@@ -54,7 +61,34 @@ export interface CommitTurnInput {
 }
 
 export function commitTurnOutputs(input: CommitTurnInput): void {
-  const { paths, sp, renderer, sessionId, turn, query, result, config, turnMarkdown, reportAppendix, indexEntry } = input;
+  const { paths, sp, renderer, sessionId, turn, query, config, reportAppendix } = input;
+  const outputLanguage = parseOutputLanguage(process.env.SMARTPERFETTO_OUTPUT_LANGUAGE);
+  const rawConclusion = input.result.result.conclusion || '';
+  const result: RunTurnOutput = input.result.privateKnowledge
+    ? {
+        ...input.result,
+        result: projectPrivateAnalysisResult(sessionId, input.result.result, outputLanguage),
+        reportError: input.result.reportError
+          ? privateAnalysisFailureMessage(outputLanguage)
+          : undefined,
+      }
+    : input.result;
+  const durableQuery = result.privateKnowledge
+    ? privateAnalysisQueryMessage(outputLanguage)
+    : query;
+  const turnMarkdown = result.privateKnowledge
+    ? sanitizeCodeAwareText(
+        sessionId,
+        replaceExact(
+          replaceExact(input.turnMarkdown, query, durableQuery),
+          rawConclusion,
+          result.result.conclusion || '',
+        ),
+      )
+    : input.turnMarkdown;
+  const indexEntry = result.privateKnowledge
+    ? {...input.indexEntry, firstQuery: durableQuery}
+    : input.indexEntry;
 
   const conclusion = result.result.conclusion || '';
   const turnPrefix = path.join(sp.turnsDir, String(turn).padStart(3, '0'));
@@ -64,10 +98,20 @@ export function commitTurnOutputs(input: CommitTurnInput): void {
   writeTurnMarkdown(sp, turn, reportAppendix?.markdown ? `${turnMarkdown}\n\n${reportAppendix.markdown}` : turnMarkdown);
 
   let turnReportPath: string | undefined;
-  const reportHtml = result.reportHtml && reportAppendix?.html
-    ? appendHtmlToBody(result.reportHtml, reportAppendix.html)
+  const privateSafeReportHtml = result.privateKnowledge && result.reportHtml
+    ? sanitizeCodeAwareText(
+        sessionId,
+        replaceExact(
+          replaceExact(result.reportHtml, query, durableQuery),
+          rawConclusion,
+          result.result.conclusion || '',
+        ),
+      )
     : result.reportHtml;
-  const reportPathForUser = result.reportHtml
+  const reportHtml = privateSafeReportHtml && reportAppendix?.html
+    ? appendHtmlToBody(privateSafeReportHtml, reportAppendix.html)
+    : privateSafeReportHtml;
+  const reportPathForUser = privateSafeReportHtml
     ? (turnReportPath = writeTurnReportHtml(sp, turn, reportHtml || ''), writeReportHtml(sp, reportHtml || ''), sp.report)
     : `(report generation failed${result.reportError ? `: ${result.reportError}` : ''})`;
   attachCliReceiptPath(result, cliTurnPath);
@@ -78,7 +122,7 @@ export function commitTurnOutputs(input: CommitTurnInput): void {
   appendTranscriptTurn(sp.transcript, {
     turn,
     timestamp: config.lastTurnAt,
-    question: query,
+    question: durableQuery,
     conclusionMd: conclusion,
     confidence: result.result.confidence,
     rounds: result.result.rounds,
@@ -126,6 +170,7 @@ function writeAnalysisQualitySidecars(sp: SessionPaths, turn: number, result: Ru
 }
 
 function attachCliReceiptPath(result: RunTurnOutput, cliTurnPath: string): void {
+  if (result.privateKnowledge) return;
   const receipt = result.result.analysisReceipt;
   if (!receipt) return;
   result.result.analysisReceipt = {
@@ -143,4 +188,8 @@ function appendHtmlToBody(html: string, appendixHtml: string): string {
     return html.replace(closeBody, `${appendixHtml}\n</body>\n</html>`);
   }
   return `${html}\n${appendixHtml}`;
+}
+
+function replaceExact(value: string, needle: string, replacement: string): string {
+  return needle ? value.split(needle).join(replacement) : value;
 }

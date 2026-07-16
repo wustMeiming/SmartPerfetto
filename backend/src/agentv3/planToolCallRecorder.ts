@@ -42,9 +42,11 @@ function shortToolName(toolName: string): string {
 
 function buildToolCallRecord(input: PlanToolCallRecorderInput): ToolCallRecord {
   const callSummary = summarizeToolCallInput(shortToolName(input.toolName), input.input);
+  const success = extractToolCallSuccessFromResult(input.resultText);
   return {
     toolName: input.toolName,
     timestamp: input.timestamp ?? Date.now(),
+    ...(success === undefined ? {} : { success }),
     ...callSummary,
   };
 }
@@ -86,22 +88,48 @@ function parseLeadingJsonObject(text: string): Record<string, unknown> | null {
   return null;
 }
 
+function collectToolResultCandidates(resultText: string): string[] {
+  const candidates = [resultText];
+  const collect = (value: unknown, depth: number): void => {
+    if (depth > 3 || value == null) return;
+    if (typeof value === 'string') {
+      candidates.push(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(entry => collect(entry, depth + 1));
+      return;
+    }
+    if (typeof value !== 'object') return;
+    const record = value as Record<string, unknown>;
+    if (typeof record.text === 'string') candidates.push(record.text);
+    if (typeof record.output === 'string') candidates.push(record.output);
+    collect(record.content, depth + 1);
+    collect(record.result, depth + 1);
+  };
+
+  try {
+    collect(JSON.parse(resultText), 0);
+  } catch {
+    // A tool result may append a reasoning nudge after its leading JSON object.
+  }
+  return [...new Set(candidates)];
+}
+
+export function extractToolCallSuccessFromResult(resultText?: string): boolean | undefined {
+  if (!resultText) return undefined;
+  for (const candidate of collectToolResultCandidates(resultText)) {
+    const parsed = parseLeadingJsonObject(candidate.trim());
+    if (!parsed) continue;
+    if (typeof parsed.success === 'boolean') return parsed.success;
+    if (parsed.isError === true) return false;
+  }
+  return undefined;
+}
+
 export function extractPlanPhaseIdFromToolResult(resultText?: string): string | undefined {
   if (!resultText) return undefined;
-  const candidates: string[] = [resultText];
-  try {
-    const parsed = JSON.parse(resultText);
-    const entries = Array.isArray(parsed) ? parsed : [parsed];
-    for (const entry of entries) {
-      if (entry && typeof entry === 'object' && typeof (entry as any).text === 'string') {
-        candidates.push((entry as any).text);
-      }
-    }
-  } catch {
-    // Fall through to leading-object parsing below.
-  }
-
-  for (const candidate of candidates) {
+  for (const candidate of collectToolResultCandidates(resultText)) {
     const trimmed = candidate.trim();
     const parsed = parseLeadingJsonObject(trimmed);
     const planPhaseId = parsed?.planPhaseId;

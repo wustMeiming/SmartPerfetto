@@ -61,7 +61,8 @@
               "atrace-slice", "atrace-counter", "atrace-async-slice", "atrace-async-track-slice",
               "sched-running", "process-stats", "battery-counters", "power-rail",
               "gpu-work-period", "gpu-frequency", "gpu-power-state", "cpu-frequency", "cpu-idle",
-              "irq-span", "frame-timeline", "lmk-kill"
+              "irq-span", "frame-timeline", "lmk-kill", "managed-heap-graph",
+              "gpu-compute-kernel"
             ]
           },
           "at_ns": {"type": "string", "pattern": "^[0-9]+$"},
@@ -102,8 +103,106 @@
           "start_energy_uws": {"type": "string", "pattern": "^[0-9]+$"},
           "end_energy_uws": {"type": "string", "pattern": "^[0-9]+$"},
           "active_duration_ns": {"type": "string", "pattern": "^[0-9]+$"},
-          "end_state": {"enum": ["R", "S", "D"]}
-        }
+          "end_state": {"enum": ["R", "S", "D"]},
+          "heap_bytes_allocated": {"type": "string", "pattern": "^[0-9]+$"},
+          "types": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "class_name", "object_size"],
+              "properties": {
+                "id": {"type": "integer", "minimum": 1},
+                "class_name": {"type": "string", "minLength": 1},
+                "object_size": {"type": "integer", "minimum": 0}
+              }
+            }
+          },
+          "objects": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 10000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "type_id", "self_size", "reference_object_ids"],
+              "properties": {
+                "id": {"type": "integer", "minimum": 1},
+                "type_id": {"type": "integer", "minimum": 1},
+                "self_size": {"type": "integer", "minimum": 0},
+                "reference_object_ids": {
+                  "type": "array",
+                  "items": {"type": "integer", "minimum": 1}
+                }
+              }
+            }
+          },
+          "roots": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["root_type", "object_ids"],
+              "properties": {
+                "root_type": {
+                  "enum": [
+                    "ROOT_UNKNOWN", "ROOT_JNI_GLOBAL", "ROOT_JNI_LOCAL", "ROOT_JAVA_FRAME",
+                    "ROOT_NATIVE_STACK", "ROOT_STICKY_CLASS", "ROOT_THREAD_BLOCK", "ROOT_MONITOR_USED",
+                    "ROOT_THREAD_OBJECT", "ROOT_INTERNED_STRING", "ROOT_FINALIZING", "ROOT_DEBUGGER",
+                    "ROOT_REFERENCE_CLEANUP", "ROOT_VM_INTERNAL", "ROOT_JNI_MONITOR"
+                  ]
+                },
+                "object_ids": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {"type": "integer", "minimum": 1}
+                }
+              }
+            }
+          },
+          "context": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+          "kernel": {"type": "string", "minLength": 1},
+          "demangled_kernel": {"type": "string", "minLength": 1},
+          "arch": {"type": "string", "minLength": 1},
+          "grid": {"$ref": "#/$defs/computeDimensions"},
+          "workgroup": {"$ref": "#/$defs/computeDimensions"},
+          "args": {
+            "type": "object",
+            "maxProperties": 64,
+            "additionalProperties": {"type": "integer", "minimum": 0}
+          }
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"type": {"const": "managed-heap-graph"}}},
+            "then": {"required": ["process", "heap_bytes_allocated", "types", "objects", "roots"]}
+          },
+          {
+            "if": {"properties": {"type": {"const": "gpu-compute-kernel"}}},
+            "then": {
+              "required": [
+                "process", "duration_ns", "gpu_id", "context", "kernel",
+                "demangled_kernel", "arch", "grid", "workgroup", "args"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "computeDimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "y": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "z": {"type": "integer", "minimum": 1, "maximum": 4294967295}
       }
     }
   }

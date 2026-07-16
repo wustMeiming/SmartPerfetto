@@ -36,6 +36,48 @@ const SENSITIVE_FIELDS: (keyof ProviderConfig['connection'])[] = [
   'awsSecretAccessKey',
   'awsSessionToken',
 ];
+const ENDPOINT_FIELDS: (keyof ProviderConfig['connection'])[] = [
+  'baseUrl',
+  'claudeBaseUrl',
+  'openaiBaseUrl',
+];
+const NETWORK_CREDENTIAL_FIELDS: (keyof ProviderConfig['connection'])[] = [
+  'apiKey',
+  'claudeApiKey',
+  'claudeAuthToken',
+  'openaiApiKey',
+  'awsBearerToken',
+  'awsAccessKeyId',
+  'awsSecretAccessKey',
+  'awsSessionToken',
+];
+
+const ALLOWED_CUSTOM_ENV_OVERRIDES = new Set([
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_BEDROCK_BASE_URL',
+  'ANTHROPIC_VERTEX_PROJECT_ID',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AWS_REGION',
+  'AWS_DEFAULT_REGION',
+  'AWS_PROFILE',
+  'AWS_BEARER_TOKEN_BEDROCK',
+  'CLOUD_ML_REGION',
+  'OPENAI_API_KEY',
+  'OPENAI_BASE_URL',
+  'OPENAI_AGENTS_PROTOCOL',
+]);
+
+function assertSafeCustomEnvOverrides(custom: ProviderConfig['custom']): void {
+  for (const key of Object.keys(custom?.envOverrides ?? {})) {
+    if (!ALLOWED_CUSTOM_ENV_OVERRIDES.has(key)) {
+      throw new Error(`Custom provider env override is not allowed: ${key}`);
+    }
+  }
+}
 
 function maskValue(value: string): string {
   if (value.length <= 8) return '****';
@@ -82,6 +124,44 @@ function maskProvider(p: ProviderConfig): ProviderConfig {
   };
 }
 
+function endpointOrigin(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return `invalid:${value.trim()}`;
+  }
+}
+
+function connectionEndpointOriginChanged(
+  existing: ProviderConfig['connection'],
+  input: Partial<ProviderConfig['connection']>,
+): boolean {
+  return ENDPOINT_FIELDS.some(field => {
+    const next = input[field];
+    return next !== undefined
+      && !String(next).startsWith('****')
+      && endpointOrigin(existing[field]) !== endpointOrigin(next);
+  });
+}
+
+function assertCredentialsReconfirmedForEndpointChange(
+  existing: ProviderConfig['connection'],
+  input: Partial<ProviderConfig['connection']>,
+): void {
+  if (!connectionEndpointOriginChanged(existing, input)) return;
+  for (const field of NETWORK_CREDENTIAL_FIELDS) {
+    if (!existing[field]) continue;
+    const replacement = input[field];
+    if (replacement === undefined || String(replacement).startsWith('****')) {
+      throw new Error(
+        `Provider endpoint origin changed; re-enter or clear credential field '${field}'`,
+      );
+    }
+  }
+}
+
 export class ProviderService {
   private store: ProviderStore;
 
@@ -123,6 +203,7 @@ export class ProviderService {
       throw new Error('models.primary and models.light are required');
     }
     this.assertRuntimeSupported(input.type, input.connection.agentRuntime);
+    assertSafeCustomEnvOverrides(input.custom);
 
     const now = new Date().toISOString();
     const provider: ProviderConfig = {
@@ -155,6 +236,7 @@ export class ProviderService {
     if (input.name !== undefined) updated.name = input.name.trim();
     if (input.models) updated.models = { ...existing.models, ...input.models };
     if (input.connection) {
+      assertCredentialsReconfirmedForEndpointChange(existing.connection, input.connection);
       const merged = { ...existing.connection };
       for (const [key, val] of Object.entries(input.connection)) {
         if (val !== undefined && !String(val).startsWith('****')) {
@@ -167,7 +249,10 @@ export class ProviderService {
       updated.connection = merged;
     }
     if (input.tuning !== undefined) updated.tuning = input.tuning ?? undefined;
-    if (input.custom !== undefined) updated.custom = input.custom ?? undefined;
+    if (input.custom !== undefined) {
+      assertSafeCustomEnvOverrides(input.custom ?? undefined);
+      updated.custom = input.custom ?? undefined;
+    }
 
     this.store.set(updated, scope);
     return updated;

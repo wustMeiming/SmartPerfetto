@@ -373,6 +373,9 @@ function shortToolName(toolName: string): string {
 
 const INFORMATIONAL_TOOL_NAMES = new Set([
   'lookup_strategy_detail',
+  // Persists reasoning across turns; it does not collect trace evidence and
+  // cannot stand in for producing the final report.
+  'write_analysis_note',
 ]);
 
 export function isInformationalToolName(toolName: string): boolean {
@@ -395,6 +398,7 @@ export function formatExpectedCall(call: ExpectedCall): string {
 }
 
 export function expectedCallMatchesRecord(call: ExpectedCall, record: ToolCallRecord): boolean {
+  if (record.success === false) return false;
   const shortTool = shortToolName(record.toolName);
   if (!isEvidenceCapableToolName(call.tool) || !isEvidenceCapableToolName(shortTool)) return false;
   if (shortToolName(call.tool) !== shortTool) return false;
@@ -407,6 +411,7 @@ export function phaseMatchesExpectedCall(phase: PlanPhase, record: ToolCallRecor
 }
 
 export function phaseMatchesCall(phase: PlanPhase, record: ToolCallRecord): boolean {
+  if (record.success === false) return false;
   const shortTool = shortToolName(record.toolName);
   if (!isEvidenceCapableToolName(shortTool)) return false;
   const expectedToolSet = new Set(phase.expectedTools.map(shortToolName));
@@ -442,6 +447,8 @@ export function expectedToolNames(phase: PlanPhase): string[] {
 export interface ToolCallRecord {
   toolName: string;
   timestamp: number;
+  /** Explicit execution outcome when the runtime result exposed one. Failed calls remain auditable but never satisfy evidence gates. */
+  success?: boolean;
   /** Phase ID this tool call was matched to (if any) */
   matchedPhaseId?: string;
   /**

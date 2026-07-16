@@ -56,6 +56,12 @@ export function bootstrap(options: BootstrapOptions = {}): BootstrapResult {
     // Keep helper services that read SMARTPERFETTO_HOME directly (for example
     // the CLI-managed trace_processor_shell cache) aligned with --session-dir.
     process.env.SMARTPERFETTO_HOME = paths.home;
+    if (!process.env.SMARTPERFETTO_BACKEND_DATA_DIR?.trim()) {
+      process.env.SMARTPERFETTO_BACKEND_DATA_DIR = path.join(paths.home, 'runtime', 'data');
+    }
+    if (!process.env.SMARTPERFETTO_BACKEND_LOG_DIR?.trim()) {
+      process.env.SMARTPERFETTO_BACKEND_LOG_DIR = path.join(paths.home, 'runtime', 'logs');
+    }
     // Keep CLI trace copies inside the same user-selected home. The web server
     // keeps its historical ./uploads/traces default because it does not call
     // this bootstrap path.

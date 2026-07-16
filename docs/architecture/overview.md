@@ -109,6 +109,10 @@ CLI `smp run` / `smp ask` / `smp compare` 复用同一 session、runtime、Skill
 provider 的 tool result；运行时桥接到 SSE、日志、报告或 snapshot 时统一投影为
 chunk 引用/哈希/许可/出处。Wiki 背景不能被 claim verifier 当作当前 trace 的测量值。
 
+源码与外部知识的选择、授权指纹、非恢复策略和删除生命周期见
+[私有分析上下文架构](private-analysis-context.md)。该边界同时覆盖普通分析、Smart
+Profile 深度分析、Web UI、CLI 和四个 runtime adapter。
+
 ## Runtime 与 Provider 边界
 
 | Runtime | Provider | 关键边界 |

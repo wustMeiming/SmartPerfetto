@@ -13,6 +13,21 @@ COPY backend/ ./
 COPY backend/data/perfettoSqlIndex.light.json backend/data/perfettoSqlIndex.json backend/data/perfettoStdlibSymbols.json ./data/
 RUN npm run build
 
+# Pin the runtime OpenCode executable independently of the builder CPU. The
+# upstream postinstall selects AVX2 from /proc/cpuinfo; copying that selection
+# into an amd64 image would make the image fail on baseline x86_64 hosts.
+RUN set -eux; \
+    ARCH="$(uname -m)"; \
+    case "$ARCH" in \
+      x86_64) OPENCODE_SOURCE="node_modules/opencode-linux-x64-baseline/bin/opencode" ;; \
+      aarch64) OPENCODE_SOURCE="node_modules/opencode-linux-arm64/bin/opencode" ;; \
+      *) echo "Unsupported OpenCode architecture: $ARCH" >&2; exit 1 ;; \
+    esac; \
+    test -s "$OPENCODE_SOURCE"; \
+    cp "$OPENCODE_SOURCE" node_modules/opencode-ai/bin/opencode.exe; \
+    chmod +x node_modules/opencode-ai/bin/opencode.exe; \
+    node_modules/opencode-ai/bin/opencode.exe --version
+
 # Remove devDependencies to drastically reduce the final image size
 RUN npm prune --production
 
@@ -100,6 +115,8 @@ COPY --from=flamegraph-analyzer-builder /app/rust/flamegraph-analyzer/target/rel
 # Copy backend runtime files (skills, strategies, SQL packages, templates)
 COPY backend/skills ./backend/skills
 COPY backend/strategies ./backend/strategies
+COPY backend/knowledge ./backend/knowledge
+COPY backend/public ./backend/public
 # SmartPerfetto PerfettoSQL package (Spark Plan 03). Loader resolves from
 # `dist/services/../../sql/smartperfetto`, which lands on this path.
 COPY backend/sql ./backend/sql
@@ -109,7 +126,7 @@ COPY backend/sql ./backend/sql
 COPY --from=frontend-prebuild-check /app/frontend ./perfetto/out/ui/ui
 
 # Create required directories and fix ownership for non-root user
-RUN mkdir -p backend/uploads backend/logs/sessions backend/data backend/provider-data && \
+RUN mkdir -p backend/uploads backend/logs/sessions backend/data backend/provider-data backend/runtime-data && \
     chown -R node:node /app
 
 # Environment defaults
@@ -118,6 +135,7 @@ ENV SMARTPERFETTO_FRONTEND_PORT=10000
 ENV NODE_ENV=production
 ENV FRONTEND_URL=http://localhost:10000
 ENV PROVIDER_DATA_DIR_OVERRIDE=/app/backend/provider-data
+ENV SMARTPERFETTO_BACKEND_DATA_DIR=/app/backend/runtime-data
 
 EXPOSE 3000 10000
 

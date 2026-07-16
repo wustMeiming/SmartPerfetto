@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2024-2026 Gracker (Chris)
+// This file is part of SmartPerfetto. See LICENSE for details.
+
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {join, resolve} from 'node:path';
+import test from 'node:test';
+
+const root = resolve(import.meta.dirname, '../..');
+
+test('Docker carries static backend surfaces and a host-independent OpenCode binary', () => {
+  const dockerfile = readFileSync(join(root, 'Dockerfile'), 'utf8');
+  assert.match(dockerfile, /COPY backend\/public \.\/backend\/public/);
+  assert.match(dockerfile, /COPY backend\/knowledge \.\/backend\/knowledge/);
+  assert.match(dockerfile, /opencode-linux-x64-baseline\/bin\/opencode/);
+  assert.match(dockerfile, /opencode-linux-arm64\/bin\/opencode/);
+  assert.match(dockerfile, /opencode\.exe --version/);
+});
+
+test('npm and portable artifacts verify the same backend runtime surfaces', () => {
+  const backendPackage = JSON.parse(readFileSync(join(root, 'backend/package.json'), 'utf8'));
+  assert.ok(backendPackage.files.includes('public/**/*'));
+  assert.ok(backendPackage.files.includes('knowledge/**/*'));
+
+  const cliPackCheck = readFileSync(join(root, 'backend/scripts/check-cli-pack.cjs'), 'utf8');
+  const portableVerifier = readFileSync(join(root, 'scripts/verify-portable-package.cjs'), 'utf8');
+  for (const asset of [
+    'public/assistant-shell/index.html',
+    'public/admin-control-plane/index.html',
+    'knowledge/android-internals-capability-map.yaml',
+  ]) {
+    assert.match(cliPackCheck, new RegExp(asset.replaceAll('/', '\\/')));
+    assert.match(portableVerifier, new RegExp(asset.replaceAll('/', '\\/')));
+  }
+  assert.equal(
+    portableVerifier.match(/node_modules\/opencode-ai\/bin\/opencode\.exe/g)?.length,
+    6,
+  );
+});
+
+test('Docker CI smokes both static routes and the packaged OpenCode executable', () => {
+  const workflow = readFileSync(
+    join(root, '.github/workflows/backend-agent-regression-gate.yml'),
+    'utf8',
+  );
+  assert.match(workflow, /curl -fsS http:\/\/127\.0\.0\.1:3000\/assistant-shell/);
+  assert.match(workflow, /curl -fsS http:\/\/127\.0\.0\.1:3000\/admin-control-plane/);
+  assert.match(workflow, /opencode-ai\/bin\/opencode\.exe --version/);
+});

@@ -117,6 +117,73 @@ describe('agentRoutes case evolution capture seam', () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
+  it('freezes turn provenance before asynchronous trace hashing completes', async () => {
+    let resolveHash!: (hash: string) => void;
+    const hashReady = new Promise<string>(resolve => {
+      resolveHash = resolve;
+    });
+    const originalEnvelope = {
+      schemaVersion: 'data-envelope@1',
+      data: {columns: ['value'], rows: [['original-turn']]},
+      meta: {skillId: 'scrolling_analysis', stepId: 'original-turn'},
+    };
+    const session = {
+      runtimeKind: 'openai-agents-sdk',
+      activeRun: {sequence: 4},
+      dataEnvelopes: [originalEnvelope],
+      orchestrator: {
+        getCachedArchitecture: jest.fn(() => ({type: 'android-original'})),
+      },
+    };
+    const saveCandidates = jest.fn<(input: any) => Promise<{captured: number}>>(
+      async () => ({captured: 1}),
+    );
+    const capture = captureCaseCandidatesAfterQualityArtifacts({
+      sessionId: 'session-race',
+      traceId: 'trace-race',
+      session: session as any,
+      result: {
+        sessionId: 'session-race',
+        success: true,
+        findings: [],
+        hypotheses: [],
+        conclusion: 'Verified conclusion',
+        confidence: 0.91,
+        rounds: 2,
+        totalDurationMs: 100,
+      } as any,
+      sceneIdHint: 'scrolling',
+      runIdForAnalysis: 'run-race',
+      caseEvolutionConfig: {captureEnabled: true} as any,
+      computeTraceHash: jest.fn(() => hashReady),
+      saveCandidates,
+      logger: {info: jest.fn(), warn: jest.fn()} as any,
+    });
+
+    session.activeRun.sequence = 5;
+    originalEnvelope.data.rows[0][0] = 'mutated-next-turn';
+    session.dataEnvelopes = [{
+      ...originalEnvelope,
+      meta: {...originalEnvelope.meta, stepId: 'next-turn'},
+    }];
+    session.orchestrator.getCachedArchitecture.mockReturnValue({type: 'android-next'});
+    resolveHash('trace-hash-race');
+    await capture;
+
+    expect(saveCandidates).toHaveBeenCalledWith(expect.objectContaining({
+      dataEnvelopes: [expect.objectContaining({
+        data: {columns: ['value'], rows: [['original-turn']]},
+        meta: expect.objectContaining({stepId: 'original-turn'}),
+      })],
+      architectureType: 'android-original',
+      provenance: expect.objectContaining({
+        turnIndex: 4,
+        engine: 'openai',
+        traceContentHash: 'trace-hash-race',
+      }),
+    }));
+  });
+
   it('does not touch trace hashing or persistence when capture is disabled', async () => {
     const computeTraceHash = jest.fn<(traceId: string) => Promise<string>>(
       async () => {
@@ -160,6 +227,38 @@ describe('agentRoutes case evolution capture seam', () => {
     expect(computeTraceHash).not.toHaveBeenCalled();
     expect(saveCandidates).not.toHaveBeenCalled();
     expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('does not hash or persist candidates from private source or RAG runs', async () => {
+    const computeTraceHash = jest.fn(async () => 'must-not-be-used');
+    const saveCandidates = jest.fn(async () => ({captured: 1}));
+    const logger = {info: jest.fn(), warn: jest.fn()};
+
+    await captureCaseCandidatesAfterQualityArtifacts({
+      sessionId: 'private-session',
+      traceId: 'trace-private',
+      session: {
+        codeAwareMode: 'provider_send',
+        codebaseIds: ['app-source'],
+        knowledgeSourceIds: ['wiki'],
+        dataEnvelopes: [],
+        orchestrator: {},
+      } as any,
+      result: {confidence: 0.99, rounds: 3} as any,
+      runIdForAnalysis: 'private-run',
+      caseEvolutionConfig: {captureEnabled: true} as any,
+      computeTraceHash,
+      saveCandidates,
+      logger: logger as any,
+    });
+
+    expect(computeTraceHash).not.toHaveBeenCalled();
+    expect(saveCandidates).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      'CaseEvolution',
+      'Skipping candidate capture for private source or knowledge analysis',
+      expect.objectContaining({sessionId: 'private-session'}),
+    );
   });
 
   it('swallows capture failures so terminal completion can continue', async () => {
@@ -279,6 +378,7 @@ describe('agentRoutes case candidate feedback seam', () => {
       receivedAt: 2000,
       outbox,
       library,
+      knowledgeScope: {tenantId: 'tenant-a', workspaceId: 'workspace-a'},
       recordFeedback,
     });
 
@@ -291,6 +391,7 @@ describe('agentRoutes case candidate feedback seam', () => {
       receivedAt: 2000,
       outbox,
       library,
+      knowledgeScope: {tenantId: 'tenant-a', workspaceId: 'workspace-a'},
     }));
   });
 });

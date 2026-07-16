@@ -22,7 +22,7 @@ import {
   loadSelectionTemplate,
   renderTemplate,
 } from './strategyLoader';
-import { DEFAULT_OUTPUT_LANGUAGE, type OutputLanguage } from './outputLanguage';
+import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from './outputLanguage';
 import {
   QUICK_TRIAGE_MAX_CHINESE_CHARS,
   QUICK_TRIAGE_MAX_CLAIMS,
@@ -241,56 +241,93 @@ export function buildSelectionContextSection(sel: SelectionContext): string {
  * Build comparison context section for dual-trace analysis.
  * Injected into system prompt when comparison mode is active (orthogonal to scene type).
  */
-function buildComparisonContextSection(ctx: ComparisonContext, currentPackageName?: string): string {
-  const template = loadPromptTemplate('comparison-context');
-  const currentTraceLabel = comparisonTraceDisplayLabel(ctx, 'current');
-  const referenceTraceLabel = comparisonTraceDisplayLabel(ctx, 'reference');
+function buildComparisonContextSection(
+  ctx: ComparisonContext,
+  currentPackageName: string | undefined,
+  outputLanguage: OutputLanguage,
+): string {
+  const template = loadPromptTemplate(
+    outputLanguage === 'en' ? 'comparison-context-en' : 'comparison-context',
+  );
+  const currentTraceLabel = comparisonTraceDisplayLabel(ctx, 'current', outputLanguage);
+  const referenceTraceLabel = comparisonTraceDisplayLabel(ctx, 'reference', outputLanguage);
   const vars = {
     currentTraceLabel,
     referenceTraceLabel,
-    currentPackageName: currentPackageName || '未知包名',
-    referencePackageName: ctx.referencePackageName || '未知包名',
-    tracePairMapping: buildTracePairMappingSection(ctx),
-    packageAlignment: buildPackageAlignmentSection(ctx, currentPackageName),
-    referenceArchitecture: buildReferenceArchitectureSection(ctx),
-    capabilityAlignment: buildCapabilityAlignmentSection(ctx),
+    currentPackageName: currentPackageName || localize(outputLanguage, '未知包名', 'unknown package'),
+    referencePackageName: ctx.referencePackageName || localize(outputLanguage, '未知包名', 'unknown package'),
+    tracePairMapping: buildTracePairMappingSection(ctx, outputLanguage),
+    packageAlignment: buildPackageAlignmentSection(ctx, currentPackageName, outputLanguage),
+    referenceArchitecture: buildReferenceArchitectureSection(ctx, outputLanguage),
+    capabilityAlignment: buildCapabilityAlignmentSection(ctx, outputLanguage),
   };
   return template ? renderTemplate(template, vars) : '';
 }
 
-function comparisonTraceDisplayLabel(ctx: ComparisonContext, traceSide: TraceSource): string {
+function comparisonTraceDisplayLabel(
+  ctx: ComparisonContext,
+  traceSide: TraceSource,
+  outputLanguage: OutputLanguage,
+): string {
   const pane = ctx.tracePairContext?.panes.find(item => item.traceSide === traceSide);
-  const role = traceSide === 'current' ? '当前 Trace' : '参考 Trace';
-  return pane ? `${tracePaneSideLabel(pane.side)}/${role}` : role;
+  const role = traceSide === 'current'
+    ? localize(outputLanguage, '当前 Trace', 'Current trace')
+    : localize(outputLanguage, '参考 Trace', 'Reference trace');
+  return pane ? `${tracePaneSideLabel(pane.side, outputLanguage)}/${role}` : role;
 }
 
-function buildTracePairMappingSection(ctx: ComparisonContext): string {
+function buildTracePairMappingSection(
+  ctx: ComparisonContext,
+  outputLanguage: OutputLanguage,
+): string {
   const pair = ctx.tracePairContext;
   if (!pair) return '';
   const lines = [
-    '### 窗口映射',
-    `- 布局: ${pair.layout === 'vertical' ? '上下' : '左右'}`,
+    localize(outputLanguage, '### 窗口映射', '### Pane mapping'),
+    localize(
+      outputLanguage,
+      `- 布局: ${pair.layout === 'vertical' ? '上下' : '左右'}`,
+      `- Layout: ${pair.layout === 'vertical' ? 'top/bottom' : 'left/right'}`,
+    ),
   ];
   if (pair.workspaceOpen !== undefined) {
-    lines.push(`- 同页双窗: ${pair.workspaceOpen ? '已打开' : '未打开'}`);
+    lines.push(localize(
+      outputLanguage,
+      `- 同页双窗: ${pair.workspaceOpen ? '已打开' : '未打开'}`,
+      `- Same-page dual panes: ${pair.workspaceOpen ? 'open' : 'not open'}`,
+    ));
   }
   if (pair.splitPercent !== undefined) {
-    lines.push(`- 分割比例: 主窗口 ${pair.splitPercent}%`);
+    lines.push(localize(
+      outputLanguage,
+      `- 分割比例: 主窗口 ${pair.splitPercent}%`,
+      `- Split ratio: primary pane ${pair.splitPercent}%`,
+    ));
   }
   if (pair.maximizedTraceSide) {
-    lines.push(`- 最大化: ${pair.maximizedTraceSide === 'current' ? '当前 Trace' : '参考 Trace'}`);
+    lines.push(localize(
+      outputLanguage,
+      `- 最大化: ${pair.maximizedTraceSide === 'current' ? '当前 Trace' : '参考 Trace'}`,
+      `- Maximized: ${pair.maximizedTraceSide === 'current' ? 'current trace' : 'reference trace'}`,
+    ));
   }
   if (pair.minimizedTraceSides && pair.minimizedTraceSides.length > 0) {
     const minimized = pair.minimizedTraceSides
-      .map(traceSide => traceSide === 'current' ? '当前 Trace' : '参考 Trace')
-      .join('、');
-    lines.push(`- 最小化: ${minimized}`);
+      .map(traceSide => traceSide === 'current'
+        ? localize(outputLanguage, '当前 Trace', 'current trace')
+        : localize(outputLanguage, '参考 Trace', 'reference trace'))
+      .join(localize(outputLanguage, '、', ', '));
+    lines.push(localize(outputLanguage, `- 最小化: ${minimized}`, `- Minimized: ${minimized}`));
   }
   for (const pane of pair.panes) {
-    const role = pane.traceSide === 'current' ? '当前 Trace' : '参考 Trace';
-    const active = pane.active ? '，当前焦点' : '';
-    const visualState = pane.visualState === 'context_only' ? '，后端上下文' : '，可视窗口';
-    lines.push(`- ${tracePaneSideLabel(pane.side)}: ${role}${pane.traceName ? ` (${pane.traceName})` : ''}${active}${visualState}`);
+    const role = pane.traceSide === 'current'
+      ? localize(outputLanguage, '当前 Trace', 'Current trace')
+      : localize(outputLanguage, '参考 Trace', 'Reference trace');
+    const active = pane.active ? localize(outputLanguage, '，当前焦点', ', active') : '';
+    const visualState = pane.visualState === 'context_only'
+      ? localize(outputLanguage, '，后端上下文', ', backend context')
+      : localize(outputLanguage, '，可视窗口', ', visible pane');
+    lines.push(`- ${tracePaneSideLabel(pane.side, outputLanguage)}: ${role}${pane.traceName ? ` (${pane.traceName})` : ''}${active}${visualState}`);
   }
   if (pair.aliases) {
     const currentAliases = Object.entries(pair.aliases)
@@ -302,42 +339,87 @@ function buildTracePairMappingSection(ctx: ComparisonContext): string {
       .map(([alias]) => alias)
       .slice(0, 8);
     if (currentAliases.length > 0 || referenceAliases.length > 0) {
-      lines.push(`- 指代别名: 当前 Trace=${currentAliases.join('/') || '无'}；参考 Trace=${referenceAliases.join('/') || '无'}`);
+      lines.push(localize(
+        outputLanguage,
+        `- 指代别名: 当前 Trace=${currentAliases.join('/') || '无'}；参考 Trace=${referenceAliases.join('/') || '无'}`,
+        `- Trace aliases: current=${currentAliases.join('/') || 'none'}; reference=${referenceAliases.join('/') || 'none'}`,
+      ));
     }
   }
   return `\n\n${lines.join('\n')}`;
 }
 
-function buildPackageAlignmentSection(ctx: ComparisonContext, currentPackageName?: string): string {
+function buildPackageAlignmentSection(
+  ctx: ComparisonContext,
+  currentPackageName: string | undefined,
+  outputLanguage: OutputLanguage,
+): string {
   if (!currentPackageName || !ctx.referencePackageName) return '';
   if (currentPackageName === ctx.referencePackageName) {
-    return `\n- **包名对齐**: 相同 (${currentPackageName})`;
+    return localize(
+      outputLanguage,
+      `\n- **包名对齐**: 相同 (${currentPackageName})`,
+      `\n- **Package alignment**: same (${currentPackageName})`,
+    );
   }
-  return [
+  const zh = [
     `\n- **包名对齐**: 不同，当前=${currentPackageName}, 参考=${ctx.referencePackageName}`,
     '- 注意：对比不同应用的 Trace 时，部分指标可能不具可比性',
   ].join('\n');
+  const en = [
+    `\n- **Package alignment**: different, current=${currentPackageName}, reference=${ctx.referencePackageName}`,
+    '- Caution: some metrics are not comparable across traces from different applications',
+  ].join('\n');
+  return localize(outputLanguage, zh, en);
 }
 
-function buildReferenceArchitectureSection(ctx: ComparisonContext): string {
+function buildReferenceArchitectureSection(
+  ctx: ComparisonContext,
+  outputLanguage: OutputLanguage,
+): string {
   return ctx.referenceArchitecture
-    ? `\n- **参考 Trace 架构**: ${ctx.referenceArchitecture.type}`
+    ? localize(
+        outputLanguage,
+        `\n- **参考 Trace 架构**: ${ctx.referenceArchitecture.type}`,
+        `\n- **Reference trace architecture**: ${ctx.referenceArchitecture.type}`,
+      )
     : '';
 }
 
-function buildCapabilityAlignmentSection(ctx: ComparisonContext): string {
-  if (ctx.commonCapabilities.length === 0) return '';
+function buildCapabilityAlignmentSection(
+  ctx: ComparisonContext,
+  outputLanguage: OutputLanguage,
+): string {
+  if (ctx.commonCapabilities.length === 0 && !ctx.capabilityDiff) return '';
   const lines = [
     '',
-    '### 能力对齐',
-    `- **共有表/视图**: ${ctx.commonCapabilities.length} 个，可安全对比`,
+    localize(outputLanguage, '### 能力对齐', '### Capability alignment'),
+    ctx.commonCapabilities.length > 0
+      ? localize(
+          outputLanguage,
+          `- **共有表/视图**: ${ctx.commonCapabilities.length} 个，可安全对比`,
+          `- **Shared tables/views**: ${ctx.commonCapabilities.length}; safe to compare`,
+        )
+      : localize(
+          outputLanguage,
+          '- **共有表/视图**: 0 个，不可直接对比',
+          '- **Shared tables/views**: 0; do not compare directly',
+        ),
   ];
   if (ctx.capabilityDiff) {
     if (ctx.capabilityDiff.currentOnly.length > 0) {
-      lines.push(`- **仅当前 Trace 有**: ${summarizeCapabilityList(ctx.capabilityDiff.currentOnly)}`);
+      lines.push(localize(
+        outputLanguage,
+        `- **仅当前 Trace 有**: ${summarizeCapabilityList(ctx.capabilityDiff.currentOnly)}`,
+        `- **Current trace only**: ${summarizeCapabilityList(ctx.capabilityDiff.currentOnly)}`,
+      ));
     }
     if (ctx.capabilityDiff.referenceOnly.length > 0) {
-      lines.push(`- **仅参考 Trace 有**: ${summarizeCapabilityList(ctx.capabilityDiff.referenceOnly)}`);
+      lines.push(localize(
+        outputLanguage,
+        `- **仅参考 Trace 有**: ${summarizeCapabilityList(ctx.capabilityDiff.referenceOnly)}`,
+        `- **Reference trace only**: ${summarizeCapabilityList(ctx.capabilityDiff.referenceOnly)}`,
+      ));
     }
   }
   return lines.join('\n');
@@ -349,16 +431,16 @@ function summarizeCapabilityList(capabilities: string[]): string {
 }
 
 
-function tracePaneSideLabel(side: TracePaneSide): string {
+function tracePaneSideLabel(side: TracePaneSide, outputLanguage: OutputLanguage): string {
   switch (side) {
     case 'left':
-      return '左侧';
+      return localize(outputLanguage, '左侧', 'Left');
     case 'right':
-      return '右侧';
+      return localize(outputLanguage, '右侧', 'Right');
     case 'top':
-      return '上方';
+      return localize(outputLanguage, '上方', 'Top');
     case 'bottom':
-      return '下方';
+      return localize(outputLanguage, '下方', 'Bottom');
   }
 }
 
@@ -582,6 +664,15 @@ export function buildSystemPromptParts(
   const outputFormat = loadPromptTemplate('prompt-output-format');
   if (outputFormat) push(1, 'output_format', outputFormat);
 
+  // Retrieval tools are available even without a private codebase selection
+  // (for example public AOSP/blog knowledge), so this boundary must always be
+  // present and must never be dropped by prompt-budget truncation.
+  const retrievedContextSafety = loadPromptTemplate('retrieved-context-safety');
+  if (!retrievedContextSafety) {
+    throw new Error('Missing required retrieved-context-safety prompt template');
+  }
+  push(1, 'retrieved_context_safety', retrievedContextSafety);
+
   // ── Tier 2: PER-TRACE STABLE ─────────────────────────────────────────────
   if (context.architecture) {
     push(2, 'architecture', buildArchitectureSection(context.architecture, context.packageName, true));
@@ -689,7 +780,13 @@ export function buildSystemPromptParts(
   }
 
   if (context.comparison) {
-    push(4, 'comparison_context', buildComparisonContextSection(context.comparison, context.packageName), false, { truncatable: true });
+    push(
+      4,
+      'comparison_context',
+      buildComparisonContextSection(context.comparison, context.packageName, outputLanguage),
+      false,
+      {truncatable: true},
+    );
     const compMethodology = loadPromptTemplate('comparison-methodology');
     if (compMethodology) push(4, 'comparison_methodology', compMethodology, false, { truncatable: true });
   }

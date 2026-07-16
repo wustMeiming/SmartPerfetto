@@ -232,12 +232,11 @@ router.post('/:id/test', async (req, res) => {
   res.json({ success: true, result });
 });
 
-function maskEnvKeys(env: Record<string, string>): Record<string, string> {
+export function maskEnvKeys(env: Record<string, string>): Record<string, string> {
   const masked: Record<string, string> = {};
-  const sensitivePatterns = ['KEY', 'TOKEN', 'SECRET', 'MODEL_JSON'];
   for (const [k, v] of Object.entries(env)) {
-    if (sensitivePatterns.some(p => k.includes(p)) && v.length > 8) {
-      masked[k] = `****${v.slice(-4)}`;
+    if (/(?:key|token|secret|password|credential|authorization|cookie|model_json)/i.test(k)) {
+      masked[k] = '****';
     } else {
       masked[k] = v;
     }

@@ -111,6 +111,11 @@ runtime bridges project it to chunk references, hashes, licenses, and attributio
 before SSE, logs, reports, or snapshots. The claim verifier must not treat Wiki
 background as a measurement from the current trace.
 
+See [Private Analysis Context Architecture](private-analysis-context.en.md) for
+source/external-knowledge selection, authorization fingerprints, non-resume
+semantics, and deletion lifecycle. The boundary applies to regular analysis,
+Smart Profile deep dives, Web UI, CLI, and all four runtime adapters.
+
 ## Runtime And Provider Boundaries
 
 | Runtime | Providers | Key boundary |

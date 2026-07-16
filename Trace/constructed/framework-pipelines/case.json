@@ -93,7 +93,7 @@
         "id": "execute-ams_module",
         "type": "skill",
         "target": "ams_module",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/modules/framework/ams_module.skill.yaml",
         "parameters": {},
         "required_steps": [
@@ -106,7 +106,7 @@
         "id": "execute-art_module",
         "type": "skill",
         "target": "art_module",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/modules/framework/art_module.skill.yaml",
         "parameters": {
           "package": "com.smartperfetto.fixture"
@@ -121,7 +121,7 @@
         "id": "execute-code_pinpoint",
         "type": "skill",
         "target": "code_pinpoint",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/composite/code_pinpoint.skill.yaml",
         "parameters": {},
         "required_steps": [
@@ -134,7 +134,7 @@
         "id": "execute-compose_recomposition_hotspot",
         "type": "skill",
         "target": "compose_recomposition_hotspot",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/compose_recomposition_hotspot.skill.yaml",
         "parameters": {},
         "required_steps": [
@@ -148,7 +148,7 @@
         "id": "execute-pipeline_4feature_scoring",
         "type": "skill",
         "target": "pipeline_4feature_scoring",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/pipeline_4feature_scoring.skill.yaml",
         "parameters": {},
         "required_steps": [
@@ -257,7 +257,7 @@
         "id": "execute-pipeline_key_slices_overlay",
         "type": "skill",
         "target": "pipeline_key_slices_overlay",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/pipeline_key_slices_overlay.skill.yaml",
         "parameters": {
           "slice_names": "'Choreographer#doFrame','DrawFrame','queueBuffer','latchBuffer'"
@@ -360,7 +360,7 @@
         "id": "execute-systemui_module",
         "type": "skill",
         "target": "systemui_module",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/modules/app/systemui_module.skill.yaml",
         "parameters": {},
         "required_steps": [
@@ -373,7 +373,7 @@
         "id": "execute-third_party_module",
         "type": "skill",
         "target": "third_party_module",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/modules/app/third_party_module.skill.yaml",
         "parameters": {
           "package": "com.smartperfetto.fixture"
@@ -388,7 +388,7 @@
         "id": "execute-wms_module",
         "type": "skill",
         "target": "wms_module",
-        "mode": "semantic",
+        "mode": "execution",
         "source_file": "backend/skills/modules/framework/wms_module.skill.yaml",
         "parameters": {},
         "required_steps": [

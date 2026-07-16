@@ -19,6 +19,8 @@ export interface HeapPathClusterOptions {
   maxK?: number;
   maxIterations?: number;
   collapseTolerancePct?: number;
+  /** Eligible trace denominator, including valid traces with zero heap rows. */
+  traceUniverseSize?: number;
 }
 
 interface ResolvedOptions {
@@ -28,6 +30,7 @@ interface ResolvedOptions {
   maxK: number;
   maxIterations: number;
   collapseTolerancePct: number;
+  traceUniverseSize?: number;
 }
 
 interface NormalizedRow extends HeapPathClusterInputRow {
@@ -45,10 +48,30 @@ const DEFAULT_OPTIONS: ResolvedOptions = {
   maxRows: 5000,
   maxVocabulary: 10000,
   maxMatrixCells: 1_000_000,
-  maxK: 20,
-  maxIterations: 100,
+  maxK: 12,
+  maxIterations: 50,
   collapseTolerancePct: 5,
 };
+const ABSOLUTE_MAX_INPUT_ROWS = 20_000;
+const ABSOLUTE_MAX_CLUSTER_ROWS = 10_000;
+const ABSOLUTE_MAX_K = 16;
+const ABSOLUTE_MAX_ITERATIONS = 100;
+const K_SELECTION_SAMPLE_SIZE = 512;
+const K_SELECTION_RESTARTS = 2;
+const FINAL_CLUSTER_RESTARTS = 2;
+const K_SELECTION_WORK_UNITS = 3_000_000;
+const FINAL_CLUSTER_WORK_UNITS = 5_000_000;
+const SILHOUETTE_EVALUATION_SAMPLES = 256;
+const SILHOUETTE_CLUSTER_SAMPLES = 64;
+const MAX_HEAP_PATH_CHARS = 4096;
+const MAX_HEAP_PATH_SEGMENTS = 64;
+const MAX_HEAP_PATH_SEGMENT_CHARS = 256;
+const MAX_TRACE_ID_CHARS = 256;
+const MAX_SAMPLE_TS_CHARS = 128;
+const MAX_PROCESS_NAME_CHARS = 256;
+const MAX_CLASS_NAME_CHARS = 256;
+const MAX_ROOT_TYPE_CHARS = 128;
+const MAX_EVIDENCE_REF_CHARS = 512;
 
 function sha256(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex');
@@ -62,32 +85,73 @@ function resolvePositiveInteger(name: keyof HeapPathClusterOptions, value: numbe
   return resolved;
 }
 
+function resolveNonNegativeInteger(name: keyof HeapPathClusterOptions, value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`invalid_heap_path_cluster_option:${name}`);
+  }
+  return value;
+}
+
 function resolveOptions(options: HeapPathClusterOptions): ResolvedOptions {
   const collapseTolerancePct = options.collapseTolerancePct ?? DEFAULT_OPTIONS.collapseTolerancePct;
   if (!Number.isFinite(collapseTolerancePct) || collapseTolerancePct < 0 || collapseTolerancePct > 100) {
     throw new Error('invalid_heap_path_cluster_option:collapseTolerancePct');
   }
   return {
-    maxRows: resolvePositiveInteger('maxRows', options.maxRows, DEFAULT_OPTIONS.maxRows),
+    maxRows: Math.min(
+      resolvePositiveInteger('maxRows', options.maxRows, DEFAULT_OPTIONS.maxRows),
+      ABSOLUTE_MAX_CLUSTER_ROWS,
+    ),
     maxVocabulary: resolvePositiveInteger('maxVocabulary', options.maxVocabulary, DEFAULT_OPTIONS.maxVocabulary),
     maxMatrixCells: resolvePositiveInteger('maxMatrixCells', options.maxMatrixCells, DEFAULT_OPTIONS.maxMatrixCells),
-    maxK: resolvePositiveInteger('maxK', options.maxK, DEFAULT_OPTIONS.maxK),
-    maxIterations: resolvePositiveInteger('maxIterations', options.maxIterations, DEFAULT_OPTIONS.maxIterations),
+    maxK: Math.min(resolvePositiveInteger('maxK', options.maxK, DEFAULT_OPTIONS.maxK), ABSOLUTE_MAX_K),
+    maxIterations: Math.min(
+      resolvePositiveInteger('maxIterations', options.maxIterations, DEFAULT_OPTIONS.maxIterations),
+      ABSOLUTE_MAX_ITERATIONS,
+    ),
     collapseTolerancePct,
+    ...(options.traceUniverseSize !== undefined
+      ? {traceUniverseSize: resolveNonNegativeInteger('traceUniverseSize', options.traceUniverseSize)}
+      : {}),
   };
 }
 
 export function normalizeHeapPath(path: string): string {
+  if (typeof path !== 'string' || path.length > MAX_HEAP_PATH_CHARS) return '';
   const withoutRoot = path.trim().replace(/^\[ROOT(?:_[A-Z0-9_]+)?\]\s*/i, '');
-  return withoutRoot
-    .split('->')
+  const segments = withoutRoot.split('->');
+  if (
+    segments.length > MAX_HEAP_PATH_SEGMENTS
+    || segments.some(segment => segment.length > MAX_HEAP_PATH_SEGMENT_CHARS)
+  ) return '';
+  return segments
     .map(segment => segment.trim().replace(/\s+\[\d+\]$/u, '').trim())
     .filter(Boolean)
     .join(' -> ');
 }
 
+function hasOversizedRowField(row: HeapPathClusterInputRow): boolean {
+  const boundedStrings: Array<[unknown, number]> = [
+    [row.traceId, MAX_TRACE_ID_CHARS],
+    [row.sampleTs, MAX_SAMPLE_TS_CHARS],
+    [row.processName, MAX_PROCESS_NAME_CHARS],
+    [row.className, MAX_CLASS_NAME_CHARS],
+    [row.rootType, MAX_ROOT_TYPE_CHARS],
+    [row.evidenceRefId, MAX_EVIDENCE_REF_CHARS],
+  ];
+  if (boundedStrings.some(([value, limit]) => typeof value === 'string' && value.length > limit)) {
+    return true;
+  }
+  if (typeof row.path !== 'string') return false;
+  if (row.path.length > MAX_HEAP_PATH_CHARS) return true;
+  const segments = row.path.split('->');
+  return segments.length > MAX_HEAP_PATH_SEGMENTS
+    || segments.some(segment => segment.length > MAX_HEAP_PATH_SEGMENT_CHARS);
+}
+
 function isValidRow(row: HeapPathClusterInputRow): boolean {
-  return Number.isSafeInteger(row.traceOrdinal)
+  return !hasOversizedRowField(row)
+    && Number.isSafeInteger(row.traceOrdinal)
     && row.traceOrdinal >= 0
     && typeof row.traceId === 'string'
     && row.traceId.length > 0
@@ -121,19 +185,32 @@ function compareRows(a: NormalizedRow, b: NormalizedRow): number {
 }
 
 function canonicalSeed(rows: NormalizedRow[]): string {
-  return sha256(JSON.stringify(rows.map(row => [
-    row.traceOrdinal,
-    row.traceId,
-    row.upid,
-    row.sampleTs,
-    row.processName,
-    row.normalizedPath,
-    row.className,
-    row.rootType,
-    row.selfSizeBytes,
-    row.retainedSizeBytes,
-    row.evidenceRefId,
-  ])));
+  const hash = crypto.createHash('sha256');
+  hash.update('[');
+  rows.forEach((row, rowIndex) => {
+    if (rowIndex > 0) hash.update(',');
+    hash.update('[');
+    const fields: Array<string | number> = [
+      row.traceOrdinal,
+      row.traceId,
+      row.upid,
+      row.sampleTs,
+      row.processName,
+      row.normalizedPath,
+      row.className,
+      row.rootType,
+      row.selfSizeBytes,
+      row.retainedSizeBytes,
+      row.evidenceRefId,
+    ];
+    fields.forEach((field, fieldIndex) => {
+      if (fieldIndex > 0) hash.update(',');
+      hash.update(JSON.stringify(field));
+    });
+    hash.update(']');
+  });
+  hash.update(']');
+  return hash.digest('hex');
 }
 
 function sampleKey(row: HeapPathClusterInputRow): string {
@@ -312,8 +389,14 @@ function partitionKey(labels: number[]): string {
   return [...members.values()].map(indexes => indexes.join(',')).sort().join('|');
 }
 
-function runBestKMeans(vectors: SparseVector[], k: number, seedHash: string, maxIterations: number): KMeansResult {
-  const candidates = Array.from({length: 4}, (_, initialization) =>
+function runBestKMeans(
+  vectors: SparseVector[],
+  k: number,
+  seedHash: string,
+  maxIterations: number,
+  restarts: number,
+): KMeansResult {
+  const candidates = Array.from({length: restarts}, (_, initialization) =>
     runKMeans(vectors, k, `${seedHash}:init:${initialization}`, maxIterations));
   return candidates.sort((a, b) =>
     kMeansInertia(vectors, a) - kMeansInertia(vectors, b)
@@ -334,18 +417,36 @@ function silhouetteScore(vectors: SparseVector[], labels: number[]): number | nu
   const clusters = [...membersByCluster.keys()].sort((a, b) => a - b);
   if (clusters.length < 2 || clusters.length >= vectors.length) return null;
   if (clusters.some(cluster => (membersByCluster.get(cluster)?.length ?? 0) < 2)) return null;
-  return mean(vectors.map((vector, index) => {
+  const sampledIndexes = evenlySampleIndexes(vectors.length, SILHOUETTE_EVALUATION_SAMPLES);
+  return mean(sampledIndexes.map(index => {
+    const vector = vectors[index];
     const own = labels[index];
-    const ownIndexes = (membersByCluster.get(own) ?? []).filter(candidate => candidate !== index);
+    const ownIndexes = evenlySampleValues(
+      (membersByCluster.get(own) ?? []).filter(candidate => candidate !== index),
+      SILHOUETTE_CLUSTER_SAMPLES,
+    );
     if (ownIndexes.length === 0) return 0;
     const within = mean(ownIndexes.map(candidate => distance(vector, vectors[candidate])));
     const nearestOther = Math.min(...clusters
       .filter(cluster => cluster !== own)
-      .map(cluster => mean((membersByCluster.get(cluster) ?? [])
+      .map(cluster => mean(evenlySampleValues(
+        membersByCluster.get(cluster) ?? [],
+        SILHOUETTE_CLUSTER_SAMPLES,
+      )
         .map(candidate => distance(vector, vectors[candidate])))));
     const denominator = Math.max(within, nearestOther);
     return denominator === 0 ? 0 : (nearestOther - within) / denominator;
   }));
+}
+
+function evenlySampleIndexes(length: number, limit: number): number[] {
+  if (length <= limit) return Array.from({length}, (_, index) => index);
+  return Array.from({length: limit}, (_, index) =>
+    Math.floor((index * (length - 1)) / (limit - 1)));
+}
+
+function evenlySampleValues<T>(values: readonly T[], limit: number): T[] {
+  return evenlySampleIndexes(values.length, limit).map(index => values[index]);
 }
 
 function vectorKey(vector: SparseVector): string {
@@ -373,13 +474,18 @@ function collapsedPaths(rows: NormalizedRow[], tolerancePct: number): string[] {
   }
   const paths = [...sizesByPath.keys()].sort();
   const collapsed = new Set<string>();
-  for (const parent of paths) {
-    for (const child of paths) {
-      if (!pathIsStrictPrefix(parent, child)) continue;
+  for (const child of paths) {
+    const childParts = child.split(' -> ');
+    for (let prefixLength = 1; prefixLength < childParts.length; prefixLength += 1) {
+      const parent = childParts.slice(0, prefixLength).join(' -> ');
+      if (!sizesByPath.has(parent) || !pathIsStrictPrefix(parent, child)) continue;
       const parentSize = mean(sizesByPath.get(parent) ?? []);
       const childSize = mean(sizesByPath.get(child) ?? []);
       const denominator = Math.max(parentSize, childSize, 1);
-      if (Math.abs(parentSize - childSize) * 100 / denominator <= tolerancePct) collapsed.add(child);
+      if (Math.abs(parentSize - childSize) * 100 / denominator <= tolerancePct) {
+        collapsed.add(child);
+        break;
+      }
     }
   }
   return [...collapsed].sort();
@@ -413,7 +519,7 @@ function summarizeCluster(
     traceCount: traces.size,
     sampleCount: new Set(rows.map(sampleKey)).size,
     rowCount: rows.length,
-    traceSupportPct: traceTotal === 0 ? 0 : Math.round((traces.size * 10000) / traceTotal) / 100,
+    traceSupportPct: traceTotal === 0 ? 0 : Math.round((traces.size * 100000) / traceTotal) / 1000,
     meanRetainedBytes: Math.round(mean(retainedSizes)),
     p95RetainedBytes: percentile95(retainedSizes),
     collapsedPaths: collapsedPaths(rows, tolerancePct),
@@ -435,7 +541,10 @@ function baseResult(
     seedHash,
     collapseTolerancePct: options.collapseTolerancePct,
     input: {
-      traceCount: new Set(rows.map(row => row.traceId)).size,
+      traceCount: Math.max(
+        new Set(rows.map(row => row.traceId)).size,
+        options.traceUniverseSize ?? 0,
+      ),
       sampleCount: new Set(rows.map(sampleKey)).size,
       rowCount: rows.length,
       rejectedRowCount,
@@ -453,16 +562,22 @@ export function clusterHeapPaths(
   const options = resolveOptions(inputOptions);
   const failures = [...inputFailures].sort((a, b) =>
     a.traceOrdinal - b.traceOrdinal || (a.traceId ?? '').localeCompare(b.traceId ?? '') || a.reason.localeCompare(b.reason));
-  const rejectedRowCount = inputRows.filter(row => !isValidRow(row)).length;
-  const allValidRows = inputRows
+  const boundedInputRows = inputRows.slice(0, ABSOLUTE_MAX_INPUT_ROWS);
+  const oversizedRowCount = boundedInputRows.filter(hasOversizedRowField).length;
+  const rejectedRowCount = boundedInputRows.filter(row => !isValidRow(row)).length;
+  const allValidRows = boundedInputRows
     .filter(isValidRow)
     .map(row => ({...row, normalizedPath: normalizeHeapPath(row.path)}))
     .sort(compareRows);
   const limitations: string[] = [];
+  if (boundedInputRows.length < inputRows.length) {
+    limitations.push(`absolute_input_row_limit_applied:${boundedInputRows.length}/${inputRows.length}`);
+  }
   const effectiveRowLimit = Math.min(options.maxRows, options.maxMatrixCells);
   const rows = allValidRows.slice(0, effectiveRowLimit);
   if (rows.length < allValidRows.length) limitations.push(`row_limit_applied:${rows.length}/${allValidRows.length}`);
   if (rejectedRowCount > 0) limitations.push(`rejected_rows:${rejectedRowCount}`);
+  if (oversizedRowCount > 0) limitations.push(`oversized_rows:${oversizedRowCount}`);
   const seedHash = canonicalSeed(rows);
   const base = baseResult(rows, failures, rejectedRowCount, seedHash, options, limitations);
 
@@ -474,6 +589,9 @@ export function clusterHeapPaths(
   }
 
   const vectors = buildVectors(rows, options, limitations);
+  if (vectors.length > SILHOUETTE_EVALUATION_SAMPLES) {
+    limitations.push(`silhouette_sampled:${SILHOUETTE_EVALUATION_SAMPLES}/${vectors.length}`);
+  }
   const uniqueVectorCount = new Set(vectors.map(vectorKey)).size;
   if (uniqueVectorCount === 1) {
     limitations.push('degenerate_vectors');
@@ -486,15 +604,33 @@ export function clusterHeapPaths(
     };
   }
 
-  const maxK = Math.min(options.maxK, rows.length - 1, uniqueVectorCount);
-  let selected: {k: number; score: number; labels: number[]} | null = null;
+  const selectionVectors = evenlySampleValues(vectors, K_SELECTION_SAMPLE_SIZE);
+  if (selectionVectors.length < vectors.length) {
+    limitations.push(`k_selection_sampled:${selectionVectors.length}/${vectors.length}`);
+  }
+  const selectionUniqueVectorCount = new Set(selectionVectors.map(vectorKey)).size;
+  const maxK = Math.min(options.maxK, selectionVectors.length - 1, selectionUniqueVectorCount);
+  let selectionWorkUnits = 0;
+  let selected: {k: number; score: number} | null = null;
   for (let k = 2; k <= maxK; k += 1) {
-    const candidate = runBestKMeans(vectors, k, `${seedHash}:${k}`, options.maxIterations);
+    const candidateWorkUnits = selectionVectors.length * k * options.maxIterations * K_SELECTION_RESTARTS;
+    if (selectionWorkUnits + candidateWorkUnits > K_SELECTION_WORK_UNITS) {
+      limitations.push(`k_selection_work_budget_applied:${selectionWorkUnits}/${K_SELECTION_WORK_UNITS}`);
+      break;
+    }
+    selectionWorkUnits += candidateWorkUnits;
+    const candidate = runBestKMeans(
+      selectionVectors,
+      k,
+      `${seedHash}:selection:${k}`,
+      options.maxIterations,
+      K_SELECTION_RESTARTS,
+    );
     if (new Set(candidate.labels).size !== k) continue;
-    const score = silhouetteScore(vectors, candidate.labels);
+    const score = silhouetteScore(selectionVectors, candidate.labels);
     if (score === null) continue;
     if (!selected || score > selected.score + 1e-12 || (Math.abs(score - selected.score) <= 1e-12 && k < selected.k)) {
-      selected = {k, score, labels: candidate.labels};
+      selected = {k, score};
     }
   }
   if (!selected) {
@@ -508,9 +644,27 @@ export function clusterHeapPaths(
     };
   }
 
-  const clusters = [...new Set(selected.labels)]
+  const finalIterations = Math.max(1, Math.min(
+    options.maxIterations,
+    Math.floor(FINAL_CLUSTER_WORK_UNITS / Math.max(1, vectors.length * selected.k * FINAL_CLUSTER_RESTARTS)),
+  ));
+  if (finalIterations < options.maxIterations) {
+    limitations.push(`final_cluster_work_budget_applied:${finalIterations}/${options.maxIterations}`);
+  }
+  const finalClustering = runBestKMeans(
+    vectors,
+    selected.k,
+    `${seedHash}:final:${selected.k}`,
+    finalIterations,
+    FINAL_CLUSTER_RESTARTS,
+  );
+  const realizedK = new Set(finalClustering.labels).size;
+  if (realizedK !== selected.k) limitations.push(`final_cluster_collapse:${realizedK}/${selected.k}`);
+  const finalScore = silhouetteScore(vectors, finalClustering.labels);
+
+  const clusters = [...new Set(finalClustering.labels)]
     .map(label => summarizeCluster(
-      rows.filter((_, index) => selected?.labels[index] === label),
+      rows.filter((_, index) => finalClustering.labels[index] === label),
       seedHash,
       base.input.traceCount,
       options.collapseTolerancePct,
@@ -523,8 +677,8 @@ export function clusterHeapPaths(
     status: failures.length > 0 || rejectedRowCount > 0 || rows.length < allValidRows.length || limitations.length > 0
       ? 'partial'
       : 'completed',
-    selectedK: selected.k,
-    silhouetteScore: Math.round(selected.score * 1_000_000) / 1_000_000,
+    selectedK: realizedK,
+    silhouetteScore: finalScore === null ? null : Math.round(finalScore * 1_000_000) / 1_000_000,
     clusters,
   };
 }

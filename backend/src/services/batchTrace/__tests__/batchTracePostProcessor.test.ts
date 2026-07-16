@@ -47,12 +47,12 @@ function envelope(rows: unknown[], columns: string[] = requiredColumns): DataEnv
   };
 }
 
-function values(path: string, retainedSizeBytes: number, upid = 1): unknown[] {
+function values(path: string, retainedSizeBytes: number, upid = 1, sampleTs = '10'): unknown[] {
   const segments = path.split(' -> ');
   return [
     upid,
     'app',
-    '10',
+    sampleTs,
     path,
     segments[segments.length - 1]?.replace(/ \[\d+\]$/, '') ?? 'Unknown',
     'ROOT_JNI_GLOBAL',
@@ -182,8 +182,8 @@ describe('batch trace post-processor registry', () => {
           traceIdentity: 'trace-b',
           status: 'completed',
           sourceEnvelope: envelope([
-            values('[ROOT] Root [1] -> BitmapCache [1]', 9000),
-            values('[ROOT] Root [1] -> BitmapCache [2]', 9200),
+            values('[ROOT] Root [1] -> BitmapCache [1]', 9000, 2, '20'),
+            values('[ROOT] Root [1] -> BitmapCache [2]', 9200, 2, '30'),
           ]),
         },
         {
@@ -191,7 +191,7 @@ describe('batch trace post-processor registry', () => {
           traceIdentity: 'trace-c',
           status: 'completed',
           sourceEnvelope: envelope([
-            values('[ROOT] Root [1] -> BitmapCache [3]', 9100),
+            values('[ROOT] Root [1] -> BitmapCache [3]', 9100, 3, '40'),
           ]),
         },
       ],
@@ -200,6 +200,65 @@ describe('batch trace post-processor registry', () => {
     expect(domain.result.status).toBe('partial');
     expect(domain.result.failures).toEqual(expect.arrayContaining([
       expect.objectContaining({traceOrdinal: 0, reason: 'malformed_source_rows:1'}),
+    ]));
+  });
+
+  it('includes completed zero-row traces but excludes failed traces from cluster support', () => {
+    const sharedRows = [
+      values('[ROOT] Root [1] -> SharedLeak [1]', 4000, 1, '10'),
+      values('[ROOT] Root [1] -> SharedLeak [2]', 4200, 1, '20'),
+      values('[ROOT] Root [1] -> SharedLeak [3]', 4100, 1, '30'),
+    ];
+    const domain = runBatchPostProcessor({
+      skillId: 'android_heap_dominator_path_extract',
+      config: config(),
+      traces: [
+        {ordinal: 0, traceIdentity: 'trace-a', status: 'completed', sourceEnvelope: envelope(sharedRows)},
+        {ordinal: 1, traceIdentity: 'trace-b', status: 'completed', sourceEnvelope: envelope(sharedRows)},
+        {ordinal: 2, traceIdentity: 'trace-zero', status: 'completed', sourceEnvelope: envelope([])},
+        {ordinal: 3, traceIdentity: 'trace-failed', status: 'failed', error: 'query failed'},
+      ],
+    });
+
+    expect(domain.result.input.traceCount).toBe(3);
+    expect(domain.result.clusters).toHaveLength(1);
+    expect(domain.result.clusters[0]).toMatchObject({
+      traceCount: 2,
+      traceSupportPct: 66.667,
+    });
+    expect(domain.result.failures).toContainEqual({
+      traceOrdinal: 3,
+      traceId: 'trace-failed',
+      reason: 'query failed',
+    });
+  });
+
+  it('excludes completed traces with invalid source-step contracts from support', () => {
+    const sharedRows = [
+      values('[ROOT] Root [1] -> SharedLeak [1]', 4000, 1, '10'),
+      values('[ROOT] Root [1] -> SharedLeak [2]', 4200, 1, '20'),
+      values('[ROOT] Root [1] -> SharedLeak [3]', 4100, 1, '30'),
+    ];
+    const domain = runBatchPostProcessor({
+      skillId: 'android_heap_dominator_path_extract',
+      config: config(),
+      traces: [
+        {ordinal: 0, traceIdentity: 'trace-valid', status: 'completed', sourceEnvelope: envelope(sharedRows)},
+        {ordinal: 1, traceIdentity: 'trace-missing-envelope', status: 'completed'},
+        {
+          ordinal: 2,
+          traceIdentity: 'trace-missing-column',
+          status: 'completed',
+          sourceEnvelope: envelope([], requiredColumns.filter(column => column !== 'path')),
+        },
+      ],
+    });
+
+    expect(domain.result.input.traceCount).toBe(1);
+    expect(domain.result.clusters[0]).toMatchObject({traceCount: 1, traceSupportPct: 100});
+    expect(domain.result.failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({traceOrdinal: 1, reason: 'source_step_missing:dominator_paths'}),
+      expect.objectContaining({traceOrdinal: 2, reason: 'missing_required_columns:path'}),
     ]));
   });
 

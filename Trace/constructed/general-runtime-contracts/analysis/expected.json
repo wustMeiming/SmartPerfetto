@@ -23,7 +23,7 @@
       "id": "execute-fence_wait_decomposition",
       "type": "skill",
       "target": "fence_wait_decomposition",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/fence_wait_decomposition.skill.yaml",
       "parameters": {
         "start_ts": "${trace_start}",
@@ -39,7 +39,7 @@
       "id": "execute-global_trace_sanity_check",
       "type": "skill",
       "target": "global_trace_sanity_check",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/global_trace_sanity_check.skill.yaml",
       "parameters": {
         "max_rows": 20

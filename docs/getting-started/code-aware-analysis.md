@@ -37,7 +37,19 @@ npm run cli -- run --format json \
   "结合源码定位启动慢原因"
 ```
 
-如果不传 `--code-aware` 或不传 `--codebase-id`，分析会按普通 trace-only 路径运行；已注册的 codebase 不会自动暴露给某个 session。`provider_send` 只在注册时带 `--send-to-provider` 且本次分析也选择 `--code-aware provider_send` 时允许发送片段。
+已注册的 codebase 或知识源不会自动暴露给 session。实际组合规则如下：
+
+| 本次选择 | 有效行为 |
+|---|---|
+| 不传任何 ID | 普通 trace-only；`fast` 可以保持轻量路径 |
+| 只传 `--codebase-id` | 默认 `metadata_only`，并切换到完整分析 runtime |
+| `--code-aware metadata_only` + codebase ID | 只使用 `CodeRef` 元数据，完整分析 runtime |
+| `--code-aware provider_send` + codebase ID | 仅双重授权通过时发送筛选后的片段，完整分析 runtime |
+| `--code-aware off` + codebase ID | 输入无效，直接拒绝，不静默忽略源码配置 |
+| 只传 `--knowledge-source-id` | 使用已授权的私有外部 RAG，完整分析 runtime |
+| codebase ID + knowledge source ID | 源码与外部 RAG 同时参与，同一隐私投影和完整分析 runtime |
+
+这里的“完整分析 runtime”意味着即使显式请求 `--analysis-mode fast`，只要选择了源码、私有 RAG 或 reference trace，系统也会解析为 `full`，避免在轻量路径里静默丢失能力。`provider_send` 需要两层授权：注册 codebase 时启用 `--send-to-provider`，且本次分析显式选择 `--code-aware provider_send`。
 
 ## 支持的代码库
 
@@ -52,8 +64,10 @@ npm run cli -- run --format json \
 
 - `metadata_only`：模型只看到 `CodeRef` 元数据，不看到源码片段。
 - `provider_send`：只有注册时同意 `sendToProvider` 的代码库才允许把筛选后的片段发给模型。
+- 私有源码/知识分析的原始 query、中间推理、工具参数和检索正文不写入 session、日志、报告或导出；Claude 本地 transcript 与 OpenAI Responses 存储会关闭，也不会读写跨会话 pattern、verifier 或 SQL 修复学习。最终结论与确定性 trace 证据会经过统一隐私投影；多轮连续性仅由当前进程内的受限会话上下文提供。
 - 旧 RAG chunk 不受 code-aware 规则破坏；`app_source`、`kernel_source` 或 `registryOrigin=codebase_registry` 的 chunk 缺少 codebase metadata 时会 fail-closed。
 - 旧 `/api/rag/chunks/:id` 和 `/api/rag/search` 对 code-aware chunk 返回 hash/长度等 sanitized 信息，不返回源码正文。
+- Web UI 的“删除源码库”会先撤销检索与 provider 授权，再清理当前 scope 内的全部索引代际；删除中断时可安全重试。已经发送给 provider 的历史内容无法由本地删除操作撤回。
 - Patch 只分三态：`verified`、`sketch`、`unverified`。`sketch` 和 `unverified` 不给 copyable diff。
 
 ## 验证

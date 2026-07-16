@@ -97,6 +97,34 @@ const displayLayers = extractConstArrayValues(backendContent, 'VALID_DISPLAY_LAY
 const displayLevels = extractConstArrayValues(backendContent, 'VALID_DISPLAY_LEVELS');
 const displayFormats = extractConstArrayValues(backendContent, 'VALID_DISPLAY_FORMATS');
 
+function extractAnalysisCompletedContract(content: string): string {
+  const startMarker = 'export interface AnalysisCompletedFinding {';
+  const endMarker = '/**\n * Union type for all SSE events';
+  const start = content.indexOf(startMarker);
+  const end = content.indexOf(endMarker, start);
+  if (start < 0 || end < 0) {
+    throw new Error('Unable to extract AnalysisCompletedEvent from backend data contract');
+  }
+  return content.slice(start, end)
+    .trim()
+    .replace("import('../agent/core/conclusionContract').ConclusionContract", 'ConclusionContract')
+    .replace("import('./evidenceContract').ClaimSupportV1", 'ClaimSupportV1')
+    .replace("import('./claimVerification').ClaimVerificationResult", 'ClaimVerificationResult')
+    .replace("import('./identityContract').IdentityResolutionV1", 'IdentityResolutionV1')
+    .replace("import('../agent/core/orchestratorTypes').QuickRunReceipt", 'QuickRunReceipt')
+    .replace("import('../agent/scene/types').SmartScenePreviewPayload", 'Record<string, unknown>')
+    .replace(
+      "import('../assistant/contracts/assistantResultContract').AssistantResultContract",
+      'Record<string, unknown>',
+    )
+    .replace(
+      /Omit<\s*import\('\.\.\/agentv3\/sessionStateSnapshot'\)\.ComparisonReportSection,\s*'html'\s*>\s*&\s*\{html\?: string\}/g,
+      'Record<string, unknown>',
+    );
+}
+
+const analysisCompletedFrontendContent = extractAnalysisCompletedContract(backendContent);
+
 // Build the frontend content
 const parts: string[] = [];
 
@@ -875,32 +903,7 @@ export type UiActionProposalV1 =
   | UiActionProposalBase<'open_evidence_table', UiOpenEvidenceTablePayload>
   | UiActionProposalBase<'pin_evidence', UiPinEvidencePayload>;
 
-export interface AnalysisCompletedEvent {
-  type: 'analysis_completed';
-  data: {
-    summary: string;
-    conclusion?: string;
-    conclusionContract?: ConclusionContract;
-    claimSupport?: ClaimSupportV1[];
-    claimVerificationResult?: ClaimVerificationResult;
-    identityResolutions?: IdentityResolutionV1[];
-    reportUrl?: string;
-    resultSnapshotId?: string;
-    confidence?: number;
-    rounds?: number;
-    totalDurationMs?: number;
-    partial?: boolean;
-    terminationReason?: string;
-    terminationMessage?: string;
-    quickRun?: QuickRunReceipt;
-    analysisReceipt?: AnalysisReceiptV1;
-    uiActionProposals?: UiActionProposalV1[];
-    terminalRunStatus?: 'completed' | 'quota_exceeded';
-    findings: DiagnosticFinding[];
-    suggestions: string[];
-  };
-  timestamp: number;
-}
+${analysisCompletedFrontendContent}
 
 /**
  * Union type for all SSE events

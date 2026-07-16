@@ -33,6 +33,8 @@ import {
 import { ClaudeRuntime } from '../../agentRuntime/engines/claude';
 import type { AnalysisOptions, AnalysisResult } from '../../agent/core/orchestratorTypes';
 import type { TracePairContext } from '../../agentv3/types';
+import * as defaultCodebaseServices from '../../services/codebase/defaultCodebaseServices';
+import * as externalKnowledgeServices from '../../services/externalKnowledgeSourceRegistry';
 import agentRoutes from '../agentRoutes';
 
 const originalApiKey = process.env.SMARTPERFETTO_API_KEY;
@@ -43,6 +45,8 @@ const originalEnterpriseDataDir = process.env[ENTERPRISE_DATA_DIR_ENV];
 const originalUploadDir = process.env.UPLOAD_DIR;
 const originalAgentRuntime = process.env.SMARTPERFETTO_AGENT_RUNTIME;
 const originalAiEnabled = process.env.SMARTPERFETTO_AI_ENABLED;
+const originalCodeAware = process.env.SMARTPERFETTO_CODE_AWARE;
+const originalOutputLanguage = process.env.SMARTPERFETTO_OUTPUT_LANGUAGE;
 
 type DeferredRuntime = {
   promise: Promise<unknown>;
@@ -192,10 +196,99 @@ afterEach(async () => {
   restoreEnvValue('UPLOAD_DIR', originalUploadDir);
   restoreEnvValue('SMARTPERFETTO_AGENT_RUNTIME', originalAgentRuntime);
   restoreEnvValue('SMARTPERFETTO_AI_ENABLED', originalAiEnabled);
+  restoreEnvValue('SMARTPERFETTO_CODE_AWARE', originalCodeAware);
+  restoreEnvValue('SMARTPERFETTO_OUTPUT_LANGUAGE', originalOutputLanguage);
   sessionContextManager.remove('session-resume-integration');
 });
 
 describe('agent route RBAC', () => {
+  it('rejects a selected codebase that has no active indexed generation', async () => {
+    delete process.env.SMARTPERFETTO_API_KEY;
+    delete process.env.SMARTPERFETTO_CODE_AWARE;
+    process.env.SMARTPERFETTO_OUTPUT_LANGUAGE = 'zh-CN';
+    process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
+    jest.spyOn(defaultCodebaseServices, 'getDefaultCodebaseRegistry').mockReturnValue({
+      get: jest.fn(() => ({
+        codebaseId: 'codebase-unindexed',
+        indexGeneration: 1,
+        chunkCount: 0,
+        consent: {sendToProvider: false, consentHash: 'consent'},
+      })),
+    } as any);
+    const traceService = {getOrLoadTrace: jest.fn()};
+    setTraceProcessorServiceForTests(traceService as any);
+
+    const res = await analystHeaders(request(makeApp()).post('/api/agent/v1/analyze'))
+      .set('X-SmartPerfetto-SSO-Scopes', 'trace:read,trace:write,agent:run,report:read,codebase:read')
+      .send({
+        traceId: 'trace-a',
+        query: 'analyze with source',
+        options: {
+          analysisMode: 'fast',
+          codeAwareMode: 'metadata_only',
+          codebaseIds: ['codebase-unindexed'],
+        },
+      });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual(expect.objectContaining({
+      success: false,
+      code: 'ANALYSIS_CONTEXT_CODEBASE_UNAVAILABLE',
+    }));
+    expect(res.body.error).toContain('活动索引代际');
+    expect(traceService.getOrLoadTrace).not.toHaveBeenCalled();
+
+    process.env.SMARTPERFETTO_OUTPUT_LANGUAGE = 'en';
+    const english = await analystHeaders(request(makeApp()).post('/api/agent/v1/analyze'))
+      .set('X-SmartPerfetto-SSO-Scopes', 'trace:read,trace:write,agent:run,report:read,codebase:read')
+      .send({
+        traceId: 'trace-a',
+        query: 'analyze with source',
+        options: {
+          codeAwareMode: 'metadata_only',
+          codebaseIds: ['codebase-unindexed'],
+        },
+      });
+    expect(english.status).toBe(409);
+    expect(english.body.error).toContain('active indexed source generation');
+  });
+
+  it('rejects an activated knowledge source whose generation contains no chunks', async () => {
+    delete process.env.SMARTPERFETTO_API_KEY;
+    process.env.SMARTPERFETTO_OUTPUT_LANGUAGE = 'en';
+    process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
+    jest.spyOn(externalKnowledgeServices, 'getDefaultExternalKnowledgeSourceRegistry')
+      .mockReturnValue({
+        get: jest.fn(() => ({
+          sourceId: 'wiki-empty',
+          indexGeneration: 2,
+          activeGeneration: 'knowledge_2_empty',
+          contentFingerprint: 'b'.repeat(64),
+          indexedChunkCount: 0,
+          rightsAcknowledged: true,
+          sendToProvider: true,
+        })),
+      } as any);
+    const traceService = {getOrLoadTrace: jest.fn()};
+    setTraceProcessorServiceForTests(traceService as any);
+
+    const res = await analystHeaders(request(makeApp()).post('/api/agent/v1/analyze'))
+      .set('X-SmartPerfetto-SSO-Scopes', 'trace:read,trace:write,agent:run,report:read,codebase:read')
+      .send({
+        traceId: 'trace-a',
+        query: 'analyze with private knowledge',
+        options: {knowledgeSourceIds: ['wiki-empty']},
+      });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual(expect.objectContaining({
+      success: false,
+      code: 'ANALYSIS_CONTEXT_SOURCE_UNAVAILABLE',
+    }));
+    expect(res.body.error).toContain('inactive or not consented');
+    expect(traceService.getOrLoadTrace).not.toHaveBeenCalled();
+  });
+
   it('rejects viewer analyze requests before trace access is evaluated', async () => {
     delete process.env.SMARTPERFETTO_API_KEY;
     process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
@@ -267,6 +360,68 @@ describe('agent route RBAC', () => {
       code: 'AI_DISABLED',
       feature: 'agent_analyze',
     });
+    expect(traceService.getOrLoadTrace).not.toHaveBeenCalled();
+  });
+
+  it('localizes Smart option validation before trace access', async () => {
+    delete process.env.SMARTPERFETTO_API_KEY;
+    process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
+    process.env.SMARTPERFETTO_AI_ENABLED = 'true';
+    process.env.SMARTPERFETTO_OUTPUT_LANGUAGE = 'zh-CN';
+    const traceService = {getOrLoadTrace: jest.fn()};
+    setTraceProcessorServiceForTests(traceService as unknown as TraceProcessorService);
+
+    const res = await analystHeaders(request(makeApp()).post('/api/agent/v1/analyze'))
+      .send({
+        traceId: 'trace-a',
+        referenceTraceId: 'trace-b',
+        query: 'Analyze this trace',
+        options: {
+          preset: 'smart',
+          outputLanguage: 'en',
+        },
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'SMART_COMPARISON_UNSUPPORTED',
+      error: 'Smart Analysis does not support dual-trace comparison yet',
+    });
+    expect(traceService.getOrLoadTrace).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'source mode',
+      {codeAwareMode: 'off', codebaseIds: ['source-a']},
+      'CODEBASE_IDS_REQUIRE_CODE_AWARE_MODE',
+      '选择源码库时，源码感知模式必须是 metadata_only 或 provider_send',
+    ],
+    [
+      'RAG allowlist',
+      {knowledgeSourceIds: Array.from({length: 33}, (_, index) => `wiki-${index}`)},
+      'ANALYSIS_SOURCE_ALLOWLIST_TOO_LARGE',
+      'knowledgeSourceIds 最多允许 32 个唯一 ID',
+    ],
+  ])('localizes %s validation in Chinese before trace access', async (
+    _label,
+    options,
+    code,
+    error,
+  ) => {
+    delete process.env.SMARTPERFETTO_API_KEY;
+    process.env.SMARTPERFETTO_SSO_TRUSTED_HEADERS = 'true';
+    process.env.SMARTPERFETTO_AI_ENABLED = 'true';
+    process.env.SMARTPERFETTO_OUTPUT_LANGUAGE = 'zh-CN';
+    const traceService = {getOrLoadTrace: jest.fn()};
+    setTraceProcessorServiceForTests(traceService as unknown as TraceProcessorService);
+
+    const res = await analystHeaders(request(makeApp()).post('/api/agent/v1/analyze'))
+      .send({traceId: 'trace-a', query: '分析性能', options});
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({success: false, code, error});
     expect(traceService.getOrLoadTrace).not.toHaveBeenCalled();
   });
 
@@ -1025,7 +1180,7 @@ describe('agent route RBAC', () => {
         .send({
           traceId,
           query: '设备型号是什么？',
-          options: { analysisMode: 'auto', maxRounds: 1 },
+          options: { analysisMode: 'auto' },
         });
 
       expect(analyzeRes.status).toBe(200);

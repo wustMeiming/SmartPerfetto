@@ -202,9 +202,14 @@ smp run trace.perfetto-trace \
 `metadata_only` exposes only `CodeRef` metadata to the model; raw source text is
 not persisted into sessions, reports, or exports. `provider_send` can send
 snippets only when the codebase was registered with `--send-to-provider` and the
-current analysis also uses `--code-aware provider_send`. If `--codebase-id` is
-omitted, the run stays on the trace-only path even when local codebases are
-registered. See [Code-Aware Analysis](../getting-started/code-aware-analysis.en.md).
+current analysis also uses `--code-aware provider_send`. Supplying only
+`--codebase-id` defaults to `metadata_only`; combining a codebase ID with
+`--code-aware off` is rejected. A run is trace-only only when no codebase or
+knowledge-source ID is selected. `--knowledge-source-id <id>` can enable an
+authorized private external RAG source alone or together with a codebase.
+Source, private RAG, and reference-trace selections resolve an explicit `fast`
+request to `full` so the lightweight runtime cannot silently drop capabilities.
+See [Code-Aware Analysis](../getting-started/code-aware-analysis.en.md).
 
 ## Trace Comparison
 

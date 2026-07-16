@@ -14,6 +14,10 @@ import {PathSecurityGate} from '../codebase/pathSecurityGate';
 import type {RagChunk} from '../../types/sparkContracts';
 import {RagStore} from '../ragStore';
 import {
+  resolveMaxSourceChunks,
+  SOURCE_INGEST_WRITE_BATCH_SIZE,
+} from '../rag/sourceFileSelection';
+import {
   inspectAndroidInternalsWikiIdentity,
   scanAndroidInternalsWiki,
   type AndroidInternalsWikiArticle,
@@ -96,24 +100,38 @@ export class AndroidInternalsWikiIngester {
     return this.gate.preview(rootPath);
   }
 
+  getSourceReadLimits(): Readonly<{maxFileBytes: number; maxTotalBytes: number}> {
+    return this.gate.getSourceReadLimits();
+  }
+
   async ingest(
     sourceId: string,
     scope: ExternalKnowledgeScope,
+    options: {maxChunks?: number} = {},
   ): Promise<AndroidInternalsWikiIngestResult> {
     return this.registry.withIngestLease(sourceId, scope, lease =>
-      this.ingestWithLease(sourceId, scope, lease));
+      this.ingestWithLease(sourceId, scope, lease, options));
   }
 
   private async ingestWithLease(
     sourceId: string,
     scope: ExternalKnowledgeScope,
     lease: ExternalKnowledgeIngestLeaseGuard,
+    options: {maxChunks?: number},
   ): Promise<AndroidInternalsWikiIngestResult> {
     const access = this.registry.evaluateAccess(sourceId, scope, [sourceId]);
     if (!access.allowed) throw new Error(access.reason);
     const preview = await this.gate.preview(access.source.rootRealpath);
     if (preview.blocked) throw new Error(preview.blockedReason ?? 'knowledge_root_blocked');
-    const corpus = scanAndroidInternalsWiki(preview.rootRealpath);
+    lease.assertHeld();
+    if (preview.rootRealpath !== access.source.rootRealpath) {
+      throw new Error('knowledge_root_realpath_drift');
+    }
+    const corpus = scanAndroidInternalsWiki(
+      preview.rootRealpath,
+      preview.acceptedFiles.map(file => file.relativePath),
+      this.gate.getSourceReadLimits(),
+    );
     const acceptedPaths = new Set(preview.acceptedFiles.map(file => file.relativePath.split('\\').join('/')));
     const blockedArticles = corpus.articles.filter(article => !acceptedPaths.has(article.relativePath));
     if (blockedArticles.length > 0) {
@@ -126,87 +144,104 @@ export class AndroidInternalsWikiIngester {
       .slice(0, 24)}`;
     const articles = retrievableArticles(corpus.articles);
     const indexedAt = Date.now();
-    const chunks: RagChunk[] = [];
-    for (const article of articles) {
-      const paragraphs = boundedParagraphs(article.body);
-      const articleVerifiedAt = verifiedAt(article.lastVerified);
-      paragraphs.forEach((snippet, index) => {
-        const chunkId = `wiki_${createHash('sha256')
-          .update(`${generation}\0${article.relativePath}\0${index}\0${snippet}`)
-          .digest('hex')}`;
-        chunks.push({
-          chunkId,
-          kind: 'android_internals_wiki',
-          registryOrigin: 'external_knowledge_registry',
-          knowledgeSourceId: sourceId,
-          sourceGeneration: generation,
-          uri: `android-internals-wiki://${sourceId}/${identity.revision}/${article.relativePath}#${index + 1}`,
-          title: article.title,
-          snippet,
-          indexedAt,
-          license: LICENSE,
-          attribution: ATTRIBUTION,
-          commitHash: identity.revision,
-          contentFingerprint: identity.contentFingerprint,
-          filePath: article.relativePath,
-          sourceStatus: article.status,
-          sourceConfidence: article.confidence,
-          lastVerifiedAgainst: article.lastVerifiedAgainst,
-          sourceTags: article.tags,
-          ...(articleVerifiedAt !== undefined ? {verifiedAt: articleVerifiedAt} : {}),
-        });
-      });
-    }
-    for (const chunk of chunks) this.store.addChunk(chunk, scope);
-    this.store.flush();
-    const stagedCount = this.store.listChunks({
-      kind: 'android_internals_wiki',
-      registryOrigin: 'external_knowledge_registry',
-      scope,
-    }).filter(chunk =>
-      chunk.knowledgeSourceId === sourceId && chunk.sourceGeneration === generation).length;
-    if (stagedCount !== chunks.length) {
-      throw new Error(`staged_chunk_count_mismatch:${stagedCount}:${chunks.length}`);
-    }
-    const cleanupChunkIds = this.store.listChunks({
-      kind: 'android_internals_wiki',
-      registryOrigin: 'external_knowledge_registry',
-      scope,
-    }).filter(chunk =>
-      chunk.knowledgeSourceId === sourceId && chunk.sourceGeneration !== generation)
-      .map(chunk => chunk.chunkId);
-    lease.activateGeneration({
-      generation,
-      revision: identity.revision,
-      contentFingerprint: identity.contentFingerprint,
-      dirty: identity.dirty,
-      indexedArticleCount: articles.length,
-      indexedChunkCount: chunks.length,
-    });
-    let cleanup: AndroidInternalsWikiIngestResult['cleanup'];
+    const maxChunks = resolveMaxSourceChunks(options.maxChunks);
+    const stagedChunkIds: string[] = [];
+    const stagedChunks: RagChunk[] = [];
+    let indexedChunkCount = 0;
+    const flushStagedChunks = (): void => {
+      if (stagedChunks.length === 0) return;
+      lease.assertHeld();
+      const batch = stagedChunks.splice(0, SOURCE_INGEST_WRITE_BATCH_SIZE);
+      this.store.addChunks(batch, scope);
+    };
     try {
-      cleanup = {
-        status: 'completed',
-        removedChunkCount: this.store.removeKnowledgeSourceChunkIds(
-          sourceId,
-          cleanupChunkIds,
-          scope,
-        ),
+      for (const article of articles) {
+        const paragraphs = boundedParagraphs(article.body);
+        const articleVerifiedAt = verifiedAt(article.lastVerified);
+        for (const [index, snippet] of paragraphs.entries()) {
+          if (indexedChunkCount >= maxChunks) {
+            throw new Error(`source_chunk_limit_exceeded:${maxChunks}`);
+          }
+          const chunkId = `wiki_${createHash('sha256')
+            .update(`${generation}\0${article.relativePath}\0${index}\0${snippet}`)
+            .digest('hex')}`;
+          stagedChunkIds.push(chunkId);
+          stagedChunks.push({
+            chunkId,
+            kind: 'android_internals_wiki',
+            registryOrigin: 'external_knowledge_registry',
+            knowledgeSourceId: sourceId,
+            sourceGeneration: generation,
+            uri: `android-internals-wiki://${sourceId}/${identity.revision}/${article.relativePath}#${index + 1}`,
+            title: article.title,
+            snippet,
+            indexedAt,
+            license: LICENSE,
+            attribution: ATTRIBUTION,
+            commitHash: identity.revision,
+            contentFingerprint: identity.contentFingerprint,
+            filePath: article.relativePath,
+            sourceStatus: article.status,
+            sourceConfidence: article.confidence,
+            lastVerifiedAgainst: article.lastVerifiedAgainst,
+            sourceTags: article.tags,
+            ...(articleVerifiedAt !== undefined ? {verifiedAt: articleVerifiedAt} : {}),
+          });
+          indexedChunkCount++;
+          if (stagedChunks.length >= SOURCE_INGEST_WRITE_BATCH_SIZE) flushStagedChunks();
+        }
+      }
+      if (articles.length === 0 || indexedChunkCount === 0) {
+        throw new Error('source_generation_empty');
+      }
+      while (stagedChunks.length > 0) flushStagedChunks();
+      this.store.flush();
+      lease.assertHeld();
+      const stagedCount = this.store.countKnowledgeSourceGenerationChunks(sourceId, generation, scope);
+      if (stagedCount !== indexedChunkCount) {
+        throw new Error(`staged_chunk_count_mismatch:${stagedCount}:${indexedChunkCount}`);
+      }
+      if (preview.rootRealpath !== access.source.rootRealpath) {
+        throw new Error('knowledge_root_realpath_drift');
+      }
+      lease.activateGeneration({
+        generation,
+        revision: identity.revision,
+        contentFingerprint: identity.contentFingerprint,
+        dirty: identity.dirty,
+        indexedArticleCount: articles.length,
+        indexedChunkCount,
+      });
+      let cleanup: AndroidInternalsWikiIngestResult['cleanup'];
+      try {
+        cleanup = {
+          status: 'completed',
+          removedChunkCount: this.store.removeInactiveKnowledgeSourceChunks(
+            sourceId,
+            generation,
+            scope,
+          ),
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[AndroidInternalsWikiIngester] Inactive generation cleanup failed: ${message}`);
+        cleanup = {status: 'failed', removedChunkCount: 0, error: message};
+      }
+      return {
+        sourceId,
+        generation,
+        revision: identity.revision,
+        contentFingerprint: identity.contentFingerprint,
+        dirtyAcceptedArticlePaths: identity.dirtyAcceptedArticlePaths,
+        indexedArticleCount: articles.length,
+        indexedChunkCount,
+        cleanup,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[AndroidInternalsWikiIngester] Inactive generation cleanup failed: ${message}`);
-      cleanup = {status: 'failed', removedChunkCount: 0, error: message};
+      if (stagedChunkIds.length > 0) {
+        this.store.removeKnowledgeSourceChunkIds(sourceId, stagedChunkIds, scope);
+      }
+      throw error;
     }
-    return {
-      sourceId,
-      generation,
-      revision: identity.revision,
-      contentFingerprint: identity.contentFingerprint,
-      dirtyAcceptedArticlePaths: identity.dirtyAcceptedArticlePaths,
-      indexedArticleCount: articles.length,
-      indexedChunkCount: chunks.length,
-      cleanup,
-    };
   }
 }

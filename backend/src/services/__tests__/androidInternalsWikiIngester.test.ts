@@ -150,26 +150,22 @@ describe('AndroidInternalsWikiIngester', () => {
       fs.readFileSync(handlerPath, 'utf8').replace('status: finalized', 'status: draft'),
       'utf8',
     );
-    const deactivated = await ingester.ingest(source.sourceId, scope);
-    const deactivatedSource = registry.get(source.sourceId, scope)!;
+    await expect(ingester.ingest(source.sourceId, scope))
+      .rejects.toThrow('source_generation_empty');
+    const retainedSource = registry.get(source.sourceId, scope)!;
 
-    expect(deactivated.generation).not.toBe(result.generation);
-    expect(deactivated.contentFingerprint).not.toBe(result.contentFingerprint);
-    expect(deactivated.indexedArticleCount).toBe(0);
-    expect(deactivated.cleanup.status).toBe('completed');
-    expect(deactivated.cleanup.removedChunkCount).toBeGreaterThan(0);
-    expect(deactivatedSource.activeGeneration).toBe(deactivated.generation);
+    expect(retainedSource.activeGeneration).toBe(result.generation);
     expect(store.listChunks({
       kind: 'android_internals_wiki',
       registryOrigin: 'external_knowledge_registry',
       scope,
-    })).toHaveLength(0);
+    }).filter(chunk => chunk.sourceGeneration === result.generation)).not.toHaveLength(0);
     expect(store.search('消息队列 Handler', {
       kinds: ['android_internals_wiki'],
       knowledgeSourceIds: [source.sourceId],
-      activeSourceGenerations: {[source.sourceId]: deactivatedSource.activeGeneration!},
+      activeSourceGenerations: {[source.sourceId]: retainedSource.activeGeneration!},
       scope,
-    }).results).toHaveLength(0);
+    }).results).toHaveLength(1);
   });
 
   it('keeps a newly activated generation when inactive cleanup fails', async () => {
@@ -197,7 +193,7 @@ describe('AndroidInternalsWikiIngester', () => {
       scope,
     });
     const store = new RagStore(path.join(tmpDir, 'rag-failure.json'));
-    jest.spyOn(store, 'removeKnowledgeSourceChunkIds').mockImplementation(() => {
+    jest.spyOn(store, 'removeInactiveKnowledgeSourceChunks').mockImplementation(() => {
       throw new Error('cleanup unavailable');
     });
     const warning = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -217,6 +213,43 @@ describe('AndroidInternalsWikiIngester', () => {
     expect(warning).toHaveBeenCalledWith(expect.stringContaining('cleanup unavailable'));
     warning.mockRestore();
     expect(registry.get(source.sourceId, scope)?.activeGeneration).toBe(result.generation);
+  });
+
+  it('rejects an oversized generation before activation', async () => {
+    const wikiRoot = path.join(tmpDir, 'wiki-chunk-limit');
+    writeArticle(wikiRoot, 'large.md', 'finalized', 'A'.repeat(4_000));
+    execFileSync('git', ['init', '-q', wikiRoot]);
+    execFileSync('git', ['-C', wikiRoot, 'config', 'user.email', 'test@example.com']);
+    execFileSync('git', ['-C', wikiRoot, 'config', 'user.name', 'Test']);
+    execFileSync('git', ['-C', wikiRoot, 'add', '.']);
+    execFileSync('git', ['-C', wikiRoot, 'commit', '-qm', 'fixture']);
+    const corpus = scanAndroidInternalsWiki(wikiRoot);
+    const scope = {tenantId: 'tenant-1', workspaceId: 'workspace-1', userId: 'user-1'};
+    const registry = new ExternalKnowledgeSourceRegistry(path.join(tmpDir, 'sources-limit.json'));
+    const source = registry.register({
+      kind: 'android_internals_wiki',
+      displayName: 'Android Internals Wiki',
+      rootRealpath: fs.realpathSync(wikiRoot),
+      revision: execFileSync('git', ['-C', wikiRoot, 'rev-parse', 'HEAD'], {encoding: 'utf8'}).trim(),
+      contentFingerprint: corpus.contentFingerprint,
+      dirty: false,
+      license: 'CC-BY-NC-SA-4.0',
+      rightsAcknowledged: true,
+      sendToProvider: true,
+      consentedBy: 'user-1',
+      scope,
+    });
+    const store = new RagStore(path.join(tmpDir, 'rag-limit.json'));
+    const ingester = new AndroidInternalsWikiIngester(
+      store,
+      registry,
+      new PathSecurityGate({allowlistRoots: [tmpDir], allowedExtensions: ['.md']}),
+    );
+
+    await expect(ingester.ingest(source.sourceId, scope, {maxChunks: 1}))
+      .rejects.toThrow('source_chunk_limit_exceeded:1');
+    expect(registry.get(source.sourceId, scope)?.activeGeneration).toBeUndefined();
+    expect(store.listChunks({scope})).toEqual([]);
   });
 
   it('rejects an interleaved reindex before it can delete the active generation', async () => {

@@ -43,6 +43,11 @@ import { extractFindingsFromText } from '../../../agentv3/claudeFindingExtractor
 import { detectFocusApps, focusAppTimeRangeFromSelection } from '../../../agentv3/focusAppDetector';
 import { classifyScene, type SceneType } from '../../../agentv3/sceneClassifier';
 import { getExtendedKnowledgeBase } from '../../../services/sqlKnowledgeBase';
+import {resolveEffectiveAnalysisMode} from '../../../services/effectiveAnalysisMode';
+import {
+  analysisContextMemoryPartitionKey,
+  analysisContextUsesPrivateKnowledge,
+} from '../../../services/resolvedAnalysisContext';
 import type {
   AnalysisNote,
   AnalysisPlanV3,
@@ -76,7 +81,9 @@ import { ArtifactStore } from '../../../agentv3/artifactStore';
 import {
   createOpenAISnapshotEngineState,
   getOpenAISnapshotEngineState,
+  projectSessionFieldsForDurableSnapshot,
   type SessionFieldsForSnapshot,
+  sessionFieldsUsePrivateKnowledge,
   type SessionStateSnapshot,
 } from '../../../agentv3/sessionStateSnapshot';
 import {
@@ -90,8 +97,12 @@ import {
 } from '../../../agentv3/analysisPatternMemory';
 import { probeTraceCompleteness } from '../../../agentv3/traceCompletenessProber';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from '../../../agentv3/outputLanguage';
-import {sanitizeCodeAwareText} from '../../../services/security/codeAwareOutputRegistry';
-import {projectPrivateKnowledgeToolResult} from '../../../services/rag/toolResultProjectionFilter';
+import {
+  createCodeAwareStreamingTextProjection,
+  sanitizeCodeAwareText,
+  type CodeAwareStreamingTextProjection,
+} from '../../../services/security/codeAwareOutputRegistry';
+import {projectToolResultForExternalSurface} from '../../../services/rag/toolResultProjectionFilter';
 import { formatToolCallNarration } from '../../../agentv3/toolNarration';
 import { loadOpenAIConfig, type OpenAIAgentConfig } from './openAiConfig';
 import {
@@ -99,11 +110,13 @@ import {
   shouldUseMimoReasoningContentCompat,
 } from './mimoReasoningCompat';
 import { createOpenAIToolsFromMcpDefinitions } from './openAiToolAdapter';
-import { buildCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
+import { buildRuntimeCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
 import {
+  assessFinalResultComparisonIdentity,
   applyFinalResultQualityGate,
   hasDeliverableFinalReportHeading,
   looksLikePhaseSummaryFallback,
+  type FinalResultComparisonIdentity,
 } from '../../../services/finalResultQualityGate';
 import { verifyConclusion } from '../claude/claudeVerifier';
 import { assessFinalReportContractCompleteness } from '../../../services/finalReportContractGate';
@@ -117,6 +130,7 @@ import {
   captureSkillDisplayEntities,
   collectRecentFindings,
   createRuntimeSkillNotesBudget,
+  findTruncationVerificationIssue,
   getLruCacheEntry,
   isFreshRuntimeEntry,
   knowledgeScopeFromAnalysisOptions,
@@ -124,7 +138,6 @@ import {
   quickStopReasonFromTermination,
   resolveQuickTurnBudget,
   shouldMarkQuickRunTriage,
-  isTruncationVerificationIssue,
   repairTruncatedFinalReport,
   setLruCacheEntry,
   toProtocolHypothesis as toRuntimeProtocolHypothesis,
@@ -164,6 +177,7 @@ import {
 import {
   deriveRuntimeQuickPreEvidenceFlags,
 } from '../../quickModeResolution';
+import {buildRuntimeTracePairComparisonContext} from '../../runtimePromptContext';
 
 interface OpenAISessionEntry {
   history?: AgentInputItem[];
@@ -602,6 +616,7 @@ function resolveOpenAIRunInput(params: {
   sessionEntry?: OpenAISessionEntry;
   effectivePrompt: string;
   previousTurns: Parameters<typeof buildQuickConversationContext>[0];
+  allowRemotePersistence?: boolean;
   now?: number;
 }): OpenAIRunInputResolution {
   let effectivePrompt = params.effectivePrompt;
@@ -612,6 +627,21 @@ function resolveOpenAIRunInput(params: {
     );
     if (quickConversationContext) {
       effectivePrompt = `${quickConversationContext}\n\n${effectivePrompt}`;
+    }
+    return {
+      input: effectivePrompt,
+      effectivePrompt,
+      shouldPersistRemoteSession: false,
+    };
+  }
+
+  if (params.allowRemotePersistence === false) {
+    const localConversationContext = buildQuickConversationContext(
+      params.previousTurns,
+      params.config.outputLanguage,
+    );
+    if (localConversationContext) {
+      effectivePrompt = `${localConversationContext}\n\n${effectivePrompt}`;
     }
     return {
       input: effectivePrompt,
@@ -655,6 +685,17 @@ function resolveOpenAIRunInput(params: {
   };
 }
 
+function buildOpenAIModelSettings(
+  config: Pick<OpenAIAgentConfig, 'maxOutputTokens'>,
+  allowRemotePersistence: boolean,
+) {
+  return {
+    maxTokens: config.maxOutputTokens,
+    parallelToolCalls: false,
+    store: allowRemotePersistence,
+  };
+}
+
 async function commitAfterProviderClose<T>(
   closeProvider: () => Promise<void>,
   abortScope: Pick<RuntimeAnalysisAbortScope, 'throwIfAborted'>,
@@ -681,6 +722,7 @@ export const __testing = {
   isRecoverableOpenAIStreamTermination,
   compactProviderErrorMessage,
   commitAfterProviderClose,
+  buildOpenAIModelSettings,
 };
 
 export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
@@ -691,6 +733,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
   private readonly artifactStores = new Map<string, ArtifactStore>();
   private readonly sessionNotes = new Map<string, AnalysisNote[]>();
   private readonly sessionSqlErrors = new Map<string, Array<{ errorSql: string; errorMessage: string; timestamp: number; fixedSql?: string }>>();
+  private readonly sessionSqlErrorPartitions = new Map<string, string>();
   private readonly sessionPlans = new Map<string, { current: AnalysisPlanV3 | null; history: AnalysisPlanV3[] }>();
   private readonly sessionHypotheses = new Map<string, Hypothesis[]>();
   private readonly sessionUncertaintyFlags = new Map<string, UncertaintyFlag[]>();
@@ -800,6 +843,10 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     traceId: string,
     options: AnalysisOptions = {},
   ): Promise<AnalysisResult> {
+    options = {
+      ...options,
+      analysisMode: resolveEffectiveAnalysisMode(options.analysisMode, options),
+    };
     if (this.activeAnalyses.has(sessionId)) {
       throw new Error(`Analysis already in progress for session ${sessionId}`);
     }
@@ -809,7 +856,10 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     let accumulatedAnswer = '';
     let rounds = 0;
     let observedToolCalls = 0;
-    const config = loadOpenAIConfig(options.providerId, providerScopeFromAnalysisOptions(options));
+    const resolvedConfig = loadOpenAIConfig(options.providerId, providerScopeFromAnalysisOptions(options));
+    const config = options.outputLanguage
+      ? {...resolvedConfig, outputLanguage: options.outputLanguage}
+      : resolvedConfig;
     const sceneType = classifyScene(query);
     const analysisAbortScope = new RuntimeAnalysisAbortScope();
     const unregisterAnalysisAbortHandle = this.registerAbortHandle(sessionId, analysisAbortScope);
@@ -1010,6 +1060,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         sessionEntry,
         effectivePrompt,
         previousTurns: context.previousTurns,
+        allowRemotePersistence: !analysisContextUsesPrivateKnowledge(options),
       });
       const input = runInput.input;
 
@@ -1042,10 +1093,10 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         model: quickMode ? config.lightModel : config.model,
         tools: context.tools,
         toolUseBehavior: 'run_llm_again',
-        modelSettings: {
-          maxTokens: config.maxOutputTokens,
-          parallelToolCalls: false,
-        },
+        modelSettings: buildOpenAIModelSettings(
+          config,
+          !analysisContextUsesPrivateKnowledge(options),
+        ),
       });
 
       let activeController: AbortController | undefined;
@@ -1122,6 +1173,12 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           let runTurns = 0;
           let completedByPlanIdle = false;
           const answerStreamFilter = createOpenAiReasoningFilterState();
+          const answerTextProjection = analysisContextUsesPrivateKnowledge(options)
+            ? createCodeAwareStreamingTextProjection(
+                sessionId,
+                `openai-answer-${continuation}-${finalReportContinuations}`,
+              )
+            : undefined;
           let planCompleteIdleTimer: ReturnType<typeof setTimeout> | undefined;
           const clearPlanCompleteIdleTimer = () => {
             if (planCompleteIdleTimer) {
@@ -1175,6 +1232,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
                   sessionId,
                   quickMode,
                   answerStreamFilter,
+                  answerTextProjection,
                   toolInputsByTaskId,
                   tracePairContext: options.tracePairContext,
                   onToolCalled: () => {
@@ -1193,6 +1251,15 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
             } catch (error) {
               if (!(isAbortLikeError(error) && (completedByPlanIdle || timedOut))) {
                 throw error;
+              }
+            } finally {
+              const projectedTail = answerTextProjection?.flush() ?? '';
+              if (projectedTail) {
+                this.emitUpdate({
+                  type: 'answer_token',
+                  content: {token: projectedTail},
+                  timestamp: Date.now(),
+                });
               }
             }
           } finally {
@@ -1253,6 +1320,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
               finalReportContinuations,
               query,
               sceneType,
+              comparisonIdentity: context.comparisonIdentity,
             }) && streamHistory.length > 0) {
               finalReportContinuations++;
               this.emitUpdate({
@@ -1315,7 +1383,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
 
         analysisAbortScope.throwIfAborted();
         clearTimeout(timeout);
-        if (options.codeAwareMode && options.codeAwareMode !== 'off') {
+        if (analysisContextUsesPrivateKnowledge(options)) {
           conclusion = sanitizeCodeAwareText(sessionId, conclusion);
         }
         const finalFallbackConclusion = this.buildCompletedPlanFallbackConclusion(sessionId, quickMode, config.outputLanguage);
@@ -1399,6 +1467,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
             outputLanguage: config.outputLanguage,
             query,
             emitIssueProgress: false,
+            allowPersistentLearning: !analysisContextUsesPrivateKnowledge(options),
           });
           let verification = await verifyCurrentConclusion();
           analysisAbortScope.throwIfAborted();
@@ -1406,9 +1475,19 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
             ...verification.heuristicIssues,
             ...(verification.llmIssues || []),
           ].find(issue => issue.severity === 'error');
+          const contractIssue = assessFinalReportContractCompleteness({
+            conclusion: result.conclusion,
+            query,
+            sceneType,
+            caseRecommendations: result.conclusionContract?.caseRecommendations,
+          });
+          const truncationIssue = findTruncationVerificationIssue([
+            ...verification.heuristicIssues,
+            ...(verification.llmIssues || []),
+          ].filter(issue => issue.severity === 'error'));
           if (
             verificationIssue &&
-            isTruncationVerificationIssue(verificationIssue) &&
+            (truncationIssue || Boolean(contractIssue?.missingSections.length)) &&
             this.getPlanCompletionStatus(sessionId, quickMode).complete
           ) {
             const repairedConclusion = repairTruncatedFinalReport({
@@ -1416,19 +1495,29 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
               plan: this.sessionPlans.get(sessionId)?.current ?? null,
               hypotheses: context.hypotheses,
               outputLanguage: config.outputLanguage,
+              recoveryKind: truncationIssue ? 'truncation' : 'missing_contract',
+              missingContractSections: contractIssue?.missingSections,
             });
             if (repairedConclusion) {
+              const preRecoveryConfidence = result.confidence;
               result.conclusion = repairedConclusion;
               result.findings = extractFindingsFromText(repairedConclusion);
-              result.confidence = this.estimateConfidence(result.findings, repairedConclusion);
+              result.confidence = Math.min(
+                preRecoveryConfidence,
+                this.estimateConfidence(result.findings, repairedConclusion),
+              );
               this.emitUpdate({
                 type: 'progress',
                 content: {
                   phase: 'concluding',
                   message: localize(
                     config.outputLanguage,
-                    '最终报告输出被截断，已基于结构化证据补齐收尾并重新验证。',
-                    'The final report output was truncated; it was closed from structured evidence and re-verified.',
+                    truncationIssue
+                      ? '最终报告输出被截断，已基于结构化证据补齐收尾并重新验证。'
+                      : '最终报告缺少必需结构，已基于完成阶段的证据补齐并重新验证。',
+                    truncationIssue
+                      ? 'The final report output was truncated; it was closed from structured evidence and re-verified.'
+                      : 'The final report missed required structure; it was completed from finished-phase evidence and re-verified.',
                   ),
                 },
                 timestamp: Date.now(),
@@ -1460,7 +1549,12 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           }
         }
         analysisAbortScope.throwIfAborted();
-        const gateIssue = applyFinalResultQualityGate({ result, query, sceneType });
+        const gateIssue = applyFinalResultQualityGate({
+          result,
+          query,
+          sceneType,
+          comparisonIdentity: context.comparisonIdentity,
+        });
         if (gateIssue) {
           this.emitUpdate({
             type: 'degraded',
@@ -1551,6 +1645,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
             requestedMode: options.analysisMode ?? 'auto',
             frontendPrequeryInjected: analysisRunSpec.traceContext.datasetCount,
             codeAwareMode: options.codeAwareMode,
+            knowledgeSourceIds: options.knowledgeSourceIds,
           });
         }
         const reportedRounds = inferReportedRounds();
@@ -1568,6 +1663,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           requestedMode: options.analysisMode ?? 'auto',
           frontendPrequeryInjected: analysisRunSpec.traceContext.datasetCount,
           codeAwareMode: options.codeAwareMode,
+          knowledgeSourceIds: options.knowledgeSourceIds,
         });
         if (recoverablePartial) {
           return recoverablePartial;
@@ -1612,6 +1708,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     this.artifactStores.clear();
     this.sessionNotes.clear();
     this.sessionSqlErrors.clear();
+    this.sessionSqlErrorPartitions.clear();
     this.sessionPlans.clear();
     this.sessionHypotheses.clear();
     this.sessionUncertaintyFlags.clear();
@@ -1628,6 +1725,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     this.artifactStores.delete(sessionId);
     this.sessionNotes.delete(sessionId);
     this.sessionSqlErrors.delete(sessionId);
+    this.sessionSqlErrorPartitions.delete(sessionId);
     this.sessionPlans.delete(sessionId);
     this.sessionHypotheses.delete(sessionId);
     this.sessionUncertaintyFlags.delete(sessionId);
@@ -1675,12 +1773,15 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     traceId: string,
     sessionFields: SessionFieldsForSnapshot,
   ): SessionStateSnapshot {
+    const privateKnowledge = sessionFieldsUsePrivateKnowledge(sessionFields);
+    const durableFields = projectSessionFieldsForDurableSnapshot(sessionFields);
     const planState = this.sessionPlans.get(sessionId);
     const artifactStore = this.artifactStores.get(sessionId);
     const sessionEntry = this.sessionMap.get(
       this.buildSessionMapKey(sessionId, sessionFields.referenceTraceId),
     );
-    const freshSessionEntry = isFreshRuntimeEntry(sessionEntry, OPENAI_SESSION_FRESHNESS_MS)
+    const freshSessionEntry = !privateKnowledge &&
+      isFreshRuntimeEntry(sessionEntry, OPENAI_SESSION_FRESHNESS_MS)
       ? sessionEntry
       : undefined;
     return {
@@ -1688,12 +1789,12 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       snapshotTimestamp: Date.now(),
       sessionId,
       traceId,
-      ...sessionFields,
-      analysisNotes: this.sessionNotes.get(sessionId) || [],
-      analysisPlan: planState?.current ?? null,
-      planHistory: planState?.history ?? [],
-      uncertaintyFlags: this.sessionUncertaintyFlags.get(sessionId) || [],
-      claudeHypotheses: this.sessionHypotheses.get(sessionId) || undefined,
+      ...durableFields,
+      analysisNotes: privateKnowledge ? [] : this.sessionNotes.get(sessionId) || [],
+      analysisPlan: privateKnowledge ? null : planState?.current ?? null,
+      planHistory: privateKnowledge ? [] : planState?.history ?? [],
+      uncertaintyFlags: privateKnowledge ? [] : this.sessionUncertaintyFlags.get(sessionId) || [],
+      claudeHypotheses: privateKnowledge ? undefined : this.sessionHypotheses.get(sessionId) || undefined,
       architecture: this.architectureCache.get(traceId),
       engineState: createOpenAISnapshotEngineState({
         providerId: sessionFields.agentRuntimeProviderId,
@@ -1709,7 +1810,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       openAIHistory: freshSessionEntry?.history,
       openAILastResponseId: freshSessionEntry?.lastResponseId,
       openAIRunState: freshSessionEntry?.runState,
-      artifacts: artifactStore?.serialize(),
+      artifacts: privateKnowledge ? undefined : artifactStore?.serialize(),
     };
   }
 
@@ -1959,15 +2060,21 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         sessionMapKey: analysisRunSpec.identity.sessionMapKey,
         quickMemoryContextCounts: undefined,
         effectivePackageName,
+        comparisonIdentity: undefined,
         directProcessIdentityAnswer,
         directTraceFactAnswer,
       };
     }
 
+    const sqlErrorPartition = analysisContextMemoryPartitionKey(options);
+    if (this.sessionSqlErrorPartitions.get(sessionId) !== sqlErrorPartition) {
+      this.sessionSqlErrors.delete(sessionId);
+      this.sessionSqlErrorPartitions.set(sessionId, sqlErrorPartition);
+    }
     let sqlErrors = this.sessionSqlErrors.get(sessionId);
     const ensureSqlErrorsLoaded = () => {
       if (!this.sessionSqlErrors.has(sessionId)) {
-        sqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope);
+        sqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope, options);
         this.sessionSqlErrors.set(sessionId, sqlErrors);
       }
       sqlErrors = this.sessionSqlErrors.get(sessionId) ?? [];
@@ -2030,9 +2137,19 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       : [];
     const quickMemoryPayload = shouldInjectQuickMemoryContext
       ? buildQuickMemoryContextPayload({
-          patternContext: buildPatternContextSection(getTraceFeatures(), knowledgeScope),
-          negativePatternContext: buildNegativePatternSection(getTraceFeatures(), knowledgeScope),
-          caseBackgroundContext: buildCaseBackgroundContext(sceneType, architecture?.type, knowledgeScope),
+          patternContext: analysisContextUsesPrivateKnowledge(options)
+            ? undefined
+            : buildPatternContextSection(getTraceFeatures(), knowledgeScope),
+          negativePatternContext: analysisContextUsesPrivateKnowledge(options)
+            ? undefined
+            : buildNegativePatternSection(getTraceFeatures(), knowledgeScope),
+          caseBackgroundContext: buildRuntimeCaseBackgroundContext({
+            sceneType,
+            architectureType: architecture?.type,
+            knowledgeScope,
+            outputLanguage: config.outputLanguage,
+            privateAnalysisContext: analysisContextUsesPrivateKnowledge(options),
+          }),
           sqlErrorFixPairs,
           recentSqlResultsContext: sessionContext.generateRecentSqlResultPromptContext(3),
           outputLanguage: config.outputLanguage,
@@ -2081,6 +2198,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         codeAwareMode: options.codeAwareMode,
         codebaseIds: options.codebaseIds,
         knowledgeSourceIds: options.knowledgeSourceIds,
+        analysisContextFingerprint: options.analysisContextFingerprint,
       });
       allowedTools = mcp.allowedTools;
       tools = createOpenAIToolsFromMcpDefinitions(mcp.toolDefinitions);
@@ -2114,8 +2232,19 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           analysisNotes: notes.length > 0 ? notes : undefined,
           availableAgents: undefined,
           sqlErrorFixPairs: sqlErrorFixPairs.length > 0 ? sqlErrorFixPairs : undefined,
-          patternContext: buildPatternContextSection(getTraceFeatures()),
-          negativePatternContext: buildNegativePatternSection(getTraceFeatures()),
+          patternContext: analysisContextUsesPrivateKnowledge(options)
+            ? undefined
+            : buildPatternContextSection(getTraceFeatures(), knowledgeScope),
+          negativePatternContext: analysisContextUsesPrivateKnowledge(options)
+            ? undefined
+            : buildNegativePatternSection(getTraceFeatures(), knowledgeScope),
+          caseBackgroundContext: buildRuntimeCaseBackgroundContext({
+            sceneType,
+            architectureType: architecture?.type,
+            knowledgeScope,
+            outputLanguage: config.outputLanguage,
+            privateAnalysisContext: analysisContextUsesPrivateKnowledge(options),
+          }),
           previousPlan,
           planHistory: analysisPlan.history.length > 0 ? analysisPlan.history : undefined,
           selectionContext: options.selectionContext,
@@ -2141,6 +2270,12 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       sessionMapKey,
       quickMemoryContextCounts: quickMemoryPayload?.counts,
       effectivePackageName,
+      ...(comparisonContext ? {
+        comparisonIdentity: {
+          currentPackageName: effectivePackageName,
+          referencePackageName: comparisonContext.referencePackageName,
+        } satisfies FinalResultComparisonIdentity,
+      } : {}),
       directProcessIdentityAnswer,
       directTraceFactAnswer,
     };
@@ -2189,46 +2324,23 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       timestamp: Date.now(),
     });
 
-    const capSql = "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND (name LIKE 'android_%' OR name LIKE 'linux_%' OR name LIKE 'sched_%' OR name LIKE 'slices_%')";
-    const [refFocusResult, refArchitecture, currentTables, refTables] = await Promise.all([
-      detectFocusApps(this.traceProcessorService, referenceTraceId).catch(() => ({
-        apps: [],
-        method: 'none' as const,
-        primaryApp: undefined,
-      })),
-      this.detectArchitecture(referenceTraceId, undefined).catch(() => undefined),
-      this.traceProcessorService.query(traceId, capSql).catch((error) => {
-        console.warn('[OpenAIRuntime] Capability query failed for current trace:', error.message);
-        return null;
-      }),
-      this.traceProcessorService.query(referenceTraceId, capSql).catch((error) => {
-        console.warn('[OpenAIRuntime] Capability query failed for reference trace:', error.message);
-        return null;
-      }),
-    ]);
-
-    let commonCapabilities: string[] = [];
-    let capabilityDiff: { currentOnly: string[]; referenceOnly: string[] } | undefined;
-    if (currentTables && refTables) {
-      const currentSet = new Set(currentTables.rows.map((r: any[]) => r[0] as string));
-      const refSet = new Set(refTables.rows.map((r: any[]) => r[0] as string));
-      commonCapabilities = [...currentSet].filter(t => refSet.has(t));
-      const currentOnly = [...currentSet].filter(t => !refSet.has(t));
-      const referenceOnly = [...refSet].filter(t => !currentSet.has(t));
-      if (currentOnly.length > 0 || referenceOnly.length > 0) {
-        capabilityDiff = { currentOnly, referenceOnly };
-      }
-    }
-
-    return {
+    const comparisonContext = await buildRuntimeTracePairComparisonContext({
+      traceProcessorService: this.traceProcessorService,
+      currentTraceId: traceId,
       referenceTraceId,
-      ...(tracePairContext ? { tracePairContext } : {}),
-      referencePackageName: refFocusResult.primaryApp,
-      referenceFocusApps: refFocusResult.apps.length > 0 ? refFocusResult.apps : undefined,
-      referenceArchitecture: refArchitecture,
-      commonCapabilities,
-      capabilityDiff,
-    };
+      ...(tracePairContext ? {tracePairContext} : {}),
+      detectReferenceArchitecture: id => this.detectArchitecture(id, undefined),
+      onCapabilityQueryError: (side, error) => {
+        console.warn(
+          `[OpenAIRuntime] Capability query failed for ${side} trace:`,
+          (error as Error).message,
+        );
+      },
+    });
+    if (!comparisonContext) {
+      throw new Error('Reference trace comparison context was not created');
+    }
+    return comparisonContext;
   }
 
   private async detectVendor(traceId: string): Promise<string | null> {
@@ -2410,6 +2522,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     finalReportContinuations: number;
     query?: string;
     sceneType?: SceneType;
+    comparisonIdentity?: FinalResultComparisonIdentity;
   }): boolean {
     if (
       input.quickMode ||
@@ -2434,6 +2547,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     })) {
       return true;
     }
+    if (assessFinalResultComparisonIdentity(conclusion, input.comparisonIdentity)) return true;
     return looksLikeProcessNarrationParagraph(conclusion.split(/\n{2,}/)[0] || '');
   }
 
@@ -2581,6 +2695,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     requestedMode?: AnalysisOptions['analysisMode'];
     frontendPrequeryInjected?: number;
     codeAwareMode?: AnalysisOptions['codeAwareMode'];
+    knowledgeSourceIds?: string[];
   }): AnalysisResult | undefined {
     if (!isRecoverableOpenAIStreamTermination(params.error)) {
       return undefined;
@@ -2607,7 +2722,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     let conclusion = planStatus.complete
       ? conclusionBase
       : this.withIncompletePlanWarning(conclusionBase, planStatus, params.outputLanguage);
-    if (params.codeAwareMode && params.codeAwareMode !== 'off') {
+    if ((params.codeAwareMode && params.codeAwareMode !== 'off') || params.knowledgeSourceIds?.length) {
       conclusion = sanitizeCodeAwareText(params.sessionId, conclusion);
     }
     const findings = extractFindingsFromText(conclusion);
@@ -2715,6 +2830,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     requestedMode?: AnalysisOptions['analysisMode'];
     frontendPrequeryInjected?: number;
     codeAwareMode?: AnalysisOptions['codeAwareMode'];
+    knowledgeSourceIds?: string[];
   }): AnalysisResult {
     const maxTurnText = Number.isFinite(params.maxTurns)
       ? localize(
@@ -2728,7 +2844,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       `分析达到轮次上限${maxTurnText}，尚未形成完整结论。`,
       `The analysis reached the turn limit${maxTurnText} before a complete conclusion was produced.`,
     );
-    if (params.codeAwareMode && params.codeAwareMode !== 'off') {
+    if ((params.codeAwareMode && params.codeAwareMode !== 'off') || params.knowledgeSourceIds?.length) {
       partialConclusion = sanitizeCodeAwareText(params.sessionId, partialConclusion);
     }
     const findings = extractFindingsFromText(partialConclusion);
@@ -2921,6 +3037,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
       sessionId: string;
       quickMode: boolean;
       answerStreamFilter: OpenAiReasoningFilterState;
+      answerTextProjection?: CodeAwareStreamingTextProjection;
       toolInputsByTaskId: Map<string, { toolName: string; args: Record<string, unknown> }>;
       tracePairContext?: TracePairContext;
       onToolCalled?: () => void;
@@ -2935,7 +3052,10 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
           return '';
         }
         if (!delta) return '';
-        this.emitUpdate({ type: 'answer_token', content: { token: delta }, timestamp: now });
+        const projected = streamContext.answerTextProjection?.write(delta) ?? delta;
+        if (projected) {
+          this.emitUpdate({type: 'answer_token', content: {token: projected}, timestamp: now});
+        }
         return delta;
       }
       return '';
@@ -2988,8 +3108,9 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         .map(taskId => streamContext.toolInputsByTaskId.get(taskId))
         .find(Boolean);
       const toolName = cached?.toolName || rawItem?.name || 'unknown';
-      const projected = projectPrivateKnowledgeToolResult(toolName, rawItem?.output);
-      const resultText = summarizeToolOutput(projected ?? rawItem?.output);
+      const resultText = summarizeToolOutput(
+        projectToolResultForExternalSurface(toolName, rawItem?.output),
+      );
       if (cached) {
         recordPlanOrPrePlanToolCall(this.sessionPlans.get(streamContext.sessionId), {
           toolName: cached.toolName,
@@ -3013,7 +3134,11 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         ? rawItem.content.map((c: any) => c.text).filter(Boolean).join('\n')
         : undefined;
       if (text) {
-        this.emitUpdate({ type: 'thought', content: { thought: text }, timestamp: now });
+        this.emitUpdate({
+          type: 'thought',
+          content: {thought: streamContext.answerTextProjection?.projectComplete(text) ?? text},
+          timestamp: now,
+        });
       }
     }
     return '';
@@ -3135,6 +3260,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
     packageName?: string;
     options: AnalysisOptions;
   }): void {
+    if (analysisContextUsesPrivateKnowledge(input.options)) return;
     if (input.result.partial === true || input.result.findings.length === 0) return;
     const insights = extractKeyInsights(input.result.findings, input.result.conclusion);
     if (insights.length === 0) return;

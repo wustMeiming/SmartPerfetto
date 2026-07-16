@@ -10,7 +10,8 @@ import {
 } from '../../../agentv3/analysisTermination';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from '../../../agentv3/outputLanguage';
 import { formatToolCallNarration, type ToolNarrationOptions } from '../../../agentv3/toolNarration';
-import {projectPrivateKnowledgeToolResult} from '../../../services/rag/toolResultProjectionFilter';
+import {projectToolResultForExternalSurface} from '../../../services/rag/toolResultProjectionFilter';
+import type {CodeAwareStreamingTextProjection} from '../../../services/security/codeAwareOutputRegistry';
 
 export type UpdateEmitter = (update: StreamingUpdate) => void;
 
@@ -59,6 +60,7 @@ export function createSseBridge(
   emit: UpdateEmitter,
   language: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE,
   narrationOptions: ToolNarrationOptions = {},
+  textProjection?: CodeAwareStreamingTextProjection,
 ): SseBridge {
   let lastToolUseId: string | undefined;
   const toolUseIdToName = new Map<string, string>();
@@ -106,6 +108,22 @@ export function createSseBridge(
   // 200ms is well below human perception threshold for streaming text.
   const BUFFER_DELAY_MS = 200;
 
+  function projectCompleteText(text: string): string {
+    return textProjection?.projectComplete(text) ?? text;
+  }
+
+  function emitAnswerChunk(text: string, timestamp: number): void {
+    if (!text) return;
+    accumulatedAnswerText += text;
+    const projected = textProjection?.write(text) ?? text;
+    if (projected) emit({type: 'answer_token', content: {token: projected}, timestamp});
+  }
+
+  function flushProjectedAnswer(timestamp = Date.now()): void {
+    const projected = textProjection?.flush() ?? '';
+    if (projected) emit({type: 'answer_token', content: {token: projected}, timestamp});
+  }
+
   function cancelBufferTimer(): void {
     if (bufferFlushTimer !== null) {
       clearTimeout(bufferFlushTimer);
@@ -118,7 +136,7 @@ export function createSseBridge(
     cancelBufferTimer();
     if (textBuffer) {
       currentTurnStreamedText = true;
-      emit({ type: 'thought', content: { thought: textBuffer }, timestamp: Date.now() });
+      emit({type: 'thought', content: {thought: projectCompleteText(textBuffer)}, timestamp: Date.now()});
       textBuffer = '';
     }
   }
@@ -128,8 +146,7 @@ export function createSseBridge(
     cancelBufferTimer();
     if (textBuffer) {
       currentTurnStreamedText = true;
-      accumulatedAnswerText += textBuffer;
-      emit({ type: 'answer_token', content: { token: textBuffer }, timestamp: Date.now() });
+      emitAnswerChunk(textBuffer, Date.now());
       textBuffer = '';
     }
     streamingAsAnswer = true;
@@ -185,8 +202,7 @@ export function createSseBridge(
         } else if (streamingAsAnswer) {
           // Buffer timer already fired — stream as answer_token directly
           currentTurnStreamedText = true;
-          accumulatedAnswerText += event.delta.text;
-          emit({ type: 'answer_token', content: { token: event.delta.text }, timestamp: now });
+          emitAnswerChunk(event.delta.text, now);
         } else {
           // Buffer text until we know if tool_use follows
           textBuffer += event.delta.text;
@@ -210,6 +226,10 @@ export function createSseBridge(
           // Answer text was misclassified as conclusion — it was actually
           // intermediate reasoning before tool calls. Clear accumulated text.
           accumulatedAnswerText = '';
+          const projectedTail = textProjection?.flush() ?? '';
+          if (projectedTail) {
+            emit({type: 'thought', content: {thought: projectedTail}, timestamp: now});
+          }
           streamingAsAnswer = false;
         }
       }
@@ -255,16 +275,16 @@ export function createSseBridge(
             // Intermediate reasoning — emit as thought so frontend can distinguish from system progress
             emit({
               type: 'thought',
-              content: { thought: block.text },
+              content: {thought: projectCompleteText(block.text)},
               timestamp: now,
             });
           } else {
             // Final answer text — stream as answer tokens
-            accumulatedAnswerText += block.text;
-            emit({ type: 'answer_token', content: { token: block.text }, timestamp: now });
+            emitAnswerChunk(block.text, now);
           }
         }
       }
+      if (!hasToolUse) flushProjectedAnswer(now);
       return;
     }
 
@@ -280,12 +300,14 @@ export function createSseBridge(
         for (const block of resultBlocks) {
           const taskId = block.toolUseId || lastToolUseId || 'unknown';
           const toolName = toolUseIdToName.get(taskId);
-          const projected = projectPrivateKnowledgeToolResult(toolName ?? 'unknown', block.result);
           emit({
             type: 'agent_response',
             content: {
               taskId,
-              result: stringifySdkToolResult(projected ?? block.result),
+              result: stringifySdkToolResult(projectToolResultForExternalSurface(
+                toolName ?? 'unknown',
+                block.result,
+              )),
             },
             timestamp: now,
           });
@@ -294,12 +316,14 @@ export function createSseBridge(
       } else {
         const taskId = lastToolUseId || 'unknown';
         const toolName = toolUseIdToName.get(taskId);
-        const projected = projectPrivateKnowledgeToolResult(toolName ?? 'unknown', msg.tool_use_result);
         emit({
           type: 'agent_response',
           content: {
             taskId,
-            result: stringifySdkToolResult(projected ?? msg.tool_use_result),
+            result: stringifySdkToolResult(projectToolResultForExternalSurface(
+              toolName ?? 'unknown',
+              msg.tool_use_result,
+            )),
           },
           timestamp: now,
         });
@@ -309,10 +333,16 @@ export function createSseBridge(
     }
 
     if (msg.type === 'result') {
+      flushProjectedAnswer(now);
       if (msg.subtype === 'success') {
         emit({
           type: 'conclusion',
-          content: { conclusion: msg.result || '', durationMs: msg.duration_ms, turns: msg.num_turns, costUsd: msg.total_cost_usd },
+          content: {
+            conclusion: projectCompleteText(msg.result || ''),
+            durationMs: msg.duration_ms,
+            turns: msg.num_turns,
+            costUsd: msg.total_cost_usd,
+          },
           timestamp: now,
         });
       } else if (isSdkMaxTurnsSubtype(msg.subtype)) {
@@ -468,13 +498,21 @@ export function createSseBridge(
       return;
     }
 
-    // Catch-all for unhandled message types
-    console.log(`[SSEBridge] Unhandled SDK message type: ${msg.type}`, JSON.stringify(msg).substring(0, 200));
+    // Catch-all for unhandled message types. SDK messages can contain prompts,
+    // source snippets, and tool payloads, so log shape only — never values.
+    const messageShape = Object.keys(msg as Record<string, unknown>)
+      .sort()
+      .join(',');
+    const subtype = typeof msg.subtype === 'string' ? ` subtype=${msg.subtype}` : '';
+    console.log(`[SSEBridge] Unhandled SDK message type=${msg.type}${subtype} keys=${messageShape}`);
   }
 
   return {
     handleMessage: handleSdkMessage,
     getAccumulatedAnswer: () => accumulatedAnswerText,
-    flushPendingAnswer: flushBufferAsAnswer,
+    flushPendingAnswer: () => {
+      flushBufferAsAnswer();
+      flushProjectedAnswer();
+    },
   };
 }

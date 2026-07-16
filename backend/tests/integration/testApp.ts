@@ -25,6 +25,10 @@ import {
 // Import services
 import { TraceProcessorService, getTraceProcessorService } from '../../src/services/traceProcessorService';
 import { resolveTraceCase } from '../../src/utils/traceCorpus';
+import {
+  deleteTraceMetadata,
+  writeTraceMetadata,
+} from '../../src/services/traceMetadataStore';
 
 // =============================================================================
 // Test App Factory
@@ -91,6 +95,18 @@ export async function loadTestTrace(traceName: string): Promise<string> {
 
   const traceProcessorService = getTraceProcessorService();
   const traceId = await traceProcessorService.loadTraceFromFilePath(tracePath);
+  const stat = fs.statSync(tracePath);
+  await writeTraceMetadata({
+    id: traceId,
+    filename: path.basename(tracePath),
+    size: stat.size,
+    uploadedAt: new Date().toISOString(),
+    status: 'ready',
+    path: tracePath,
+    tenantId: 'default-dev-tenant',
+    workspaceId: 'default-workspace',
+    userId: 'dev-user-123',
+  });
 
   console.log(`[TestApp] Loaded trace ${traceName} with ID: ${traceId}`);
   return traceId;
@@ -103,6 +119,7 @@ export async function cleanupTrace(traceId: string): Promise<void> {
   try {
     const traceProcessorService = getTraceProcessorService();
     await traceProcessorService.deleteTrace(traceId);
+    await deleteTraceMetadata(traceId);
     console.log(`[TestApp] Cleaned up trace: ${traceId}`);
   } catch (e) {
     // Ignore cleanup errors

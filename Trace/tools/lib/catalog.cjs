@@ -3,8 +3,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const Ajv2020 = require('ajv/dist/2020');
 
 const {sha256File} = require('./hash.cjs');
+const {SUPPORTED_SIGNAL_TYPES} = require('./generator.cjs');
 
 const CASE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
@@ -106,6 +108,40 @@ function issue(code, manifestPath, message) {
   return {code, file: manifestPath, message};
 }
 
+function loadPublicationExceptions(repoRoot, validateSchema, formatSchemaErrors, issues) {
+  const ledgerPath = path.join(repoRoot, 'Trace/governance/legacy-publication-exceptions.json');
+  if (!fs.existsSync(ledgerPath)) return {ledgerPath, exceptions: new Map()};
+
+  let ledger;
+  try {
+    ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+  } catch (error) {
+    issues.push(issue('publication-exception-ledger-invalid', ledgerPath, error.message));
+    return {ledgerPath, exceptions: new Map()};
+  }
+  if (!validateSchema(ledger)) {
+    issues.push(issue(
+      'publication-exception-ledger-invalid',
+      ledgerPath,
+      formatSchemaErrors(validateSchema.errors),
+    ));
+  }
+
+  const exceptions = new Map();
+  for (const exception of ledger.exceptions ?? []) {
+    if (exceptions.has(exception.case_id)) {
+      issues.push(issue(
+        'duplicate-publication-exception',
+        ledgerPath,
+        `case ${exception.case_id} has more than one legacy publication exception`,
+      ));
+      continue;
+    }
+    exceptions.set(exception.case_id, exception);
+  }
+  return {ledgerPath, exceptions};
+}
+
 function validateRequiredShape(entry, issues) {
   const file = entry.manifest_path;
   if (entry.schema_version !== 1) issues.push(issue('invalid-schema-version', file, 'schema_version must be 1'));
@@ -162,7 +198,7 @@ function validatePathsAndHashes(entry, issues) {
   }
 }
 
-function validatePublication(entry, issues) {
+function validatePublication(entry, publicationExceptions, issues) {
   const source = entry.source ?? {};
   if (source.publication === 'private') {
     issues.push(issue('tracked-private-case', entry.manifest_path, 'private cases belong under ignored Trace/real/.private'));
@@ -179,6 +215,25 @@ function validatePublication(entry, issues) {
       }
     }
   }
+  if (source.publication === 'legacy-tracked') {
+    const exception = publicationExceptions.get(entry.id);
+    if (!exception) {
+      issues.push(issue(
+        'missing-publication-exception',
+        entry.manifest_path,
+        'legacy-tracked cases require a bounded entry in Trace/governance/legacy-publication-exceptions.json',
+      ));
+      return;
+    }
+    const reviewDeadline = Date.parse(`${exception.review_by}T23:59:59.999Z`);
+    if (!Number.isFinite(reviewDeadline) || reviewDeadline < Date.now()) {
+      issues.push(issue(
+        'expired-publication-exception',
+        entry.manifest_path,
+        `legacy publication exception expired on ${exception.review_by}`,
+      ));
+    }
+  }
 }
 
 function validateNoLegacyTraceReferences(repoRoot, issues) {
@@ -191,6 +246,7 @@ function validateNoLegacyTraceReferences(repoRoot, issues) {
     path.join(repoRoot, 'docs', 'superpowers'),
     path.join(repoRoot, 'backend', 'logs'),
     path.join(repoRoot, 'backend', 'test-output'),
+    path.join(repoRoot, 'backend', 'uploads'),
     path.join(repoRoot, 'logs'),
     path.join(repoRoot, 'output'),
     path.join(repoRoot, 'test-output'),
@@ -206,7 +262,16 @@ function validateNoLegacyTraceReferences(repoRoot, issues) {
     return textExtensions.has(path.extname(filePath));
   });
   for (const filePath of files) {
-    const source = fs.readFileSync(filePath, 'utf8');
+    let source;
+    try {
+      source = fs.readFileSync(filePath, 'utf8');
+    } catch (error) {
+      // Runtime artifacts may disappear between enumeration and read. Only
+      // tolerate that expected race; permission and I/O failures must remain
+      // visible to the governance gate.
+      if (error && error.code === 'ENOENT') continue;
+      throw error;
+    }
     if (/test-traces(?:\/|["'])/.test(source)) {
       issues.push(issue(
         'legacy-trace-reference',
@@ -224,12 +289,73 @@ function validateCatalog(repoRoot) {
   const ids = new Map();
   const baseIds = new Set(catalog.cases.filter((entry) => entry.kind === 'real').map((entry) => entry.id));
   const covered = {skills: new Set(), strategies: new Set()};
-  const quality = {semantic: new Set(), graceful_empty: new Set(), unavailable: new Set(), definition: new Set()};
+  const quality = {
+    semantic: new Set(),
+    execution: new Set(),
+    graceful_empty: new Set(),
+    unavailable: new Set(),
+    definition: new Set(),
+  };
+  const ajv = new Ajv2020({allErrors: true, strict: false, validateFormats: false});
+  const caseSchema = JSON.parse(fs.readFileSync(path.join(repoRoot, 'Trace/schema/case.schema.json'), 'utf8'));
+  const scenarioSchema = JSON.parse(fs.readFileSync(path.join(repoRoot, 'Trace/schema/scenario.schema.json'), 'utf8'));
+  const publicationExceptionSchema = JSON.parse(fs.readFileSync(
+    path.join(repoRoot, 'Trace/schema/legacy-publication-exceptions.schema.json'),
+    'utf8',
+  ));
+  const validateCaseSchema = ajv.compile(caseSchema);
+  const validateScenarioSchema = ajv.compile(scenarioSchema);
+  const validatePublicationExceptionSchema = ajv.compile(publicationExceptionSchema);
+  const publicationLedger = loadPublicationExceptions(
+    repoRoot,
+    validatePublicationExceptionSchema,
+    (errors) => ajv.errorsText(errors, {separator: '; '}),
+    issues,
+  );
+  const usedPublicationExceptions = new Set();
+  const schemaSignalTypes = new Set(
+    scenarioSchema.properties.signals.items.properties.type.enum,
+  );
+  for (const signalType of new Set([...schemaSignalTypes, ...SUPPORTED_SIGNAL_TYPES])) {
+    if (!schemaSignalTypes.has(signalType) || !SUPPORTED_SIGNAL_TYPES.has(signalType)) {
+      issues.push(issue(
+        'scenario-signal-contract-drift',
+        path.join(repoRoot, 'Trace/schema/scenario.schema.json'),
+        `signal type differs between schema and generator: ${signalType}`,
+      ));
+    }
+  }
 
   for (const entry of catalog.cases) {
+    const rawEntry = JSON.parse(fs.readFileSync(entry.manifest_path, 'utf8'));
+    if (!validateCaseSchema(rawEntry)) {
+      issues.push(issue(
+        'case-schema-invalid',
+        entry.manifest_path,
+        ajv.errorsText(validateCaseSchema.errors, {separator: '; '}),
+      ));
+    }
+    if (entry.kind === 'constructed' && entry.construction?.scenario_file) {
+      const scenarioPath = path.join(entry.case_dir, entry.construction.scenario_file);
+      try {
+        const scenario = JSON.parse(fs.readFileSync(scenarioPath, 'utf8'));
+        if (!validateScenarioSchema(scenario)) {
+          issues.push(issue(
+            'scenario-schema-invalid',
+            scenarioPath,
+            ajv.errorsText(validateScenarioSchema.errors, {separator: '; '}),
+          ));
+        }
+      } catch (error) {
+        issues.push(issue('scenario-schema-invalid', scenarioPath, error.message));
+      }
+    }
     validateRequiredShape(entry, issues);
     validatePathsAndHashes(entry, issues);
-    validatePublication(entry, issues);
+    validatePublication(entry, publicationLedger.exceptions, issues);
+    if (entry.source?.publication === 'legacy-tracked' && publicationLedger.exceptions.has(entry.id)) {
+      usedPublicationExceptions.add(entry.id);
+    }
     if (ids.has(entry.id)) {
       issues.push(issue('duplicate-case-id', entry.manifest_path, `case id also used by ${ids.get(entry.id)}`));
     } else {
@@ -253,6 +379,13 @@ function validateCatalog(repoRoot) {
           issues.push(issue('incomplete-execution-expectation', entry.manifest_path, `Skill ${expectation.target} requires steps and semantic_step`));
         }
       }
+      if (mode === 'semantic' && (!Array.isArray(expectation.assertions) || expectation.assertions.length === 0)) {
+        issues.push(issue(
+          'semantic-expectation-without-assertions',
+          entry.manifest_path,
+          `Skill ${expectation.target} requires at least one value assertion for semantic coverage`,
+        ));
+      }
       if (mode === 'graceful_empty' || mode === 'unavailable') {
         if (typeof expectation.limitation_reason !== 'string' || expectation.limitation_reason.trim() === '') {
           issues.push(issue('missing-limitation-reason', entry.manifest_path, `Skill ${expectation.target} requires limitation_reason`));
@@ -273,6 +406,15 @@ function validateCatalog(repoRoot) {
       if (!expectationTargets.has(`strategy:${strategy}`)) {
         issues.push(issue('coverage-without-expectation', entry.manifest_path, `Strategy ${strategy} has no executable expectation`));
       }
+    }
+  }
+  for (const caseId of publicationLedger.exceptions.keys()) {
+    if (!usedPublicationExceptions.has(caseId)) {
+      issues.push(issue(
+        'stale-publication-exception',
+        publicationLedger.ledgerPath,
+        `case ${caseId} is not a tracked legacy publication`,
+      ));
     }
   }
   validateNoLegacyTraceReferences(repoRoot, issues);

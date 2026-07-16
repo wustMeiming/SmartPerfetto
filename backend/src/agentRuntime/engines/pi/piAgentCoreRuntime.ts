@@ -14,13 +14,20 @@ import { createSkillExecutor } from '../../../services/skillEngine/skillExecutor
 import { ensureSkillRegistryInitialized, skillRegistry } from '../../../services/skillEngine/skillLoader';
 import type { TraceProcessorService } from '../../../services/traceProcessorService';
 import { getExtendedKnowledgeBase } from '../../../services/sqlKnowledgeBase';
+import {resolveEffectiveAnalysisMode} from '../../../services/effectiveAnalysisMode';
+import {analysisContextUsesPrivateKnowledge} from '../../../services/resolvedAnalysisContext';
 import { sanitizeCodeAwareText } from '../../../services/security/codeAwareOutputRegistry';
-import {projectPrivateKnowledgeToolResult} from '../../../services/rag/toolResultProjectionFilter';
+import {
+  isSensitiveRagToolName,
+  projectToolResultForExternalSurface,
+} from '../../../services/rag/toolResultProjectionFilter';
 import {
   createPiAgentCoreSnapshotEngineState,
   getPiAgentCoreSnapshotEngineState,
+  projectSessionFieldsForDurableSnapshot,
   type PiAgentCoreOpaqueState,
   type SessionFieldsForSnapshot,
+  sessionFieldsUsePrivateKnowledge,
   type SessionStateSnapshot,
 } from '../../../agentv3/sessionStateSnapshot';
 import {
@@ -50,6 +57,7 @@ import type {
   Hypothesis,
   PlanPhase,
   UncertaintyFlag,
+  VerificationIssue,
 } from '../../../agentv3/types';
 import {
   getAnalysisPlanCompletionStatus,
@@ -61,12 +69,17 @@ import {
   recordPlanOrPrePlanToolCall,
 } from '../../../agentv3/planToolCallRecorder';
 import {
+  assessFinalResultComparisonIdentity,
   assessFinalResultQuality,
   applyFinalResultQualityGate,
   hasDeliverableFinalReportHeading,
   looksLikeProcessNarrationConclusion,
+  type FinalResultComparisonIdentity,
 } from '../../../services/finalResultQualityGate';
-import { verifyConclusion } from '../claude/claudeVerifier';
+import {
+  generateCorrectionPrompt,
+  verifyConclusion,
+} from '../claude/claudeVerifier';
 import type { ClaimVerificationResult } from '../../../types/claimVerification';
 import type { RuntimeToolResult, SharedToolSpec } from '../../runtimeToolSpec';
 import {
@@ -77,7 +90,10 @@ import type { RuntimeSelection } from '../../runtimeSelection';
 import type { RuntimeEngineDefinition, RuntimeFactoryInput } from '../../runtimeRegistry';
 import type { EngineCapabilities } from '../../runtimeDescriptorTypes';
 import { createAnalysisRunSpec, type AnalysisRunSpec } from '../../analysisRunSpec';
-import { buildRuntimeTracePairComparisonContext } from '../../runtimePromptContext';
+import {
+  buildQuickConversationContext,
+  buildRuntimeTracePairComparisonContext,
+} from '../../runtimePromptContext';
 import { loadPromptTemplate } from '../../../agentv3/strategyLoader';
 import {
   EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND,
@@ -89,6 +105,7 @@ import {
   buildQuickMemoryContextPayload,
   captureSkillDisplayEntities,
   createRuntimeSkillNotesBudget,
+  findTruncationVerificationIssue,
   isTruncationVerificationIssue,
   quickStopReasonFromTermination,
   repairTruncatedFinalReport,
@@ -96,7 +113,8 @@ import {
   shouldMarkQuickRunTriage,
   toProtocolHypothesis as toRuntimeProtocolHypothesis,
 } from '../../runtimeCommon';
-import { buildCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
+import { buildRuntimeCaseBackgroundContext } from '../../../services/caseEvolution/caseBackgroundContext';
+import { assessFinalReportContractCompleteness } from '../../../services/finalReportContractGate';
 import { resolveRuntimeQuickMode } from '../../quickModeResolution';
 import {
   buildRuntimeQuickEvidenceDirectAnswer,
@@ -110,6 +128,7 @@ import {
   emitQuickDirectAnswerEvents,
   emitQuickDirectQualityGateIssue,
 } from '../../quickDirectResult';
+import {getLruCacheEntry, setLruCacheEntry} from '../../runtimeCache';
 
 export type ExperimentalPiAgentCoreRuntimeKind = typeof EXPERIMENTAL_PI_AGENT_CORE_RUNTIME_KIND;
 export type PublicPiAgentCoreRuntimeKind = typeof PI_AGENT_CORE_RUNTIME_KIND;
@@ -146,6 +165,7 @@ const PI_AGENT_CORE_MAX_FINAL_REPORT_CONTINUATIONS = 1;
 interface PiAgentCoreAgentState {
   messages?: unknown[];
   tools?: unknown[];
+  systemPrompt?: string;
   errorMessage?: string;
 }
 
@@ -172,8 +192,19 @@ function sanitizeOpaqueJsonValue(value: unknown, key = ''): unknown {
       .filter(item => item !== undefined);
   }
   if (typeof value === 'object' && value) {
+    const candidate = value as Record<string, unknown>;
+    const messageType = typeof candidate.type === 'string' ? candidate.type : '';
+    const messageRole = typeof candidate.role === 'string' ? candidate.role : '';
+    if (/tool[_-]?result/i.test(messageType) || /tool[_-]?result/i.test(messageRole)) {
+      return {
+        ...(messageType ? {type: messageType} : {}),
+        ...(messageRole ? {role: messageRole} : {}),
+        ...(typeof candidate.toolCallId === 'string' ? {toolCallId: candidate.toolCallId} : {}),
+        content: '[TOOL_RESULT_REDACTED_FROM_DURABLE_STATE]',
+      };
+    }
     const out: Record<string, unknown> = {};
-    for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+    for (const [childKey, childValue] of Object.entries(candidate)) {
       const sanitized = sanitizeOpaqueJsonValue(childValue, childKey);
       if (sanitized !== undefined) out[childKey] = sanitized;
     }
@@ -303,6 +334,7 @@ interface PiAnalysisPreparation {
   hypotheses: Hypothesis[];
   uncertaintyFlags: UncertaintyFlag[];
   analysisRunSpec: AnalysisRunSpec;
+  comparisonIdentity?: FinalResultComparisonIdentity;
   quickMemoryContextCounts?: ReturnType<typeof buildQuickMemoryContextPayload>['counts'];
 }
 
@@ -509,6 +541,7 @@ export function shouldContinuePiAgentCoreFinalReportAfterPlanComplete(input: {
   conclusion: string;
   query: string;
   sceneType: SceneType;
+  comparisonIdentity?: FinalResultComparisonIdentity;
 }): boolean {
   if (
     input.quickMode ||
@@ -531,6 +564,7 @@ export function shouldContinuePiAgentCoreFinalReportAfterPlanComplete(input: {
     },
     query: input.query,
     sceneType: input.sceneType,
+    comparisonIdentity: input.comparisonIdentity,
   });
   return Boolean(issue);
 }
@@ -544,6 +578,59 @@ function loadPiFinalReportContinuationPrompt(outputLanguage: OutputLanguage): st
     throw new Error(`Missing Pi final-report continuation prompt template: ${templateName}`);
   }
   return template;
+}
+
+function loadPiFinalReportCorrectionSystemPrompt(outputLanguage: OutputLanguage): string {
+  const templateName = outputLanguage === 'en'
+    ? 'prompt-final-report-correction-system-en'
+    : 'prompt-final-report-correction-system-zh';
+  const template = loadPromptTemplate(templateName);
+  if (!template) {
+    throw new Error(`Missing Pi final-report correction system prompt template: ${templateName}`);
+  }
+  return template;
+}
+
+export async function verifyPiAgentCoreConclusionForCorrection(input: {
+  conclusion: string;
+  plan: AnalysisPlanV3 | null | undefined;
+  hypotheses: Hypothesis[];
+  sceneType: SceneType;
+  outputLanguage: OutputLanguage;
+  query: string;
+  allowPersistentLearning: boolean;
+  comparisonIdentity?: FinalResultComparisonIdentity;
+}): Promise<VerificationIssue[]> {
+  const verification = await verifyConclusion(
+    extractFindingsFromText(input.conclusion),
+    input.conclusion,
+    {
+      enableLLM: false,
+      plan: input.plan,
+      hypotheses: input.hypotheses,
+      sceneType: input.sceneType,
+      outputLanguage: input.outputLanguage,
+      query: input.query,
+      emitIssueProgress: false,
+      allowPersistentLearning: input.allowPersistentLearning,
+    },
+  );
+  const issues: VerificationIssue[] = [
+    ...verification.heuristicIssues,
+    ...(verification.llmIssues ?? []),
+  ];
+  const comparisonIdentityIssue = assessFinalResultComparisonIdentity(
+    input.conclusion,
+    input.comparisonIdentity,
+  );
+  if (comparisonIdentityIssue) {
+    issues.push({
+      type: 'missing_check',
+      severity: 'error',
+      message: comparisonIdentityIssue.message,
+    });
+  }
+  return issues;
 }
 
 function estimateConfidence(findings: Finding[], partial: boolean): number {
@@ -618,8 +705,8 @@ export function projectPiAgentCoreEventToStreamingUpdate(
     case 'tool_execution_update': {
       const toolName = typeof event.toolName === 'string' ? event.toolName : 'unknown';
       const rawUpdate = event.partialResult ?? event.update;
-      const update = toolName === 'lookup_blog_knowledge'
-        ? projectPrivateKnowledgeToolResult(toolName, rawUpdate) ?? 'knowledge_lookup_in_progress'
+      const update = isSensitiveRagToolName(toolName)
+        ? projectToolResultForExternalSurface(toolName, rawUpdate)
         : rawUpdate;
       return {
         type: 'progress',
@@ -634,16 +721,19 @@ export function projectPiAgentCoreEventToStreamingUpdate(
     }
     case 'tool_execution_end': {
       const toolName = typeof event.toolName === 'string' ? event.toolName : 'unknown';
-      const projected = projectPrivateKnowledgeToolResult(toolName, event.result);
-      const result = summarizePiToolResult(projected ?? event.result);
+      const result = summarizePiToolResult(
+        projectToolResultForExternalSurface(toolName, event.result),
+      );
       return event.isError
         ? {
-            type: 'error',
+            type: 'agent_response',
             content: {
-              module: 'pi-agent-core',
-              tool: event.toolName,
+              taskId: event.toolCallId || 'unknown',
+              toolName,
               toolCallId: event.toolCallId,
               result,
+              isError: true,
+              recoverable: true,
             },
             timestamp,
           }
@@ -762,16 +852,18 @@ export function createPiAgentCoreToolFromSharedSpec(
         signal,
         ...(options.extra && typeof options.extra === 'object' ? options.extra : {}),
       });
-      const projected = projectPrivateKnowledgeToolResult(spec.name, result);
       recordPlanOrPrePlanToolCall(options.analysisPlan, {
         toolName: spec.name,
         input: toolArgs,
-        resultText: summarizePiToolResult(projected ?? result),
+        resultText: summarizePiToolResult(
+          projectToolResultForExternalSurface(spec.name, result),
+        ),
       });
       onUpdate?.({ type: 'smartperfetto_tool_finished', toolCallId, toolName: spec.name });
       return {
         content: stringifyPiToolResult(result),
         details: result,
+        ...(result.isError === true ? { isError: true } : {}),
       };
     },
   };
@@ -940,9 +1032,13 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     traceId: string,
     options: AnalysisOptions = {},
   ): Promise<AnalysisResult> {
+    options = {
+      ...options,
+      analysisMode: resolveEffectiveAnalysisMode(options.analysisMode, options),
+    };
     const fakeStream = truthyEnv(this.env[PI_AGENT_CORE_FAKE_STREAM_ENV]);
     return fakeStream
-      ? this.analyzeFakeStream(query, sessionId, traceId)
+      ? this.analyzeFakeStream(query, sessionId, traceId, options)
       : this.analyzeWithSmartPerfettoTools(query, sessionId, traceId, options);
   }
 
@@ -973,6 +1069,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     query: string,
     sessionId: string,
     traceId: string,
+    options: AnalysisOptions,
   ): Promise<AnalysisResult> {
     const startedAt = Date.now();
     const modelConfig = resolvePiAgentCoreModel(this.env, true);
@@ -983,13 +1080,17 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
         ? `Pi agent-core smoke completed for query "${query}" on trace ${traceId}.`
         : `Experimental Pi agent-core smoke completed for query "${query}" on trace ${traceId}.`,
     );
+    const privateAnalysisContext = analysisContextUsesPrivateKnowledge(options);
+    if (privateAnalysisContext) this.sessionOpaqueStates.delete(sessionId);
 
     const agent = new Agent({
       initialState: {
         systemPrompt,
         model: modelConfig.model,
         tools: [],
-        messages: this.getInitialMessagesForSession(sessionId),
+        messages: privateAnalysisContext
+          ? []
+          : this.getInitialMessagesForSession(sessionId),
       },
       streamFn,
       toolExecution: 'sequential',
@@ -1019,7 +1120,11 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       });
       await agent.prompt(query);
     } finally {
-      this.rememberOpaqueState(sessionId, agent);
+      if (privateAnalysisContext) {
+        this.sessionOpaqueStates.delete(sessionId);
+      } else {
+        this.rememberOpaqueState(sessionId, agent);
+      }
       unsubscribe();
       if (this.activeAgents.get(sessionId) === agent) {
         this.activeAgents.delete(sessionId);
@@ -1057,7 +1162,8 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     options: AnalysisOptions,
   ): Promise<AnalysisResult> {
     const startedAt = Date.now();
-    const outputLanguage = parseOutputLanguage(this.env.SMARTPERFETTO_OUTPUT_LANGUAGE);
+    const outputLanguage = options.outputLanguage
+      ?? parseOutputLanguage(this.env.SMARTPERFETTO_OUTPUT_LANGUAGE);
     const sceneType = classifyScene(query);
     const sessionContext = sessionContextManager.getOrCreate(sessionId, traceId);
     const previousTurns = sessionContext.getAllTurns?.() || [];
@@ -1143,13 +1249,17 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     const modelConfig = resolvePiAgentCoreModel(this.env, false);
     const { Agent } = await this.moduleLoader(this.env);
     const prep = await this.prepareAnalysis(query, sessionId, traceId, options);
+    const privateAnalysisContext = analysisContextUsesPrivateKnowledge(options);
+    if (privateAnalysisContext) this.sessionOpaqueStates.delete(sessionId);
 
     const agent = new Agent({
       initialState: {
         systemPrompt: prep.systemPrompt,
         model: modelConfig.model,
         tools: prep.tools,
-        messages: this.getInitialMessagesForSession(sessionId),
+        messages: privateAnalysisContext
+          ? []
+          : this.getInitialMessagesForSession(sessionId),
         thinkingLevel: modelConfig.thinkingLevel ?? 'off',
       },
       sessionId,
@@ -1176,9 +1286,15 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
 
     let rounds = 0;
     let finalReportContinuations = 0;
+    let correctionInProgress = false;
+    let analysisTerminalAssistant: Record<string, unknown> | undefined;
+    let analysisErrorMessage: string | undefined;
+    let baseConclusion = '';
+    let correctedConclusion: string | undefined;
     const unsubscribe = agent.subscribe((event) => {
       if (event.type === 'turn_end') rounds++;
       const update = projectPiAgentCoreEventToStreamingUpdate(event);
+      if (correctionInProgress && update?.type === 'error') return;
       if (update) this.emit('update', update);
     });
 
@@ -1219,6 +1335,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
           conclusion: candidateConclusion,
           query,
           sceneType: prep.sceneType,
+          comparisonIdentity: prep.comparisonIdentity,
         })) {
           break;
         }
@@ -1238,21 +1355,147 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
         });
         await agent.prompt(loadPiFinalReportContinuationPrompt(prep.analysisRunSpec.outputLanguage));
       }
+
+      analysisTerminalAssistant = latestAssistantMessage(agent.state.messages);
+      const analysisStopReason = typeof analysisTerminalAssistant?.stopReason === 'string'
+        ? analysisTerminalAssistant.stopReason
+        : undefined;
+      analysisErrorMessage = typeof analysisTerminalAssistant?.errorMessage === 'string'
+        ? analysisTerminalAssistant.errorMessage
+        : agent.state.errorMessage;
+      baseConclusion = sanitizePiAgentCoreConclusionText(
+        selectAssistantConclusion(agent.state.messages) ||
+        'Pi Agent Core runtime completed without assistant text.',
+      );
+
+      if (analysisStopReason !== 'error' && analysisStopReason !== 'aborted' && !analysisErrorMessage) {
+        const closedFinalPhase = completePiAgentCoreFinalReportPhaseIfDelivered(
+          prep.analysisPlan.current,
+          baseConclusion,
+          prep.analysisRunSpec.outputLanguage,
+        );
+        if (closedFinalPhase) {
+          this.emit('update', {
+            type: 'plan_phase_updated',
+            content: {
+              phaseId: closedFinalPhase.id,
+              status: closedFinalPhase.status,
+              summary: closedFinalPhase.summary,
+              phaseName: closedFinalPhase.name,
+            },
+            timestamp: Date.now(),
+          });
+        }
+
+        const correctionPlanStatus = getPiAgentCorePlanCompletionStatus(prep.analysisPlan.current);
+        if (!prep.quickMode && correctionPlanStatus.complete) {
+          const heuristicIssues = await verifyPiAgentCoreConclusionForCorrection({
+            conclusion: baseConclusion,
+            plan: prep.analysisPlan.current,
+            hypotheses: prep.hypotheses,
+            sceneType: prep.sceneType,
+            outputLanguage: prep.analysisRunSpec.outputLanguage,
+            query,
+            allowPersistentLearning: !privateAnalysisContext,
+            comparisonIdentity: prep.comparisonIdentity,
+          });
+          const errorIssues = heuristicIssues.filter(issue => issue.severity === 'error');
+          const shouldCorrect = errorIssues.length > 0 &&
+            !errorIssues.some(isTruncationVerificationIssue);
+          if (shouldCorrect) {
+            this.emit('update', {
+              type: 'progress',
+              content: {
+                phase: 'concluding',
+                message: localize(
+                  prep.analysisRunSpec.outputLanguage,
+                  '最终报告证据绑定仍需补齐，正在基于已收集证据自动修订一次。',
+                  'The final report still needs evidence binding; applying one correction from collected evidence.',
+                ),
+              },
+              timestamp: Date.now(),
+            });
+
+            const originalTools = agent.state.tools;
+            const originalSystemPrompt = agent.state.systemPrompt;
+            const originalStateError = agent.state.errorMessage;
+            const correctionMessageBoundary = agent.state.messages?.length ?? 0;
+            try {
+              correctionInProgress = true;
+              agent.state.tools = [];
+              agent.state.systemPrompt = loadPiFinalReportCorrectionSystemPrompt(
+                prep.analysisRunSpec.outputLanguage,
+              );
+              await agent.prompt(generateCorrectionPrompt(
+                heuristicIssues,
+                baseConclusion,
+                prep.analysisRunSpec.outputLanguage,
+                prep.sceneType,
+              ));
+
+              const correctionMessages = (agent.state.messages ?? [])
+                .slice(correctionMessageBoundary);
+              const correctionAssistant = latestAssistantMessage(correctionMessages);
+              const correctionStopReason = typeof correctionAssistant?.stopReason === 'string'
+                ? correctionAssistant.stopReason
+                : undefined;
+              const correctionErrorMessage = typeof correctionAssistant?.errorMessage === 'string'
+                ? correctionAssistant.errorMessage
+                : agent.state.errorMessage;
+              if (
+                correctionStopReason !== 'error' &&
+                correctionStopReason !== 'aborted' &&
+                !correctionErrorMessage
+              ) {
+                const candidate = sanitizePiAgentCoreConclusionText(
+                  selectAssistantConclusion(correctionMessages),
+                );
+                if (candidate && hasDeliverableFinalReportHeading(candidate)) {
+                  const candidateIssues = await verifyPiAgentCoreConclusionForCorrection({
+                    conclusion: candidate,
+                    plan: prep.analysisPlan.current,
+                    hypotheses: prep.hypotheses,
+                    sceneType: prep.sceneType,
+                    outputLanguage: prep.analysisRunSpec.outputLanguage,
+                    query,
+                    allowPersistentLearning: !privateAnalysisContext,
+                    comparisonIdentity: prep.comparisonIdentity,
+                  });
+                  if (!candidateIssues.some(issue => issue.severity === 'error')) {
+                    correctedConclusion = candidate;
+                  }
+                }
+              }
+            } catch {
+              console.warn('[PiAgentCoreRuntime] Final report correction failed; keeping original report.');
+            } finally {
+              agent.state.tools = originalTools;
+              agent.state.systemPrompt = originalSystemPrompt;
+              agent.state.errorMessage = originalStateError;
+              correctionInProgress = false;
+            }
+          }
+        }
+      }
     } finally {
-      this.rememberOpaqueState(sessionId, agent);
+      if (privateAnalysisContext) {
+        this.sessionOpaqueStates.delete(sessionId);
+      } else {
+        this.rememberOpaqueState(sessionId, agent);
+      }
       unsubscribe();
       if (this.activeAgents.get(sessionId) === agent) {
         this.activeAgents.delete(sessionId);
       }
     }
 
-    const latestAssistant = latestAssistantMessage(agent.state.messages);
+    const latestAssistant = analysisTerminalAssistant ?? latestAssistantMessage(agent.state.messages);
     const stopReason = typeof latestAssistant?.stopReason === 'string'
       ? latestAssistant.stopReason
       : undefined;
     const errorMessage = typeof latestAssistant?.errorMessage === 'string'
       ? latestAssistant.errorMessage
-      : agent.state.errorMessage;
+      : analysisErrorMessage;
     if (stopReason === 'error' || stopReason === 'aborted' || errorMessage) {
       return {
         sessionId,
@@ -1268,30 +1511,12 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       };
     }
 
-    let conclusion = sanitizePiAgentCoreConclusionText(
+    let conclusion = correctedConclusion || baseConclusion || sanitizePiAgentCoreConclusionText(
       selectAssistantConclusion(agent.state.messages) ||
       'Pi Agent Core runtime completed without assistant text.',
     );
-    if (options.codeAwareMode && options.codeAwareMode !== 'off') {
+    if (analysisContextUsesPrivateKnowledge(options)) {
       conclusion = sanitizeCodeAwareText(sessionId, conclusion);
-    }
-
-    const closedFinalPhase = completePiAgentCoreFinalReportPhaseIfDelivered(
-      prep.analysisPlan.current,
-      conclusion,
-      prep.analysisRunSpec.outputLanguage,
-    );
-    if (closedFinalPhase) {
-      this.emit('update', {
-        type: 'plan_phase_updated',
-        content: {
-          phaseId: closedFinalPhase.id,
-          status: closedFinalPhase.status,
-          summary: closedFinalPhase.summary,
-          phaseName: closedFinalPhase.name,
-        },
-        timestamp: Date.now(),
-      });
     }
 
     const planStatus = getPiAgentCorePlanCompletionStatus(prep.analysisPlan.current);
@@ -1370,15 +1595,26 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
         outputLanguage: prep.analysisRunSpec.outputLanguage,
         query,
         emitIssueProgress: false,
+        allowPersistentLearning: !analysisContextUsesPrivateKnowledge(options),
       });
       let verification = await verifyCurrentConclusion();
       let verificationIssue = [
         ...verification.heuristicIssues,
         ...(verification.llmIssues || []),
       ].find(issue => issue.severity === 'error');
+      const contractIssue = assessFinalReportContractCompleteness({
+        conclusion: result.conclusion,
+        query,
+        sceneType: prep.sceneType,
+        caseRecommendations: result.conclusionContract?.caseRecommendations,
+      });
+      const truncationIssue = findTruncationVerificationIssue([
+        ...verification.heuristicIssues,
+        ...(verification.llmIssues || []),
+      ].filter(issue => issue.severity === 'error'));
       if (
         verificationIssue &&
-        isTruncationVerificationIssue(verificationIssue) &&
+        (truncationIssue || Boolean(contractIssue?.missingSections.length)) &&
         planStatus.complete
       ) {
         const repairedConclusion = repairTruncatedFinalReport({
@@ -1386,24 +1622,29 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
           plan: prep.analysisPlan.current,
           hypotheses: prep.hypotheses,
           outputLanguage: prep.analysisRunSpec.outputLanguage,
+          recoveryKind: truncationIssue ? 'truncation' : 'missing_contract',
+          missingContractSections: contractIssue?.missingSections,
         });
         if (repairedConclusion) {
+          const preRecoveryConfidence = result.confidence;
           result.conclusion = repairedConclusion;
           result.findings = extractFindingsFromText(repairedConclusion);
-          result.confidence = estimateConfidence(result.findings, false);
-          if (result.terminationReason === 'max_turns') {
-            result.partial = undefined;
-            result.terminationReason = undefined;
-            result.terminationMessage = undefined;
-          }
+          result.confidence = Math.min(
+            preRecoveryConfidence,
+            estimateConfidence(result.findings, Boolean(result.partial)),
+          );
           this.emit('update', {
             type: 'progress',
             content: {
               phase: 'concluding',
               message: localize(
                 prep.analysisRunSpec.outputLanguage,
-                '最终报告输出被截断，已基于结构化证据补齐收尾并重新验证。',
-                'The final report output was truncated; it was closed from structured evidence and re-verified.',
+                truncationIssue
+                  ? '最终报告输出被截断，已基于结构化证据补齐收尾并重新验证。'
+                  : '最终报告缺少必需结构，已基于完成阶段的证据补齐并重新验证。',
+                truncationIssue
+                  ? 'The final report output was truncated; it was closed from structured evidence and re-verified.'
+                  : 'The final report missed required structure; it was completed from finished-phase evidence and re-verified.',
               ),
             },
             timestamp: Date.now(),
@@ -1435,7 +1676,12 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     }
 
     const wasPartialBeforeQualityGate = result.partial === true;
-    const gateIssue = applyFinalResultQualityGate({ result, query, sceneType: prep.sceneType });
+    const gateIssue = applyFinalResultQualityGate({
+      result,
+      query,
+      sceneType: prep.sceneType,
+      comparisonIdentity: prep.comparisonIdentity,
+    });
     if (gateIssue && !wasPartialBeforeQualityGate) {
       result.confidence = estimateConfidence(result.findings, true);
       this.emit('update', {
@@ -1609,7 +1855,8 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     traceId: string,
     options: AnalysisOptions,
   ): Promise<PiAnalysisPreparation> {
-    const outputLanguage = parseOutputLanguage(this.env.SMARTPERFETTO_OUTPUT_LANGUAGE);
+    const outputLanguage = options.outputLanguage
+      ?? parseOutputLanguage(this.env.SMARTPERFETTO_OUTPUT_LANGUAGE);
     const sceneType = classifyScene(query);
     const sessionContext = sessionContextManager.getOrCreate(sessionId, traceId);
     const previousTurns = sessionContext.getAllTurns?.() || [];
@@ -1645,7 +1892,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     skillExecutor.registerSkills(skillRegistry.getAllSkills());
     skillExecutor.setFragmentRegistry(skillRegistry.getFragmentCache());
 
-    let architecture = this.architectureCache.get(traceId);
+    let architecture = getLruCacheEntry(this.architectureCache, traceId);
     if (!architecture && !quickResolution.skipTracePreflightDetection) {
       try {
         architecture = await createArchitectureDetector().detect({
@@ -1653,7 +1900,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
           traceProcessorService: this.traceProcessorService,
           packageName: effectivePackageName,
         });
-        if (architecture) this.architectureCache.set(traceId, architecture);
+        if (architecture) setLruCacheEntry(this.architectureCache, traceId, architecture);
       } catch (err) {
         console.warn('[PiAgentCoreRuntime] Architecture detection failed:', (err as Error).message);
       }
@@ -1724,9 +1971,12 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
 
     const watchdogWarning: { current: string | null } = { current: null };
     const knowledgeScope = analysisRunSpec.scopes.knowledge;
-    const recentSqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope);
+    const privateAnalysisContext = analysisContextUsesPrivateKnowledge(options);
+    const recentSqlErrors = loadLearnedSqlFixPairs(5, knowledgeScope, options);
     const skillNotesBudget = createRuntimeSkillNotesBudget(quickMode);
-    const comparisonContext = buildRuntimeTracePairComparisonContext({
+    const comparisonContext = await buildRuntimeTracePairComparisonContext({
+      traceProcessorService: this.traceProcessorService,
+      currentTraceId: traceId,
       ...(options.referenceTraceId ? { referenceTraceId: options.referenceTraceId } : {}),
       ...(options.tracePairContext ? { tracePairContext: options.tracePairContext } : {}),
     });
@@ -1757,6 +2007,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       codeAwareMode: options.codeAwareMode,
       codebaseIds: options.codebaseIds,
       knowledgeSourceIds: options.knowledgeSourceIds,
+      analysisContextFingerprint: options.analysisContextFingerprint,
       referenceTraceId: options.referenceTraceId,
       ...(comparisonContext ? { comparisonContext } : {}),
     });
@@ -1780,10 +2031,24 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     });
 
     if (quickMode) {
+      const quickConversationContext = buildQuickConversationContext(previousTurns, outputLanguage);
+      if (quickConversationContext) {
+        prompt = `${quickConversationContext}\n\n${prompt}`;
+      }
       const quickMemoryPayload = buildQuickMemoryContextPayload({
-        patternContext: buildPatternContextSection(traceFeatures, knowledgeScope),
-        negativePatternContext: buildNegativePatternSection(traceFeatures, knowledgeScope),
-        caseBackgroundContext: buildCaseBackgroundContext(sceneType, architecture?.type, knowledgeScope),
+        patternContext: privateAnalysisContext
+          ? undefined
+          : buildPatternContextSection(traceFeatures, knowledgeScope),
+        negativePatternContext: privateAnalysisContext
+          ? undefined
+          : buildNegativePatternSection(traceFeatures, knowledgeScope),
+        caseBackgroundContext: buildRuntimeCaseBackgroundContext({
+          sceneType,
+          architectureType: architecture?.type,
+          knowledgeScope,
+          outputLanguage,
+          privateAnalysisContext,
+        }),
         sqlErrorFixPairs: recentSqlErrors,
         recentSqlResultsContext: sessionContext.generateRecentSqlResultPromptContext(3),
         outputLanguage,
@@ -1813,6 +2078,12 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
         hypotheses,
         uncertaintyFlags,
         analysisRunSpec,
+        ...(comparisonContext ? {
+          comparisonIdentity: {
+            currentPackageName: effectivePackageName,
+            referencePackageName: comparisonContext.referencePackageName,
+          },
+        } : {}),
         quickMemoryContextCounts: quickMemoryPayload.counts,
       };
     }
@@ -1825,14 +2096,12 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       // Non-fatal. Pi can still use lookup_sql_schema/knowledge tools.
     }
 
-    const patternContext = buildPatternContextSection(
-      traceFeatures,
-      knowledgeScope,
-    );
-    const negativePatternContext = buildNegativePatternSection(
-      traceFeatures,
-      knowledgeScope,
-    );
+    const patternContext = privateAnalysisContext
+      ? undefined
+      : buildPatternContextSection(traceFeatures, knowledgeScope);
+    const negativePatternContext = privateAnalysisContext
+      ? undefined
+      : buildNegativePatternSection(traceFeatures, knowledgeScope);
     const traceInfo = this.traceProcessorService.getTrace(traceId);
     const systemPromptEnv = normalizeOptionalString(this.env[PI_AGENT_CORE_SYSTEM_PROMPT_ENV]);
     const analysisContext: ClaudeAnalysisContext = {
@@ -1857,6 +2126,13 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
         })),
       patternContext,
       negativePatternContext,
+      caseBackgroundContext: buildRuntimeCaseBackgroundContext({
+        sceneType,
+        architectureType: architecture?.type,
+        knowledgeScope,
+        outputLanguage,
+        privateAnalysisContext,
+      }),
       previousPlan,
       planHistory: analysisPlan.history.length > 0 ? analysisPlan.history : undefined,
       selectionContext: options.selectionContext,
@@ -1887,15 +2163,21 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       hypotheses,
       uncertaintyFlags,
       analysisRunSpec,
+      ...(comparisonContext ? {
+        comparisonIdentity: {
+          currentPackageName: effectivePackageName,
+          referencePackageName: comparisonContext.referencePackageName,
+        },
+      } : {}),
     };
   }
 
   restoreArchitectureCache(traceId: string, architecture: ArchitectureInfo): void {
-    this.architectureCache.set(traceId, architecture);
+    setLruCacheEntry(this.architectureCache, traceId, architecture);
   }
 
   getCachedArchitecture(traceId: string): ArchitectureInfo | undefined {
-    return this.architectureCache.get(traceId);
+    return getLruCacheEntry(this.architectureCache, traceId);
   }
 
   getSessionNotes(sessionId: string): AnalysisNote[] {
@@ -1915,23 +2197,29 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     traceId: string,
     sessionFields: SessionFieldsForSnapshot,
   ): SessionStateSnapshot {
+    const privateKnowledge = sessionFieldsUsePrivateKnowledge(sessionFields);
+    const durableFields = projectSessionFieldsForDurableSnapshot(sessionFields);
     const planState = this.sessionPlans.get(sessionId);
     const artifactStore = this.artifactStores.get(sessionId);
     const activeAgent = this.activeAgents.get(sessionId);
-    const opaque = this.sessionOpaqueStates.get(sessionId)
-      ?? createPiOpaqueStateFromMessages(activeAgent?.state.messages);
+    const opaque = privateKnowledge
+      ? undefined
+      : this.sessionOpaqueStates.get(sessionId)
+        ?? (activeAgent
+          ? createPiOpaqueStateFromMessages(activeAgent.state.messages)
+          : undefined);
     return {
       version: 1,
       snapshotTimestamp: Date.now(),
       sessionId,
       traceId,
-      ...sessionFields,
-      analysisNotes: this.sessionNotes.get(sessionId) || [],
-      analysisPlan: planState?.current ?? null,
-      planHistory: planState?.history ?? [],
-      uncertaintyFlags: this.sessionUncertaintyFlags.get(sessionId) || [],
-      claudeHypotheses: this.sessionHypotheses.get(sessionId) || undefined,
-      architecture: this.architectureCache.get(traceId),
+      ...durableFields,
+      analysisNotes: privateKnowledge ? [] : this.sessionNotes.get(sessionId) || [],
+      analysisPlan: privateKnowledge ? null : planState?.current ?? null,
+      planHistory: privateKnowledge ? [] : planState?.history ?? [],
+      uncertaintyFlags: privateKnowledge ? [] : this.sessionUncertaintyFlags.get(sessionId) || [],
+      claudeHypotheses: privateKnowledge ? undefined : this.sessionHypotheses.get(sessionId) || undefined,
+      architecture: getLruCacheEntry(this.architectureCache, traceId),
       engineState: createPiAgentCoreSnapshotEngineState({
         providerId: sessionFields.agentRuntimeProviderId,
         providerSnapshotHash: sessionFields.agentRuntimeProviderSnapshotHash,
@@ -1940,7 +2228,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       agentRuntimeKind: PI_AGENT_CORE_RUNTIME_KIND,
       agentRuntimeProviderId: sessionFields.agentRuntimeProviderId,
       agentRuntimeProviderSnapshotHash: sessionFields.agentRuntimeProviderSnapshotHash,
-      artifacts: artifactStore?.serialize(),
+      artifacts: privateKnowledge ? undefined : artifactStore?.serialize(),
     };
   }
 
@@ -1964,7 +2252,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
       this.artifactStores.set(sessionId, ArtifactStore.fromSnapshot(snapshot.artifacts));
     }
     if (snapshot.architecture) {
-      this.architectureCache.set(traceId, snapshot.architecture);
+      setLruCacheEntry(this.architectureCache, traceId, snapshot.architecture);
     }
     const opaque = getPiAgentCoreSnapshotEngineState(snapshot)?.opaque;
     if (opaque) {
@@ -1978,6 +2266,7 @@ export class PiAgentCoreRuntime extends EventEmitter implements IOrchestrator {
     }
     this.activeAgents.clear();
     this.sessionOpaqueStates.clear();
+    this.architectureCache.clear();
     this.removeAllListeners();
   }
 

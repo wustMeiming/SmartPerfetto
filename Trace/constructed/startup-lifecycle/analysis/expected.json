@@ -7,7 +7,7 @@
       "id": "execute-app_process_starts_summary",
       "type": "skill",
       "target": "app_process_starts_summary",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/app_process_starts_summary.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -20,7 +20,7 @@
       "id": "execute-launcher_module",
       "type": "skill",
       "target": "launcher_module",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/modules/app/launcher_module.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -33,7 +33,7 @@
       "id": "execute-startup_analysis",
       "type": "skill",
       "target": "startup_analysis",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/startup_analysis.skill.yaml",
       "parameters": {},
       "required_steps": [
@@ -95,7 +95,7 @@
       "id": "execute-startup_detail",
       "type": "skill",
       "target": "startup_detail",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/startup_detail.skill.yaml",
       "parameters": {
         "startup_id": 1,
@@ -204,7 +204,7 @@
       "id": "execute-startup_slow_reasons",
       "type": "skill",
       "target": "startup_slow_reasons",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/startup_slow_reasons.skill.yaml",
       "parameters": {},
       "required_steps": [

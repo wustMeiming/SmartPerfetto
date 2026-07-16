@@ -12,3 +12,7 @@
 {{packageAlignment}}
 {{referenceArchitecture}}
 {{capabilityAlignment}}
+
+### 最终交付身份契约
+- 最终报告必须显式写出两侧完整包名，并说明各自对应的 Trace 侧；不能只用“左侧/右侧”“主/参考”或业务别名替代包名。
+- 即使两侧包名相同，也要在首次对比结论中明确当前 Trace 与参考 Trace 的映射。

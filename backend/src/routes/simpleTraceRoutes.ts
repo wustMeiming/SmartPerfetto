@@ -7,8 +7,7 @@ import multer from 'multer';
 import path from 'path';
 import { createWriteStream } from 'fs';
 import fs from 'fs/promises';
-import net from 'net';
-import { Readable, Transform } from 'stream';
+import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { uuidv4 } from '../utils/uuid';
 import { resolveFeatureConfig } from '../config';
@@ -42,10 +41,13 @@ import {
 } from '../services/enterpriseTenantLifecycleService';
 import {
   buildTraceOwnerMetadata,
+  countTraceMetadataForContext,
   deleteTraceMetadataForContext,
   getTraceFilePath,
   getWritableTraceDirForContext,
+  InvalidTraceMetadataCursorError,
   listTraceMetadataForContext,
+  listTraceMetadataPageForContext,
   readTraceMetadata,
   readTraceMetadataForContext,
   type TraceMetadata,
@@ -60,12 +62,21 @@ import {
   sharesWorkspaceWithContext,
 } from '../services/rbac';
 import { resolveTraceUploadLimitBytes } from '../services/traceUploadLimit';
+import {issueTraceProcessorProxyCapability} from '../services/traceProcessorProxyCapability';
+import {
+  downloadPublicHttpUrl,
+  PublicHttpUrlRejectedError,
+  sanitizedPublicHttpUrl,
+  type PublicHttpDownloadResponse,
+} from '../services/publicHttpDownload';
 
 const router = Router();
 const URL_UPLOAD_TIMEOUT_MS = 300000;
 const TEMP_UPLOAD_SUFFIX = '.uploading';
 const CLEANUP_TERMINAL_LEASE_STATES = new Set<TraceProcessorLeaseState>(['released', 'failed']);
 const DELETE_BLOCKING_RUN_STATUSES = new Set(['pending', 'running', 'awaiting_user']);
+const DEFAULT_TRACE_LIST_LIMIT = 100;
+const MAX_TRACE_LIST_LIMIT = 200;
 // 2x covers the in-flight upload plus the .uploading temp file written alongside the final trace.
 const DISK_SAFETY_MULTIPLIER = 2;
 
@@ -454,6 +465,34 @@ function ownedTraceIdForProcessorKey(processorKey: string, ownedTraceIds: Set<st
   return null;
 }
 
+function traceListOptions(req: Request): {limit: number; cursor?: string} {
+  const rawLimit = req.query.limit;
+  const rawCursor = req.query.cursor;
+  if (rawLimit !== undefined && typeof rawLimit !== 'string') {
+    throw new RangeError('Trace list limit must be a single integer');
+  }
+  if (rawCursor !== undefined && typeof rawCursor !== 'string') {
+    throw new InvalidTraceMetadataCursorError();
+  }
+  const limit = rawLimit === undefined ? DEFAULT_TRACE_LIST_LIMIT : Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_TRACE_LIST_LIMIT) {
+    throw new RangeError(`Trace list limit must be between 1 and ${MAX_TRACE_LIST_LIMIT}`);
+  }
+  return {limit, ...(rawCursor ? {cursor: rawCursor} : {})};
+}
+
+async function readableTraceIdsForCandidates(
+  context: RequestContext,
+  candidateTraceIds: Iterable<string>,
+): Promise<Set<string>> {
+  const ids = Array.from(new Set(candidateTraceIds));
+  const resolved = await Promise.all(ids.map(async traceId => ({
+    traceId,
+    metadata: await readTraceMetadataForContext(traceId, context),
+  })));
+  return new Set(resolved.filter(item => item.metadata !== null).map(item => item.traceId));
+}
+
 function decideLeaseModeForTrace(
   context: RequestContext,
   traceId: string,
@@ -486,6 +525,15 @@ function leaseResponseFields(acquisition: TraceProcessorLeaseAcquisition | null 
     leaseModeReason: acquisition.decision.reason,
     leaseQueueLength: acquisition.decision.signals.sharedQueueLength,
   };
+}
+
+function websocketCapabilityResponseFields(
+  context: RequestContext,
+  leaseId: string | undefined,
+): {websocketCapability?: ReturnType<typeof issueTraceProcessorProxyCapability>} {
+  return leaseId
+    ? {websocketCapability: issueTraceProcessorProxyCapability({context, leaseId})}
+    : {};
 }
 
 function acquireFrontendTraceLease(
@@ -617,26 +665,6 @@ function getFilenameFromUrl(rawUrl: string, fallback = 'trace.perfetto'): string
   }
 }
 
-function isBlockedTraceUrl(url: URL): boolean {
-  const hostname = url.hostname.toLowerCase();
-  if (hostname === 'localhost') return true;
-
-  const ipVersion = net.isIP(hostname);
-  if (ipVersion === 4) {
-    const parts = hostname.split('.').map(part => Number.parseInt(part, 10));
-    if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0) return true;
-    if (parts[0] === 169 && parts[1] === 254) return true;
-    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
-    if (parts[0] === 192 && parts[1] === 168) return true;
-    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
-  } else if (ipVersion === 6) {
-    if (hostname === '::1') return true;
-    if (hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80')) return true;
-  }
-
-  return false;
-}
-
 function tempUploadFilename(): string {
   return `${uuidv4()}${TEMP_UPLOAD_SUFFIX}`;
 }
@@ -702,7 +730,10 @@ function createUploadSizeLimitStream(maxBytes: number): { stream: Transform; get
   };
 }
 
-async function streamResponseBodyToTempFile(response: globalThis.Response, tempPath: string): Promise<number> {
+async function streamResponseBodyToTempFile(
+  response: PublicHttpDownloadResponse,
+  tempPath: string,
+): Promise<number> {
   if (!response.body) {
     throw new Error('Trace URL response body is empty');
   }
@@ -710,7 +741,7 @@ async function streamResponseBodyToTempFile(response: globalThis.Response, tempP
   const limiter = createUploadSizeLimitStream(resolveTraceUploadLimitBytes());
   try {
     await pipeline(
-      Readable.fromWeb(response.body as any),
+      response.body,
       limiter.stream,
       createWriteStream(tempPath, { flags: 'wx' }),
     );
@@ -819,6 +850,7 @@ router.post(
           leaseMode: traceInfo?.leaseMode,
           leaseModeReason: traceInfo?.leaseModeReason,
           leaseQueueLength: traceInfo?.leaseQueueLength,
+          ...websocketCapabilityResponseFields(context, traceInfo?.leaseId),
           processorStatus: traceInfo?.processor?.status,
         }
       });
@@ -858,24 +890,17 @@ router.post('/upload-url', async (req, res) => {
         error: 'Only http and https trace URLs are supported'
       });
     }
-    if (isBlockedTraceUrl(url)) {
-      return res.status(400).json({
-        error: 'Local and private trace URLs are not supported'
-      });
-    }
-
     const filename = typeof req.body?.filename === 'string' && req.body.filename.trim()
       ? path.basename(req.body.filename.trim())
       : getFilenameFromUrl(rawUrl);
 
-    console.log(`Fetching URL trace: ${rawUrl}`);
-    const response = await fetch(rawUrl, {
-      signal: AbortSignal.timeout(URL_UPLOAD_TIMEOUT_MS),
-    });
-    if (!response.ok) {
+    console.log(`Fetching URL trace: ${sanitizedPublicHttpUrl(url)}`);
+    const response = await downloadPublicHttpUrl(url, URL_UPLOAD_TIMEOUT_MS);
+    if (response.status < 200 || response.status >= 300) {
+      response.body.destroy();
       return res.status(502).json({
         error: 'Failed to fetch trace URL',
-        details: `${response.status} ${response.statusText}`
+        details: `${response.status} ${response.statusText}`,
       });
     }
 
@@ -883,6 +908,7 @@ router.post('/upload-url', async (req, res) => {
     const uploadLimitBytes = resolveTraceUploadLimitBytes();
     const contentLengthBytes = contentLength ? Number.parseInt(contentLength, 10) : Number.NaN;
     if (Number.isFinite(contentLengthBytes) && contentLengthBytes > uploadLimitBytes) {
+      response.body.destroy();
       return res.status(413).json({
         error: 'Trace file too large',
         details: `Remote trace exceeds ${uploadLimitBytes} bytes`
@@ -891,6 +917,7 @@ router.post('/upload-url', async (req, res) => {
     if (Number.isFinite(contentLengthBytes)) {
       const quotaDecision = evaluateTraceUploadQuota(context, contentLengthBytes);
       if (!quotaDecision.allowed) {
+        response.body.destroy();
         return sendTraceQuotaDenied(res, quotaDecision);
       }
     }
@@ -915,7 +942,7 @@ router.post('/upload-url', async (req, res) => {
       throw streamError;
     }
 
-    console.log(`URL trace fetched successfully: ${rawUrl} -> ${traceId}`);
+    console.log(`URL trace fetched successfully: ${sanitizedPublicHttpUrl(response.finalUrl)} -> ${traceId}`);
 
     const traceInfo = await finalizeTraceUpload(traceId, filename, size, finalPath, context, 'url');
     if (!traceUploadHasRpcTarget(traceInfo)) {
@@ -937,11 +964,18 @@ router.post('/upload-url', async (req, res) => {
         leaseMode: traceInfo?.leaseMode,
         leaseModeReason: traceInfo?.leaseModeReason,
         leaseQueueLength: traceInfo?.leaseQueueLength,
+        ...websocketCapabilityResponseFields(context, traceInfo?.leaseId),
         processorStatus: traceInfo?.processor?.status,
       }
     });
 
   } catch (error: any) {
+    if (error instanceof PublicHttpUrlRejectedError) {
+      return res.status(400).json({
+        error: 'Local and private trace URLs are not supported',
+        details: error.message,
+      });
+    }
     if (error instanceof TraceUploadTooLargeError) {
       return res.status(413).json({
         error: 'Trace file too large',
@@ -963,13 +997,15 @@ router.get('/', async (req, res) => {
     if (!hasRbacPermission(context, 'trace:read')) {
       return sendForbidden(res, 'Listing traces requires trace:read permission');
     }
-    const ownedTraces: TraceMetadata[] = await listTraceMetadataForContext(context);
-
-    // Sort by upload date (newest first)
-    ownedTraces.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
-
-    res.json({ traces: ownedTraces });
+    const page = await listTraceMetadataPageForContext(context, traceListOptions(req));
+    res.json(page);
   } catch (error: any) {
+    if (error instanceof InvalidTraceMetadataCursorError || error instanceof RangeError) {
+      return res.status(400).json({
+        error: error.message,
+        code: 'INVALID_TRACE_LIST_PAGE',
+      });
+    }
     console.error('List traces error:', error);
     res.status(500).json({
       error: 'Failed to list traces',
@@ -986,14 +1022,22 @@ router.get('/stats', async (req, res) => {
     if (!hasRbacPermission(context, 'trace:read')) {
       return sendForbidden(res, 'Trace stats require trace:read permission');
     }
-    const ownedTraceIds = new Set<string>();
-    for (const metadata of await listTraceMetadataForContext(context)) {
-      ownedTraceIds.add(metadata.id);
-    }
     const portPoolStats = getPortPool().getStats();
     const processorStats = TraceProcessorFactory.getStats();
     const traceService = getTraceProcessorService();
-    const traces = traceService.getAllTraces().filter(t => ownedTraceIds.has(t.id));
+    const serviceTraces = traceService.getAllTraces();
+    const leases = enterpriseLeasesEnabled()
+      ? getTraceProcessorLeaseStore().listLeases(leaseScopeFromContext(context))
+      : [];
+    const candidateTraceIds = new Set<string>([
+      ...serviceTraces.map(trace => trace.id),
+      ...processorStats.processors.map(processor => processor.traceId),
+      ...leases.map(lease => lease.traceId),
+      ...portPoolStats.allocations.map(allocation => allocation.traceId.split(':lease:', 1)[0]),
+    ]);
+    const ownedTraceIds = await readableTraceIdsForCandidates(context, candidateTraceIds);
+    const traceMetadataCount = await countTraceMetadataForContext(context);
+    const traces = serviceTraces.filter(t => ownedTraceIds.has(t.id));
     const allocations = portPoolStats.allocations
       .map(allocation => ({
         ...allocation,
@@ -1005,11 +1049,8 @@ router.get('/stats', async (req, res) => {
       const worker = processor.sqlWorker;
       return sum + (worker ? worker.queuedP0 + worker.queuedP1 + worker.queuedP2 : 0);
     }, 0);
-    const leases = enterpriseLeasesEnabled()
-      ? getTraceProcessorLeaseStore().listLeases(leaseScopeFromContext(context))
-        .filter(lease => ownedTraceIds.has(lease.traceId))
-      : [];
-    const activeLeases = leases.filter(lease => lease.state !== 'released' && lease.state !== 'failed');
+    const ownedLeases = leases.filter(lease => ownedTraceIds.has(lease.traceId));
+    const activeLeases = ownedLeases.filter(lease => lease.state !== 'released' && lease.state !== 'failed');
 
     res.json({
       success: true,
@@ -1033,11 +1074,11 @@ router.get('/stats', async (req, res) => {
           items: processors,
         },
         leases: {
-          count: leases.length,
+          count: ownedLeases.length,
           activeCount: activeLeases.length,
-          crashCount: leases.filter(lease => lease.state === 'crashed').length,
-          holderCount: leases.reduce((sum, lease) => sum + lease.holderCount, 0),
-          items: leases.map(lease => ({
+          crashCount: ownedLeases.filter(lease => lease.state === 'crashed').length,
+          holderCount: ownedLeases.reduce((sum, lease) => sum + lease.holderCount, 0),
+          items: ownedLeases.map(lease => ({
             id: lease.id,
             traceId: lease.traceId,
             mode: lease.mode,
@@ -1056,6 +1097,7 @@ router.get('/stats', async (req, res) => {
         },
         traces: {
           count: traces.length,
+          metadataCount: traceMetadataCount,
           items: traces.map(t => ({
             id: t.id,
             filename: t.filename,

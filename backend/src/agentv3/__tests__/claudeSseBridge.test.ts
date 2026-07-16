@@ -125,6 +125,27 @@ describe('createSseBridge', () => {
     }
   });
 
+  it('logs only the shape of unhandled SDK messages', () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const bridge = createSseBridge(() => {});
+
+    try {
+      bridge.handleMessage({
+        type: 'future_sdk_message',
+        subtype: 'future_subtype',
+        payload: 'PRIVATE_UNHANDLED_MESSAGE_CANARY',
+      });
+
+      const serializedLogs = JSON.stringify(logSpy.mock.calls);
+      expect(serializedLogs).not.toContain('PRIVATE_UNHANDLED_MESSAGE_CANARY');
+      expect(serializedLogs).toContain('future_sdk_message');
+      expect(serializedLogs).toContain('future_subtype');
+      expect(serializedLogs).toContain('payload');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it('can flush pending streamed answer text when a stream is cancelled before assistant/result', () => {
     const updates: StreamingUpdate[] = [];
     const bridge = createSseBridge((update) => updates.push(update));

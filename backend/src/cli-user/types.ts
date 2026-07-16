@@ -103,6 +103,8 @@ export interface CliSessionConfig {
   codeAwareMode?: CodeAwareMode;
   /** Registered codebase ids exposed to this analysis turn. */
   codebaseIds?: string[];
+  /** Registered private knowledge source ids exposed to this analysis turn. */
+  knowledgeSourceIds?: string[];
   /** Analysis mode selected for the latest turn. */
   analysisMode?: CliAnalysisMode;
   /** Capture metadata when the session was created by `smp capture ... --analyze`. */

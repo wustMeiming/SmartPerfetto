@@ -14,7 +14,7 @@
     "shellcheck": "shellcheck -x start.sh scripts/*.sh",
     "check:frontend-prebuild": "node scripts/check-frontend-prebuild.cjs",
     "test:node-env": "bash scripts/test-node-env.sh",
-    "test:governance": "node --test scripts/__tests__/check-perfetto-skills-impact.test.mjs",
+    "test:governance": "node --test scripts/__tests__/check-perfetto-skills-impact.test.mjs scripts/__tests__/process-harness.test.mjs scripts/__tests__/runtime-distribution-assets.test.mjs",
     "sync:rendering-pipelines": "node scripts/sync-rendering-pipelines.mjs",
     "check:rendering-pipelines": "node scripts/sync-rendering-pipelines.mjs --check",
     "verify:rendering-pipelines": "npm run check:rendering-pipelines && node --test scripts/__tests__/sync-rendering-pipelines.test.mjs scripts/__tests__/rendering-pipeline-runtime-assets.test.mjs && npm --prefix backend run generate:pipeline-detection -- --check",
@@ -28,17 +28,17 @@
     "rust:check": "cargo check --manifest-path rust/flamegraph-analyzer/Cargo.toml",
     "rust:test": "cargo test --manifest-path rust/flamegraph-analyzer/Cargo.toml",
     "rust:verify": "npm run rust:fmt && npm run rust:check && npm run rust:test",
-    "package:portable": "./scripts/package-portable.sh",
-    "package:windows-exe": "./scripts/package-windows-exe.sh",
-    "package:macos-app": "./scripts/package-portable.sh --targets macos-arm64",
-    "package:linux": "./scripts/package-portable.sh --targets linux-x64",
+    "package:portable": "bash ./scripts/package-portable.sh",
+    "package:windows-exe": "bash ./scripts/package-windows-exe.sh",
+    "package:macos-app": "bash ./scripts/package-portable.sh --targets macos-arm64",
+    "package:linux": "bash ./scripts/package-portable.sh --targets linux-x64",
     "version:sync": "node scripts/sync-version.cjs",
     "version:set": "node scripts/sync-version.cjs",
-    "verify:public-skills": "./scripts/verify-public-skill-export.sh",
+    "verify:public-skills": "bash ./scripts/verify-public-skill-export.sh",
     "check:perfetto-skills-impact": "node scripts/check-perfetto-skills-impact.mjs",
     "trace-processor:sync-prebuilts": "node scripts/sync-trace-processor-prebuilts.cjs",
-    "release:portable": "./scripts/release-portable.sh",
-    "release:windows-exe": "./scripts/release-windows-exe.sh",
+    "release:portable": "bash ./scripts/release-portable.sh",
+    "release:windows-exe": "bash ./scripts/release-windows-exe.sh",
     "quality": "npm run lint && npm run format:check && npm run deadcode && npm run shellcheck",
     "verify:pr": "npm run test:governance && npm run verify:rendering-pipelines && npm run quality && npm run check:frontend-prebuild && npm run rust:verify && npm --prefix backend run verify:pr"
   },
@@ -50,7 +50,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.3",
+    "ajv": "^8.17.1",
     "js-yaml": "^4.3.0",
-    "knip": "^6.26.0"
+    "knip": "^6.26.0",
+    "protobufjs": "^7.6.5"
   }
 }

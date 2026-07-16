@@ -9,9 +9,18 @@
         "Dockerfile",
         "docker-compose*.yml",
         "start.sh",
-        "scripts/*.sh"
+        "scripts/*.sh",
+        "Trace/tools/trace-corpus.cjs"
       ],
-      "project": ["package.json", ".github/**/*.yml", "Dockerfile", "docker-compose*.yml", "start.sh", "scripts/*.sh"]
+      "project": [
+        "package.json",
+        ".github/**/*.yml",
+        "Dockerfile",
+        "docker-compose*.yml",
+        "start.sh",
+        "scripts/*.sh",
+        "Trace/tools/**/*.cjs"
+      ]
     },
     "backend": {
       "entry": [

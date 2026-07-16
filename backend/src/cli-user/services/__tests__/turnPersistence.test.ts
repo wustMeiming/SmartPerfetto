@@ -10,6 +10,7 @@ import { computePaths, ensureLayout, ensureSessionLayout, sessionPaths } from '.
 import { commitTurnOutputs } from '../turnPersistence';
 import type { Renderer } from '../../repl/renderer';
 import type { RunTurnOutput } from '../cliAnalyzeService';
+import {clearCodeAwareOutputGuards, registerCodeAwareCanary} from '../../../services/security/codeAwareOutputRegistry';
 
 function rendererStub(): Renderer {
   return {
@@ -32,6 +33,7 @@ describe('commitTurnOutputs', () => {
     const result: RunTurnOutput = {
       sessionId: 'session-receipt',
       traceId: 'trace-receipt',
+      codeAwareMode: 'off',
       result: {
         sessionId: 'session-receipt',
         success: true,
@@ -133,4 +135,94 @@ describe('commitTurnOutputs', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it('keeps every private session artifact free of raw query, model, and quality canaries', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'smartperfetto-cli-private-'));
+    const paths = computePaths(home);
+    ensureLayout(paths);
+    const sessionId = 'session-private-artifacts';
+    const sp = sessionPaths(paths, sessionId);
+    ensureSessionLayout(sp);
+    const canary = 'CLI_PRIVATE_ARTIFACT_CANARY';
+    registerCodeAwareCanary(sessionId, canary);
+    const result: RunTurnOutput = {
+      sessionId,
+      traceId: 'trace-private',
+      codeAwareMode: 'provider_send',
+      privateKnowledge: true,
+      reportHtml: `<html><body>${canary}</body></html>`,
+      reportError: canary,
+      result: {
+        sessionId,
+        success: true,
+        findings: [{id: 'private', title: canary}] as any,
+        hypotheses: [{description: canary}] as any,
+        conclusion: `conclusion ${canary}`,
+        conclusionContract: {claims: [{statement: canary}]} as any,
+        claimSupport: [{claimId: canary}] as any,
+        claimVerificationResult: {status: canary} as any,
+        identityResolutions: [{identityRefId: canary}] as any,
+        confidence: 0.8,
+        rounds: 1,
+        totalDurationMs: 20,
+        terminationMessage: canary,
+        uiActionProposals: [{title: canary}] as any,
+      },
+    };
+
+    try {
+      commitTurnOutputs({
+        paths,
+        sp,
+        renderer: rendererStub(),
+        sessionId,
+        turn: 1,
+        query: `query ${canary}`,
+        result,
+        config: {
+          sessionId,
+          backendSessionId: sessionId,
+          tracePath: '/tmp/private.perfetto-trace',
+          traceId: 'trace-private',
+          codeAwareMode: 'provider_send',
+          codebaseIds: ['private-codebase'],
+          createdAt: 1,
+          lastTurnAt: 2,
+          turnCount: 1,
+        },
+        turnMarkdown: `# Turn 1\n\nquery ${canary}\n\nconclusion ${canary}`,
+        indexEntry: {
+          sessionId,
+          createdAt: 1,
+          lastTurnAt: 2,
+          tracePath: '/tmp/private.perfetto-trace',
+          traceFilename: 'private.perfetto-trace',
+          firstQuery: `query ${canary}`,
+          turnCount: 1,
+          status: 'completed',
+        },
+      });
+
+      const persistedText = [
+        ...readTextFiles(sp.dir),
+        ...readTextFiles(paths.home),
+      ].join('\n');
+      expect(persistedText).not.toContain(canary);
+      expect(persistedText).toMatch(/原始内容未持久化|original content not persisted/);
+    } finally {
+      clearCodeAwareOutputGuards(sessionId);
+      fs.rmSync(home, {recursive: true, force: true});
+    }
+  });
 });
+
+function readTextFiles(root: string): string[] {
+  if (!fs.existsSync(root)) return [];
+  const output: string[] = [];
+  for (const entry of fs.readdirSync(root, {withFileTypes: true})) {
+    const target = path.join(root, entry.name);
+    if (entry.isDirectory()) output.push(...readTextFiles(target));
+    else if (entry.isFile()) output.push(fs.readFileSync(target, 'utf-8'));
+  }
+  return output;
+}

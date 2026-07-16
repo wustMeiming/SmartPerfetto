@@ -15,13 +15,6 @@
 
 import { createHash } from 'crypto';
 
-const SHORT_LIMIT = 120;
-
-function shorten(s: string): string {
-  const flat = s.replace(/\s+/g, ' ').trim();
-  return flat.length > SHORT_LIMIT ? flat.slice(0, SHORT_LIMIT - 3) + '...' : flat;
-}
-
 function hashInput(input: unknown): string {
   return createHash('sha256').update(JSON.stringify(input ?? null)).digest('hex').slice(0, 8);
 }
@@ -36,9 +29,9 @@ export interface ToolCallSummary {
  * Resolve a structured digest for an MCP tool call. `toolName` must be the
  * short form (without the `mcp__smartperfetto__` prefix).
  *
- * Tools with well-known input shapes (`execute_sql`, `invoke_skill`,
- * `fetch_artifact`) get hand-tuned summaries; everything else falls back
- * to a truncated JSON dump.
+ * Tools with well-known input shapes get structural summaries. Values are
+ * never copied into the summary: summaries are persisted in plan history and
+ * a lookup query, SQL literal, note, or hypothesis may contain private text.
  */
 export function summarizeToolCallInput(toolName: string, input: unknown): ToolCallSummary {
   if (input == null || typeof input !== 'object') return {};
@@ -48,7 +41,7 @@ export function summarizeToolCallInput(toolName: string, input: unknown): ToolCa
   switch (toolName) {
     case 'execute_sql': {
       const sql = typeof obj.sql === 'string' ? obj.sql : '';
-      return { inputSummary: shorten(sql) || undefined, paramsHash };
+      return { inputSummary: sql ? 'sql' : undefined, paramsHash };
     }
     case 'invoke_skill':
     case 'compare_skill': {
@@ -75,11 +68,14 @@ export function summarizeToolCallInput(toolName: string, input: unknown): ToolCa
     case 'fetch_artifact': {
       const id = obj.artifactId ?? obj.id ?? '?';
       const detail = obj.detail ?? obj.level ?? '?';
-      const purpose = typeof obj.purpose === 'string' ? ` ${shorten(obj.purpose)}` : '';
-      return { inputSummary: `${id}@${detail}${purpose}`, paramsHash };
+      return { inputSummary: `${id}@${detail}`, paramsHash };
     }
     default: {
-      return { inputSummary: shorten(JSON.stringify(input)), paramsHash };
+      const keys = Object.keys(obj).sort();
+      return {
+        inputSummary: keys.length > 0 ? `${toolName}(${keys.join(',')})` : toolName,
+        paramsHash,
+      };
     }
   }
 }

@@ -29,6 +29,11 @@ import { hasRbacPermission, sendForbidden } from '../services/rbac';
 import { EnterpriseSsoService } from '../services/enterpriseSsoService';
 import { EnterpriseApiKeyService } from '../services/enterpriseApiKeyService';
 import type { EnterpriseRepositoryScope } from '../services/enterpriseRepository';
+import {
+  issueTraceProcessorProxyCapability,
+  resolveTraceProcessorProxyCapability,
+  stripTraceProcessorCapabilityProtocols,
+} from '../services/traceProcessorProxyCapability';
 
 const router = Router();
 const READY_STATES = new Set<TraceProcessorLeaseState>(['ready', 'idle', 'active']);
@@ -180,7 +185,7 @@ function contextFromIdentity(req: IncomingMessage, identity: RequestIdentity): R
   };
 }
 
-function resolveUpgradeRequestContext(req: IncomingMessage): RequestContext | null {
+function resolveUpgradeRequestContext(req: IncomingMessage, leaseId: string): RequestContext | null {
   const trustedIdentity = resolveTrustedSsoIdentity(req);
   if (trustedIdentity) return contextFromIdentity(req, trustedIdentity);
 
@@ -200,7 +205,13 @@ function resolveUpgradeRequestContext(req: IncomingMessage): RequestContext | nu
     // Fall through to dev fallback.
   }
 
-  if (!resolveFeatureConfig().enterprise) {
+  const capabilityContext = resolveTraceProcessorProxyCapability(
+    req.headers['sec-websocket-protocol'],
+    leaseId,
+  );
+  if (capabilityContext) return capabilityContext;
+
+  if (!resolveFeatureConfig().enterprise && !process.env.SMARTPERFETTO_API_KEY?.trim()) {
     return contextFromIdentity(req, {
       userId: queryValue(req, 'userId') || DEFAULT_DEV_USER_ID,
       authType: 'dev',
@@ -377,12 +388,23 @@ async function forwardQueryRpc(req: Request, res: Response): Promise<void> {
     lastQueryAt: Date.now(),
     queryPriority: priority,
   });
-  const responseBody = await getTraceProcessorService().queryRaw(target.lease.traceId, body, {
-    priority,
-    leaseId: target.lease.id,
-    leaseMode: target.lease.mode,
-    leaseScope: target.scope,
-  });
+  const controller = new AbortController();
+  const abort = () => controller.abort(new Error('Trace processor proxy client disconnected'));
+  req.once('aborted', abort);
+  res.once('close', abort);
+  let responseBody: Buffer;
+  try {
+    responseBody = await getTraceProcessorService().queryRaw(target.lease.traceId, body, {
+      priority,
+      leaseId: target.lease.id,
+      leaseMode: target.lease.mode,
+      leaseScope: target.scope,
+      signal: controller.signal,
+    });
+  } finally {
+    req.off('aborted', abort);
+    res.off('close', abort);
+  }
   res.setHeader('content-type', 'application/x-protobuf');
   res.status(200).send(responseBody);
 }
@@ -434,6 +456,10 @@ async function heartbeatLease(req: Request, res: Response): Promise<void> {
       windowId: holder.windowId ?? null,
       frontendVisibility: visibility,
     },
+    websocketCapability: issueTraceProcessorProxyCapability({
+      context,
+      leaseId: lease.id,
+    }),
   });
 }
 
@@ -546,6 +572,13 @@ function websocketRequestHeaders(req: IncomingMessage, targetPort: number): stri
     const value = req.rawHeaders[i + 1];
     if (!name || value === undefined) continue;
     if (HOP_BY_HOP_HEADERS.has(name.toLowerCase())) continue;
+    if (name.toLowerCase() === 'sec-websocket-protocol') {
+      const upstreamProtocols = stripTraceProcessorCapabilityProtocols(value);
+      if (upstreamProtocols.length > 0) {
+        headers.push(`Sec-WebSocket-Protocol: ${upstreamProtocols.join(', ')}`);
+      }
+      continue;
+    }
     headers.push(`${name}: ${value}`);
   }
 
@@ -558,7 +591,7 @@ async function proxyWebSocket(
   head: Buffer,
   leaseId: string,
 ): Promise<void> {
-  const context = resolveUpgradeRequestContext(req);
+  const context = resolveUpgradeRequestContext(req, leaseId);
   if (!context) {
     throw new TraceProcessorProxyError(401, 'Trace processor WebSocket requires authentication');
   }

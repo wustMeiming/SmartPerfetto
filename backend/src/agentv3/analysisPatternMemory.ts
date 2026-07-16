@@ -37,15 +37,23 @@ import {
   type SupersedeStoreHandle,
 } from './selfImprove/supersedeStore';
 import {
+  enterpriseKnowledgeDbWritesEnabled,
   enterpriseKnowledgeStoreEnabled,
+  getScopedKnowledgeRecord,
+  legacyKnowledgeFilesystemWritesEnabled,
+  listScopedKnowledgePartitions,
+  mutateScopedKnowledgeRecord,
   type KnowledgeScope,
   resolveKnowledgeScope,
 } from '../services/scopedKnowledgeStore';
+import {withFilesystemRegistryLockAsync} from '../services/filesystemRegistryLock';
 import { bucketPackageDomain } from '../services/caseEvolution/domainBucket';
 
 const PATTERNS_FILE = backendLogPath('analysis_patterns.json');
 const NEGATIVE_PATTERNS_FILE = backendLogPath('analysis_negative_patterns.json');
 const QUICK_PATTERNS_FILE = backendLogPath('analysis_quick_patterns.json');
+const PATTERN_BUCKET_KNOWLEDGE_KIND = 'analysis_pattern_bucket';
+const PATTERN_BUCKET_ROW_SCOPE_PREFIX = 'pattern-memory:';
 const MAX_PATTERNS = 200;
 const MAX_NEGATIVE_PATTERNS = 100;
 const MAX_QUICK_PATTERNS = 100;
@@ -101,6 +109,18 @@ interface PatternStoreCache<T> {
   retainLastGoodOnMissing?: boolean;
 }
 
+interface PatternBucketSpec<T> {
+  externalId: 'positive' | 'negative' | 'quick';
+  filePath: string;
+  label: string;
+  cache: PatternStoreCache<T>;
+}
+
+interface PatternBucketMutation<T, TResult> {
+  entries: T[];
+  result: TResult;
+}
+
 export interface AutoConfirmSweepResult {
   positivePromoted: number;
   negativePromoted: number;
@@ -132,6 +152,10 @@ const AUTO_CONFIRM_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
 function cloneStoreEntries<T>(entries: T[]): T[] {
   return JSON.parse(JSON.stringify(entries)) as T[];
+}
+
+function patternBucketRowScope(externalId: PatternBucketSpec<unknown>['externalId']): string {
+  return `${PATTERN_BUCKET_ROW_SCOPE_PREFIX}${externalId}`;
 }
 
 function errorMessage(err: unknown): string {
@@ -390,7 +414,9 @@ function withKnowledgeScopeProvenance(
   provenance: PatternProvenance | undefined,
   scope: KnowledgeScope | undefined,
 ): PatternProvenance | undefined {
-  if (!enterpriseKnowledgeStoreEnabled() && !scope) return provenance;
+  if (!enterpriseKnowledgeStoreEnabled() && !enterpriseKnowledgeDbWritesEnabled() && !scope) {
+    return provenance;
+  }
   const resolved = resolveKnowledgeScope(scope);
   return {
     ...(provenance ?? {}),
@@ -412,33 +438,134 @@ function patternMatchesKnowledgeScope(
   );
 }
 
-/** Load patterns from disk. */
-function loadPatterns(): AnalysisPatternEntry[] {
-  return loadPatternStore(PATTERNS_FILE, 'analysis patterns', positivePatternCache);
-}
+const POSITIVE_PATTERN_BUCKET: PatternBucketSpec<AnalysisPatternEntry> = {
+  externalId: 'positive',
+  filePath: PATTERNS_FILE,
+  label: 'analysis patterns',
+  cache: positivePatternCache,
+};
+const NEGATIVE_PATTERN_BUCKET: PatternBucketSpec<NegativePatternEntry> = {
+  externalId: 'negative',
+  filePath: NEGATIVE_PATTERNS_FILE,
+  label: 'negative analysis patterns',
+  cache: negativePatternCache,
+};
+const QUICK_PATTERN_BUCKET: PatternBucketSpec<AnalysisPatternEntry> = {
+  externalId: 'quick',
+  filePath: QUICK_PATTERNS_FILE,
+  label: 'quick analysis patterns',
+  cache: quickPatternCache,
+};
 
-/** Load negative patterns from disk. */
-function loadNegativePatterns(): NegativePatternEntry[] {
-  return loadPatternStore(
-    NEGATIVE_PATTERNS_FILE,
-    'negative analysis patterns',
-    negativePatternCache,
+function patternBucketIsPartitioned(scope: KnowledgeScope | undefined): boolean {
+  return Boolean(
+    scope || enterpriseKnowledgeStoreEnabled() || enterpriseKnowledgeDbWritesEnabled(),
   );
 }
 
-/** Save patterns to disk (atomic write). */
-async function savePatterns(patterns: AnalysisPatternEntry[]): Promise<void> {
-  await writePatternStore(PATTERNS_FILE, 'analysis patterns', patterns, positivePatternCache);
+function selectPatternBucketScope<T>(
+  entries: T[],
+  scope: KnowledgeScope | undefined,
+): T[] {
+  if (!patternBucketIsPartitioned(scope)) return entries;
+  return entries.filter(entry => patternMatchesKnowledgeScope(
+    entry as {provenance?: PatternProvenance},
+    scope,
+  ));
 }
 
-/** Save negative patterns to disk (atomic write). */
-async function saveNegativePatterns(patterns: NegativePatternEntry[]): Promise<void> {
-  await writePatternStore(
-    NEGATIVE_PATTERNS_FILE,
-    'negative analysis patterns',
-    patterns,
-    negativePatternCache,
-  );
+function replacePatternBucketScope<T>(
+  allEntries: T[],
+  scope: KnowledgeScope | undefined,
+  scopedEntries: T[],
+): T[] {
+  if (!patternBucketIsPartitioned(scope)) return scopedEntries;
+  const otherScopes = allEntries.filter(entry => !patternMatchesKnowledgeScope(
+    entry as {provenance?: PatternProvenance},
+    scope,
+  ));
+  return [...otherScopes, ...scopedEntries];
+}
+
+function loadPatternBucket<T>(
+  spec: PatternBucketSpec<T>,
+  scope?: KnowledgeScope,
+): T[] {
+  if (enterpriseKnowledgeStoreEnabled()) {
+    const record = getScopedKnowledgeRecord<T[]>(
+      PATTERN_BUCKET_KNOWLEDGE_KIND,
+      spec.externalId,
+      scope,
+    )?.record;
+    return Array.isArray(record) ? cloneStoreEntries(record) : [];
+  }
+  return loadPatternStore(spec.filePath, spec.label, spec.cache);
+}
+
+async function mutatePatternBucket<T, TResult>(
+  spec: PatternBucketSpec<T>,
+  scope: KnowledgeScope | undefined,
+  mutate: (entries: T[]) => PatternBucketMutation<T, TResult>,
+): Promise<TResult> {
+  return patternStoreMutex.runExclusive(async () => {
+    let filesystemResult: TResult | undefined;
+    let databaseResult: TResult | undefined;
+    let filesystemWritten = false;
+    let databaseWritten = false;
+
+    if (legacyKnowledgeFilesystemWritesEnabled()) {
+      filesystemResult = await withFilesystemRegistryLockAsync(
+        spec.filePath,
+        'analysis_pattern_store_busy',
+        async lease => {
+          lease.assertHeld();
+          const allEntries = loadPatternStore(spec.filePath, spec.label, spec.cache);
+          const currentScope = selectPatternBucketScope(allEntries, scope);
+          const outcome = mutate(cloneStoreEntries(currentScope));
+          const nextEntries = replacePatternBucketScope(allEntries, scope, outcome.entries);
+          await writePatternStore(spec.filePath, spec.label, nextEntries, spec.cache);
+          lease.assertHeld();
+          return outcome.result;
+        },
+      );
+      filesystemWritten = true;
+    }
+
+    if (enterpriseKnowledgeDbWritesEnabled()) {
+      mutateScopedKnowledgeRecord<T[]>(
+        PATTERN_BUCKET_KNOWLEDGE_KIND,
+        spec.externalId,
+        scope,
+        current => {
+          const entries = Array.isArray(current) ? cloneStoreEntries(current) : [];
+          const outcome = mutate(entries);
+          databaseResult = outcome.result;
+          return outcome.entries;
+        },
+        {
+          rowScope: patternBucketRowScope(spec.externalId),
+          updatedAt: Date.now(),
+        },
+      );
+      databaseWritten = true;
+    }
+
+    const databaseIsAuthoritative = enterpriseKnowledgeStoreEnabled();
+    if ((databaseIsAuthoritative && !databaseWritten) || (!databaseIsAuthoritative && !filesystemWritten)) {
+      throw new Error('analysis_pattern_store_write_unavailable');
+    }
+    return (databaseIsAuthoritative ? databaseResult : filesystemResult) as TResult;
+  });
+}
+
+/** Load patterns from the authoritative migration surface. */
+function loadPatterns(scope?: KnowledgeScope): AnalysisPatternEntry[] {
+  return loadPatternBucket(POSITIVE_PATTERN_BUCKET, scope);
+}
+
+/** Load negative patterns from the authoritative migration surface. */
+function loadNegativePatterns(scope?: KnowledgeScope): NegativePatternEntry[] {
+  return loadPatternBucket(NEGATIVE_PATTERN_BUCKET, scope);
 }
 
 /**
@@ -541,18 +668,17 @@ export async function saveAnalysisPattern(
 ): Promise<void> {
   if (features.length === 0 || insights.length === 0) return;
 
-  await patternStoreMutex.runExclusive(async () => {
-    const patterns = loadPatterns();
-    const now = Date.now();
-    const provenance = withKnowledgeScopeProvenance(
-      extras.provenance,
-      extras.knowledgeScope,
-    );
+  const now = Date.now();
+  const id = `pat-${now}-${Math.random().toString(36).substring(2, 6)}`;
+  const provenance = withKnowledgeScopeProvenance(
+    extras.provenance,
+    extras.knowledgeScope,
+  );
+  await mutatePatternBucket(POSITIVE_PATTERN_BUCKET, extras.knowledgeScope, patterns => {
 
     // Deduplicate: check if a very similar pattern already exists (>70% similarity)
-    const existingIdx = patterns.findIndex(p =>
-      patternMatchesKnowledgeScope(p, extras.knowledgeScope) &&
-      weightedJaccardSimilarity(p.traceFeatures, features) > 0.7,
+    const existingIdx = patterns.findIndex(
+      p => weightedJaccardSimilarity(p.traceFeatures, features) > 0.7,
     );
 
     if (existingIdx >= 0) {
@@ -569,7 +695,6 @@ export async function saveAnalysisPattern(
       // Re-saves don't downgrade status — a provisional pattern that has
       // already auto-confirmed must not slip back to provisional.
     } else {
-      const id = `pat-${now}-${Math.random().toString(36).substring(2, 6)}`;
       patterns.push({
         id,
         traceFeatures: features,
@@ -593,7 +718,7 @@ export async function saveAnalysisPattern(
       .sort((a, b) => evictionScore(b) - evictionScore(a))
       .slice(0, MAX_PATTERNS);
 
-    await savePatterns(active);
+    return {entries: active, result: undefined};
   });
 }
 
@@ -616,20 +741,19 @@ export async function saveNegativePattern(
     checkAndRecordRecurrence(extras.failureModeHash);
   }
 
-  await patternStoreMutex.runExclusive(async () => {
-    const patterns = loadNegativePatterns();
-    const provenance = withKnowledgeScopeProvenance(
-      extras.provenance,
-      extras.knowledgeScope,
-    );
+  const now = Date.now();
+  const id = `neg-${now}-${Math.random().toString(36).substring(2, 6)}`;
+  const provenance = withKnowledgeScopeProvenance(
+    extras.provenance,
+    extras.knowledgeScope,
+  );
+  await mutatePatternBucket(NEGATIVE_PATTERN_BUCKET, extras.knowledgeScope, patterns => {
 
     // Deduplicate: merge into existing pattern if >70% similar
-    const existingIdx = patterns.findIndex(p =>
-      patternMatchesKnowledgeScope(p, extras.knowledgeScope) &&
-      weightedJaccardSimilarity(p.traceFeatures, features) > 0.7,
+    const existingIdx = patterns.findIndex(
+      p => weightedJaccardSimilarity(p.traceFeatures, features) > 0.7,
     );
 
-    const now = Date.now();
     if (existingIdx >= 0) {
       const existing = patterns[existingIdx];
       const existingKeys = new Set(existing.failedApproaches.map(a => `${a.type}:${a.approach}`));
@@ -647,7 +771,6 @@ export async function saveNegativePattern(
       if (extras.bucketKey) existing.bucketKey = extras.bucketKey;
       if (provenance) existing.provenance = provenance;
     } else {
-      const id = `neg-${now}-${Math.random().toString(36).substring(2, 6)}`;
       patterns.push({
         id,
         traceFeatures: features,
@@ -664,13 +787,13 @@ export async function saveNegativePattern(
     }
 
     // Prune expired + enforce max size (P1-G10: frequency-aware eviction)
-    const cutoff = Date.now() - NEGATIVE_PATTERN_TTL_MS;
+    const cutoff = now - NEGATIVE_PATTERN_TTL_MS;
     const active = patterns
       .filter(p => p.createdAt >= cutoff)
       .sort((a, b) => evictionScore(b) - evictionScore(a))
       .slice(0, MAX_NEGATIVE_PATTERNS);
 
-    await saveNegativePatterns(active);
+    return {entries: active, result: undefined};
   });
 }
 
@@ -684,7 +807,7 @@ export function matchPatterns(
 ): Array<AnalysisPatternEntry & { score: number }> {
   if (features.length === 0) return [];
 
-  const patterns = loadPatterns();
+  const patterns = loadPatterns(scope);
   const cutoff = Date.now() - PATTERN_TTL_MS;
 
   return patterns
@@ -717,7 +840,7 @@ export function matchNegativePatterns(
 ): Array<NegativePatternEntry & { score: number }> {
   if (features.length === 0) return [];
 
-  const patterns = loadNegativePatterns();
+  const patterns = loadNegativePatterns(scope);
   const cutoff = Date.now() - NEGATIVE_PATTERN_TTL_MS;
 
   return patterns
@@ -765,12 +888,8 @@ export function checkAndRecordRecurrence(failureModeHash: string | undefined): v
 // =============================================================================
 
 /** Load entries from the 7-day quick-path bucket. */
-function loadQuickPatterns(): AnalysisPatternEntry[] {
-  return loadPatternStore(QUICK_PATTERNS_FILE, 'quick analysis patterns', quickPatternCache);
-}
-
-async function saveQuickPatterns(patterns: AnalysisPatternEntry[]): Promise<void> {
-  await writePatternStore(QUICK_PATTERNS_FILE, 'quick analysis patterns', patterns, quickPatternCache);
+function loadQuickPatterns(scope?: KnowledgeScope): AnalysisPatternEntry[] {
+  return loadPatternBucket(QUICK_PATTERN_BUCKET, scope);
 }
 
 /**
@@ -788,14 +907,13 @@ export async function saveQuickPathPattern(
 ): Promise<void> {
   if (features.length === 0 || insights.length === 0) return;
 
-  await patternStoreMutex.runExclusive(async () => {
-    const patterns = loadQuickPatterns();
-    const now = Date.now();
-    const id = `qp-${now}-${Math.random().toString(36).substring(2, 6)}`;
-    const provenance = withKnowledgeScopeProvenance(
-      extras.provenance,
-      extras.knowledgeScope,
-    );
+  const now = Date.now();
+  const id = `qp-${now}-${Math.random().toString(36).substring(2, 6)}`;
+  const provenance = withKnowledgeScopeProvenance(
+    extras.provenance,
+    extras.knowledgeScope,
+  );
+  await mutatePatternBucket(QUICK_PATTERN_BUCKET, extras.knowledgeScope, patterns => {
     patterns.push({
       id,
       traceFeatures: features,
@@ -817,7 +935,7 @@ export async function saveQuickPathPattern(
       .sort((a, b) => evictionScore(b) - evictionScore(a))
       .slice(0, MAX_QUICK_PATTERNS);
 
-    await saveQuickPatterns(active);
+    return {entries: active, result: undefined};
   });
 }
 
@@ -831,7 +949,7 @@ export function matchQuickPatternsAsBackup(
   scope?: KnowledgeScope,
 ): Array<AnalysisPatternEntry & { score: number }> {
   if (features.length === 0) return [];
-  const patterns = loadQuickPatterns();
+  const patterns = loadQuickPatterns(scope);
   const cutoff = Date.now() - QUICK_PATTERN_TTL_MS;
   return patterns
     .filter(p => p.createdAt >= cutoff)
@@ -869,7 +987,7 @@ export async function promoteQuickPatternIfMatching(input: {
   knowledgeScope?: KnowledgeScope;
 }): Promise<boolean> {
   if (!input.verifierPassed) return false;
-  const candidates = loadQuickPatterns();
+  const candidates = loadQuickPatterns(input.knowledgeScope);
   const winner = candidates
     .filter(p => patternMatchesKnowledgeScope(p, input.knowledgeScope))
     .filter(p => getEffectiveStatus(p) !== 'rejected' && getEffectiveStatus(p) !== 'disputed')
@@ -928,34 +1046,26 @@ export type FeedbackRating = 'positive' | 'negative';
 export async function applyFeedbackToPattern(
   patternId: string,
   rating: FeedbackRating,
+  scope: KnowledgeScope,
   now: number = Date.now(),
 ): Promise<PatternStatus | null> {
-  return patternStoreMutex.runExclusive(async () => {
-    const positives = loadPatterns();
-    const quick = loadQuickPatterns();
-    const negatives = loadNegativePatterns();
-
-    const allBuckets: Array<{ entry: AnalysisPatternEntry | NegativePatternEntry; bucket: 'positive' | 'quick' | 'negative' }> = [];
-    for (const p of positives) allBuckets.push({ entry: p, bucket: 'positive' });
-    for (const p of quick) allBuckets.push({ entry: p, bucket: 'quick' });
-    for (const p of negatives) allBuckets.push({ entry: p, bucket: 'negative' });
-
-    const target = allBuckets.find(b => b.entry.id === patternId);
-    if (!target) return null;
-
-    const next = transitionStatus(target.entry, rating, now);
-    target.entry.status = next;
-    target.entry.lastFeedbackAt = now;
-    if (target.entry.firstFeedbackAt === undefined) {
-      target.entry.firstFeedbackAt = now;
-    }
-
-    if (target.bucket === 'positive') await savePatterns(positives);
-    if (target.bucket === 'quick') await saveQuickPatterns(quick);
-    if (target.bucket === 'negative') await saveNegativePatterns(negatives);
-
-    return next;
+  const applyToBucket = <T extends AnalysisPatternEntry | NegativePatternEntry>(
+    spec: PatternBucketSpec<T>,
+  ) => mutatePatternBucket(spec, scope, entries => {
+    const target = entries.find(entry => entry.id === patternId);
+    if (!target) return {entries, result: null};
+    const next = transitionStatus(target, rating, now);
+    target.status = next;
+    target.lastFeedbackAt = now;
+    if (target.firstFeedbackAt === undefined) target.firstFeedbackAt = now;
+    return {entries, result: next};
   });
+
+  const positive = await applyToBucket(POSITIVE_PATTERN_BUCKET);
+  if (positive !== null) return positive;
+  const quick = await applyToBucket(QUICK_PATTERN_BUCKET);
+  if (quick !== null) return quick;
+  return applyToBucket(NEGATIVE_PATTERN_BUCKET);
 }
 
 /**
@@ -1005,36 +1115,52 @@ export async function sweepAutoConfirm(
   now: number = Date.now(),
   scope?: KnowledgeScope,
 ): Promise<AutoConfirmSweepResult> {
-  return patternStoreMutex.runExclusive(async () => {
-    const positives = loadPatterns();
-    let positivePromoted = 0;
-    for (const p of positives) {
-      if (scope && !patternMatchesKnowledgeScope(p, scope)) continue;
-      if (autoConfirmIfRipe(p, now)) positivePromoted += 1;
+  const sweepBucket = <T extends AnalysisPatternEntry | NegativePatternEntry>(
+    spec: PatternBucketSpec<T>,
+  ) => mutatePatternBucket(spec, scope, entries => {
+    let promoted = 0;
+    for (const entry of entries) {
+      if (autoConfirmIfRipe(entry, now)) promoted += 1;
     }
-    if (positivePromoted > 0) await savePatterns(positives);
-
-    const negatives = loadNegativePatterns();
-    let negativePromoted = 0;
-    for (const p of negatives) {
-      if (scope && !patternMatchesKnowledgeScope(p, scope)) continue;
-      if (autoConfirmIfRipe(p, now)) negativePromoted += 1;
-    }
-    if (negativePromoted > 0) await saveNegativePatterns(negatives);
-
-    return {
-      positivePromoted,
-      negativePromoted,
-      totalPromoted: positivePromoted + negativePromoted,
-    };
+    return {entries, result: promoted};
   });
+  const positivePromoted = await sweepBucket(POSITIVE_PATTERN_BUCKET);
+  const negativePromoted = await sweepBucket(NEGATIVE_PATTERN_BUCKET);
+  return {
+    positivePromoted,
+    negativePromoted,
+    totalPromoted: positivePromoted + negativePromoted,
+  };
+}
+
+/** Sweep every DB partition in enterprise cutover; legacy storage is global. */
+export async function sweepAllPatternMemoryPartitions(
+  now: number = Date.now(),
+): Promise<AutoConfirmSweepResult> {
+  if (!enterpriseKnowledgeStoreEnabled()) return sweepAutoConfirm(now);
+  const partitions = listScopedKnowledgePartitions([
+    patternBucketRowScope(POSITIVE_PATTERN_BUCKET.externalId),
+    patternBucketRowScope(NEGATIVE_PATTERN_BUCKET.externalId),
+  ]);
+  const total: AutoConfirmSweepResult = {
+    positivePromoted: 0,
+    negativePromoted: 0,
+    totalPromoted: 0,
+  };
+  for (const scope of partitions) {
+    const result = await sweepAutoConfirm(now, scope);
+    total.positivePromoted += result.positivePromoted;
+    total.negativePromoted += result.negativePromoted;
+    total.totalPromoted += result.totalPromoted;
+  }
+  return total;
 }
 
 export function startPatternMemoryAutoConfirmSweep(
   opts: PatternMemoryAutoConfirmSweepOptions = {},
 ): PatternMemoryAutoConfirmSweepHandle {
   const intervalMs = opts.intervalMs ?? AUTO_CONFIRM_SWEEP_INTERVAL_MS;
-  const sweep = opts.sweep ?? (() => sweepAutoConfirm());
+  const sweep = opts.sweep ?? (() => sweepAllPatternMemoryPartitions());
   const logger = opts.logger ?? patternStoreLogger;
   const setIntervalFn = opts.setIntervalFn ?? setInterval;
   const clearIntervalFn = opts.clearIntervalFn ?? clearInterval;

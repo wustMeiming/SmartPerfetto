@@ -26,6 +26,11 @@ function sha256(content) {
 
 function createIndexFixture() {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-index-'));
+  fs.cpSync(
+    path.resolve(__dirname, '../../schema'),
+    path.join(repoRoot, 'Trace/schema'),
+    {recursive: true},
+  );
   fs.mkdirSync(path.join(repoRoot, 'backend/skills'), {recursive: true});
   fs.mkdirSync(path.join(repoRoot, 'backend/strategies'), {recursive: true});
   const caseDir = path.join(repoRoot, 'Trace/real/android-startup');

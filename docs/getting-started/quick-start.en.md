@@ -32,7 +32,7 @@ Step 1: run `cp .env.example .env`.
 
 Step 2: edit `.env` and uncomment one provider block. Skip this if you will configure the provider in UI Provider Manager, or if you only need a health/UI smoke check; real AI analysis requires one provider source.
 
-If a Provider Manager profile is active in the UI, it overrides `.env` fallback. Confirm the active source in the container startup log or `aiEngine.credentialSource` from `http://localhost:3000/health`.
+If a Provider Manager profile is active in the UI, it overrides `.env` fallback. Confirm the active source in the container startup log, Provider settings, or authenticated `/api/runtime-health`; public `/health` is liveness-only.
 
 ## 3. Run with Docker
 

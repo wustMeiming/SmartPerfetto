@@ -709,7 +709,16 @@ export function describeWithTrace(
   traceName: string,
   fn: () => void,
 ): void {
-  const absolute = path.resolve(process.cwd(), '..', getTestTracePath(traceName));
+  let absolute: string;
+  try {
+    absolute = path.resolve(process.cwd(), '..', getTestTracePath(traceName));
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Unknown trace case:')) {
+      describe.skip(`${suiteName} [skipped: missing trace fixture ${traceName}]`, fn);
+      return;
+    }
+    throw error;
+  }
   if (fs.existsSync(absolute)) {
     describe(suiteName, fn);
   } else {

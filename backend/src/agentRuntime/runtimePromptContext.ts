@@ -6,21 +6,74 @@ import type { TraceDataset } from '../agent/core/orchestratorTypes';
 import type { QuickRunContextInjectedCounts } from '../agent/core/orchestratorTypes';
 import type { Finding, SubAgentResult } from '../agent/types';
 import type { ComparisonContext, TracePairContext } from '../agentv3/types';
+import type {ArchitectureInfo} from '../agent/detectors/types';
+import {detectFocusApps} from '../agentv3/focusAppDetector';
+import {createArchitectureDetector} from '../agent/detectors/architectureDetector';
+import type {TraceProcessorService} from '../services/traceProcessorService';
 import {
   DEFAULT_OUTPUT_LANGUAGE,
   localize,
   type OutputLanguage,
 } from '../agentv3/outputLanguage';
+import {renderRequiredLocalizedStrategyTemplate} from '../agentv3/localizedStrategyTemplate';
 
-export function buildRuntimeTracePairComparisonContext(input: {
+export async function buildRuntimeTracePairComparisonContext(input: {
+  readonly traceProcessorService: TraceProcessorService;
+  readonly currentTraceId: string;
   readonly referenceTraceId?: string;
   readonly tracePairContext?: TracePairContext;
-}): ComparisonContext | undefined {
+  readonly detectReferenceArchitecture?: (traceId: string) => Promise<ArchitectureInfo | undefined>;
+  readonly onCapabilityQueryError?: (
+    side: 'current' | 'reference',
+    error: unknown,
+  ) => void;
+}): Promise<ComparisonContext | undefined> {
   if (!input.referenceTraceId) return undefined;
+  const capabilitySql = "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND (name LIKE 'android_%' OR name LIKE 'linux_%' OR name LIKE 'sched_%' OR name LIKE 'slices_%')";
+  const [referenceFocus, referenceArchitecture, currentTables, referenceTables] = await Promise.all([
+    detectFocusApps(input.traceProcessorService, input.referenceTraceId).catch(() => ({
+      apps: [],
+      method: 'none' as const,
+      primaryApp: undefined,
+    })),
+    (input.detectReferenceArchitecture
+      ? input.detectReferenceArchitecture(input.referenceTraceId)
+      : createArchitectureDetector().detect({
+          traceId: input.referenceTraceId,
+          traceProcessorService: input.traceProcessorService,
+          packageName: undefined,
+        })).catch(() => undefined),
+    input.traceProcessorService.query(input.currentTraceId, capabilitySql).catch(error => {
+      input.onCapabilityQueryError?.('current', error);
+      return null;
+    }),
+    input.traceProcessorService.query(input.referenceTraceId, capabilitySql).catch(error => {
+      input.onCapabilityQueryError?.('reference', error);
+      return null;
+    }),
+  ]);
+
+  let commonCapabilities: string[] = [];
+  let capabilityDiff: ComparisonContext['capabilityDiff'];
+  if (currentTables && referenceTables) {
+    const current = new Set(currentTables.rows.map((row: unknown[]) => String(row[0])));
+    const reference = new Set(referenceTables.rows.map((row: unknown[]) => String(row[0])));
+    commonCapabilities = [...current].filter(name => reference.has(name)).sort();
+    const currentOnly = [...current].filter(name => !reference.has(name)).sort();
+    const referenceOnly = [...reference].filter(name => !current.has(name)).sort();
+    if (currentOnly.length > 0 || referenceOnly.length > 0) {
+      capabilityDiff = {currentOnly, referenceOnly};
+    }
+  }
+
   return {
     referenceTraceId: input.referenceTraceId,
     ...(input.tracePairContext ? { tracePairContext: input.tracePairContext } : {}),
-    commonCapabilities: [],
+    referencePackageName: referenceFocus.primaryApp,
+    referenceFocusApps: referenceFocus.apps.length > 0 ? referenceFocus.apps : undefined,
+    referenceArchitecture,
+    commonCapabilities,
+    capabilityDiff,
   };
 }
 
@@ -47,10 +100,10 @@ export function formatTraceContext(
       : '';
     return `### ${d.label}\n${sourceLines ? `${sourceLines}\n\n` : ''}${header}\n${sep}\n${rows.join('\n')}${truncNote}`;
   });
-  return localize(
+  return renderRequiredLocalizedStrategyTemplate(
+    'prompt-runtime-trace-context',
     outputLanguage,
-    `## 前端预查询 Trace 数据\n\n以下数据已由前端查询完毕，直接使用，无需重复 SQL 查询。回答中引用这些数据时使用对应的 evidence_ref_id（例如 data:frontend_prequery:*）：\n\n${parts.join('\n\n')}`,
-    `## Frontend Pre-queried Trace Data\n\nThe frontend has already queried the following data. Use it directly; do not repeat the same SQL query. When citing these data, use the corresponding evidence_ref_id (for example data:frontend_prequery:*).\n\n${parts.join('\n\n')}`,
+    {datasets: parts.join('\n\n')},
   );
 }
 
@@ -82,13 +135,7 @@ export function buildQuickConversationContext(
   const turns = previousTurns.filter(turn => turn.completed).slice(-3);
   if (turns.length === 0) return undefined;
 
-  const lines = [
-    localize(
-      outputLanguage,
-      '## 最近对话上下文\n\n以下是 SmartPerfetto 本地保存的最近问答，用于理解“继续/刚才/这个”等指代；不要把它当作当前问题的新证据。',
-      '## Recent Conversation Context\n\nThe following recent SmartPerfetto turns are local context for references like "continue", "earlier", or "this"; do not treat them as new evidence for the current question.',
-    ),
-  ];
+  const renderedTurns: string[] = [];
 
   for (const turn of turns) {
     const query = compactForPrompt(turn.query, 220);
@@ -98,17 +145,27 @@ export function buildQuickConversationContext(
       .map(f => `[${f.severity}] ${compactForPrompt(f.title, 160)}`)
       .filter(Boolean);
 
-    lines.push(`### Turn ${turn.turnIndex + 1}`);
-    lines.push(`- ${localize(outputLanguage, '用户', 'User')}: ${query}`);
-    if (answer) {
-      lines.push(`- ${localize(outputLanguage, '上轮回答', 'Previous answer')}: ${answer}`);
-    }
-    if (findings.length > 0) {
-      lines.push(`- ${localize(outputLanguage, '上轮发现', 'Previous findings')}: ${findings.join('; ')}`);
-    }
+    renderedTurns.push(renderRequiredLocalizedStrategyTemplate(
+      'prompt-runtime-conversation-turn',
+      outputLanguage,
+      {
+        turnNumber: turn.turnIndex + 1,
+        query,
+        answerLine: answer
+          ? `- ${localize(outputLanguage, '上轮回答', 'Previous answer')}: ${answer}`
+          : '',
+        findingsLine: findings.length > 0
+          ? `- ${localize(outputLanguage, '上轮发现', 'Previous findings')}: ${findings.join('; ')}`
+          : '',
+      },
+    ));
   }
 
-  return lines.join('\n');
+  return renderRequiredLocalizedStrategyTemplate(
+    'prompt-runtime-conversation-context',
+    outputLanguage,
+    {turns: renderedTurns.join('\n\n')},
+  );
 }
 
 export interface QuickMemoryContextInput {
@@ -170,10 +227,10 @@ export function buildQuickMemoryContextPayload(input: QuickMemoryContextInput): 
       `   BAD: \`${compactForPrompt(pair.errorSql, 150)}\``,
       `   FIX: \`${compactForPrompt(pair.fixedSql, 150)}\``,
     ].join('\n'));
-    parts.push(localize(
+    parts.push(renderRequiredLocalizedStrategyTemplate(
+      'prompt-runtime-sql-pitfalls',
       outputLanguage,
-      `## SQL 踩坑提示（快速模式）\n\n以下是历史 SQL 错误/修正对，只用于避坑和加速，不是当前 trace 证据：\n\n${pairLines.join('\n')}`,
-      `## SQL Pitfall Hints (Fast Mode)\n\nThe following historical SQL error/fix pairs are hints for avoiding repeated mistakes and are not current-trace evidence:\n\n${pairLines.join('\n')}`,
+      {pairs: pairLines.join('\n')},
     ));
     counts.sqlPitfallPairs = sqlPairs.length;
   }
@@ -196,10 +253,10 @@ export function buildQuickMemoryContextPayload(input: QuickMemoryContextInput): 
   if (parts.length === 0) {
     return { counts, tokenEstimate: 0, dropped };
   }
-  const text = localize(
+  const text = renderRequiredLocalizedStrategyTemplate(
+    'prompt-runtime-fast-memory',
     outputLanguage,
-    `## 快速模式可复用上下文\n\n以下内容来自 SmartPerfetto 已保存的上下文或跨会话记忆；只能用于理解上下文、避坑和减少重复查询，不能作为当前问题的证据。若与当前 trace 数据冲突，以本轮新查询或前端预查询 evidence_ref_id 为准。\n\n${parts.join('\n\n')}`,
-    `## Fast Mode Reusable Context\n\nThe following context comes from saved SmartPerfetto session state or cross-session memory. It may only help interpret context, avoid pitfalls, and reduce repeated queries; it is not evidence for the current question. If it conflicts with current trace data, trust new evidence from this turn or frontend pre-query evidence_ref_id values.\n\n${parts.join('\n\n')}`,
+    {context: parts.join('\n\n')},
   );
   return {
     text,

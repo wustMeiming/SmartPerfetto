@@ -14,6 +14,13 @@ const HEAP_GRAPH_LIMITS = Object.freeze({types: 5000, objects: 10000, roots: 100
 const GPU_COMPUTE_KERNELS_EXTENSION = '.perfetto.protos.GpuInternedData.computeKernels';
 const GPU_COMPUTE_ARG_NAMES_EXTENSION = '.perfetto.protos.GpuInternedData.computeArgNames';
 const GPU_COMPUTE_MAX_ARGS = 64;
+const SUPPORTED_SIGNAL_TYPES = new Set([
+  'atrace-slice', 'atrace-counter', 'atrace-async-slice', 'atrace-async-track-slice',
+  'sched-running', 'process-stats', 'battery-counters', 'power-rail',
+  'gpu-work-period', 'gpu-compute-kernel', 'gpu-frequency', 'gpu-power-state',
+  'cpu-frequency', 'cpu-idle', 'irq-span', 'frame-timeline', 'lmk-kill',
+  'managed-heap-graph',
+]);
 const HEAP_ROOT_TYPES = new Set([
   'ROOT_UNKNOWN',
   'ROOT_JNI_GLOBAL',
@@ -121,16 +128,31 @@ function validateScenario(scenario) {
   if (!scenario || scenario.schema_version !== 1) {
     throw new Error('scenario.schema_version must be 1');
   }
-  decimalString(scenario.clock?.duration_ns, 'scenario.clock.duration_ns');
+  const clockDuration = BigInt(decimalString(
+    scenario.clock?.duration_ns,
+    'scenario.clock.duration_ns',
+  ));
   if (!Array.isArray(scenario.actors?.processes) || !Array.isArray(scenario.actors?.threads)) {
     throw new Error('scenario.actors.processes and threads must be arrays');
   }
   if (!Array.isArray(scenario.signals)) throw new Error('scenario.signals must be an array');
   for (const [index, signal] of scenario.signals.entries()) {
     nonEmptyString(signal.type, `scenario.signals[${index}].type`);
-    decimalString(signal.at_ns, `scenario.signals[${index}].at_ns`);
+    if (!SUPPORTED_SIGNAL_TYPES.has(signal.type)) {
+      throw new Error(`scenario.signals[${index}].type is unsupported: ${signal.type}`);
+    }
+    const at = BigInt(decimalString(signal.at_ns, `scenario.signals[${index}].at_ns`));
+    if (at > clockDuration) {
+      throw new Error(`scenario.signals[${index}].at_ns exceeds scenario.clock.duration_ns`);
+    }
     if (signal.duration_ns !== undefined) {
-      decimalString(signal.duration_ns, `scenario.signals[${index}].duration_ns`);
+      const duration = BigInt(decimalString(
+        signal.duration_ns,
+        `scenario.signals[${index}].duration_ns`,
+      ));
+      if (at + duration > clockDuration) {
+        throw new Error(`scenario.signals[${index}] ends after scenario.clock.duration_ns`);
+      }
     }
   }
 }
@@ -852,6 +874,7 @@ function buildConstructedTrace(repoRoot, options) {
 }
 
 module.exports = {
+  SUPPORTED_SIGNAL_TYPES,
   buildConstructedTrace,
   encodeScenarioOverlay,
   materializeTrace,

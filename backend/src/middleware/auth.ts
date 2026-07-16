@@ -146,9 +146,12 @@ const buildRequestContext = (req: Request, identity: ResolvedIdentity): RequestC
   const tenantId = identity.tenantId
     || sanitizeContextId(getFirstHeaderValue(req, ['x-tenant-id', 'x-sso-tenant-id']))
     || DEFAULT_TENANT_ID;
-  const workspaceId = identity.workspaceId
-    || sanitizeContextId(getFirstHeaderValue(req, ['x-workspace-id', 'x-sso-workspace-id']))
-    || DEFAULT_WORKSPACE_ID;
+  const workspaceId = identity.workspaceId || (
+    identity.authType === 'api_key'
+      ? DEFAULT_WORKSPACE_ID
+      : sanitizeContextId(getFirstHeaderValue(req, ['x-workspace-id', 'x-sso-workspace-id']))
+        || DEFAULT_WORKSPACE_ID
+  );
   const requestId =
     sanitizeContextId(getHeaderValue(req, 'x-request-id')) ||
     `req-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
@@ -173,11 +176,21 @@ const makeDevIdentity = (): ResolvedIdentity => ({
   authType: 'dev',
 });
 
-const makeApiKeyIdentity = (apiKey: string): ResolvedIdentity => ({
+const makeStaticApiKeyIdentity = (req: Request, apiKey: string): ResolvedIdentity => ({
   userId: `api-key-${hashApiKey(apiKey)}`,
   email: '',
   subscription: 'pro',
   authType: 'api_key',
+  // A single operator-managed local key is intentionally partition-selectable.
+  // Enterprise API keys are resolved above from durable credential bindings and
+  // never use these request headers as authority.
+  tenantId: sanitizeContextId(getFirstHeaderValue(req, ['x-tenant-id'])) || DEFAULT_TENANT_ID,
+  workspaceId: sanitizeContextId(getFirstHeaderValue(req, ['x-workspace-id'])) || DEFAULT_WORKSPACE_ID,
+  // SMARTPERFETTO_API_KEY is the deployment operator's bootstrap credential,
+  // not an end-user enterprise key. Enterprise keys resolve their own durable
+  // roles/scopes before this fallback and remain least-privilege.
+  roles: ['org_admin'],
+  scopes: ['*'],
 });
 
 const resolveTrustedSsoIdentity = (req: Request): ResolvedIdentity | null => {
@@ -320,7 +333,7 @@ export const authenticate = async (
     return;
   }
 
-  attachIdentity(req, makeApiKeyIdentity(providedKey));
+  attachIdentity(req, makeStaticApiKeyIdentity(req, providedKey));
   next();
 };
 

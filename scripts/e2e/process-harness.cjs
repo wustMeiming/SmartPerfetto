@@ -4,7 +4,7 @@
 
 'use strict';
 
-const {spawn} = require('child_process');
+const {spawn, spawnSync} = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -23,12 +23,39 @@ function tailFile(filePath, maximumCharacters = 8_000) {
   }
 }
 
-function signalProcessGroup(tracked, signal) {
+function signalProcessGroup(
+  tracked,
+  signal,
+  platform = process.platform,
+  commandRunner = spawnSync,
+) {
   const pid = tracked?.child?.pid;
   if (!pid) return;
   try {
-    if (process.platform === 'win32') tracked.child.kill(signal);
-    else process.kill(-pid, signal);
+    if (platform === 'win32') {
+      const args = ['/PID', String(pid), '/T'];
+      if (signal === 'SIGKILL') args.push('/F');
+      const result = commandRunner('taskkill', args, {
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      tracked.windowsTreeSignal = {
+        signal,
+        status: result.status,
+        succeeded: !result.error && result.status === 0,
+      };
+      if (result.error) throw result.error;
+      // A closed parent handle does not prove that its descendants exited.
+      // Treat taskkill failure as unresolved even after the tracked child has
+      // emitted close; otherwise an orphan trace_processor can be hidden.
+      if (result.status !== 0) {
+        throw new Error(
+          `taskkill failed for PID ${pid}: ${(result.stderr || result.stdout || `status ${result.status}`).trim()}`,
+        );
+      }
+    } else {
+      process.kill(-pid, signal);
+    }
   } catch (error) {
     if (error.code !== 'ESRCH') throw error;
   }
@@ -46,7 +73,9 @@ function signalProcessGroupBestEffort(tracked, signal) {
 function isProcessGroupAlive(tracked) {
   const pid = tracked?.child?.pid;
   if (!pid) return false;
-  if (process.platform === 'win32') return tracked.exitResult === null;
+  if (process.platform === 'win32') {
+    return tracked.exitResult === null;
+  }
   try {
     process.kill(-pid, 0);
     return true;
@@ -202,4 +231,4 @@ class ProcessHarness {
   }
 }
 
-module.exports = {ProcessHarness};
+module.exports = {ProcessHarness, signalProcessGroup};

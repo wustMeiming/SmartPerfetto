@@ -32,7 +32,7 @@
 
 步骤 2：编辑 `.env` 并解注释一个 provider block。如果准备在 UI Provider Manager 里配置 provider，或只做 health/UI smoke check，可以跳过；真正执行 AI 分析必须有一个 provider 来源。
 
-如果 UI 里已经激活了 Provider Manager profile，它会覆盖 `.env` fallback。当前来源可以在容器启动日志或 `http://localhost:3000/health` 的 `aiEngine.credentialSource` 里确认。
+如果 UI 里已经激活了 Provider Manager profile，它会覆盖 `.env` fallback。当前来源可以在容器启动日志、Provider 设置页或带鉴权的 `/api/runtime-health` 中确认；公开 `/health` 只用于存活检查。
 
 ## 3. Docker 运行
 

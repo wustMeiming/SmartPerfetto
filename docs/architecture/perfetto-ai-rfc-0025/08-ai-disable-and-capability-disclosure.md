@@ -58,7 +58,9 @@ Relevant existing files:
     auth requirement, and diagnostics.
   - There is no `aiPolicy` field yet.
 - `backend/src/index.ts`
-  - `GET /health` returns `buildRuntimeHealthPayload()`.
+  - Public `GET /health` returns only liveness/version; authenticated
+    `GET /api/runtime-health` returns `buildRuntimeHealthPayload()` and requires
+    `runtime:manage`.
   - Workspace provider routes are mounted at
     `/api/workspaces/:workspaceId/providers`; legacy routes are mounted at
     `/api/v1/providers`.
@@ -101,12 +103,12 @@ Relevant existing files:
   - Deterministic Skill execution can run without an AI service today, but
     AI-backed Skill steps need an explicit policy guard.
 - `perfetto/ui/src/plugins/com.smartperfetto.AIAssistant/types.ts`
-  - `ServerStatus` reflects the current `/health` `aiEngine` shape.
+  - `ServerStatus` reflects the authenticated `/api/runtime-health` `aiEngine` shape.
   - The runtime union currently covers only `claude-agent-sdk` and
     `openai-agents-sdk`, while backend selection can also expose Pi and
     OpenCode runtimes.
 - `perfetto/ui/src/plugins/com.smartperfetto.AIAssistant/ai_panel.ts`
-  - `checkServerStatus()` fetches `/health` and caches `ServerStatus`.
+  - `checkServerStatus()` fetches authenticated `/api/runtime-health` and caches `ServerStatus`.
   - Natural language messages and `/analyze` converge through `sendMessage()`.
   - Deterministic slash commands such as `/sql`, `/goto`, `/pins`, `/clear`,
     and `/help` share the same input surface.
@@ -370,7 +372,7 @@ configuration remains editable.
 
 **Interfaces:**
 
-- Produces: `/health.aiPolicy`, `/health.aiEngine.aiEnabled`, and
+- Produces: `/api/runtime-health.aiPolicy`, `/api/runtime-health.aiEngine.aiEnabled`, and
   `DoctorReport.aiPolicy`.
 - Consumes: health payload, CLI doctor, and runtime guard.
 
@@ -431,7 +433,7 @@ deterministic Skills still execute.
 **Interfaces:**
 
 - Produces: policy-aware `ServerStatus` and visible disabled state.
-- Consumes: `/health.aiPolicy` and existing `aiEngine` fields.
+- Consumes: authenticated `/api/runtime-health.aiPolicy` and existing `aiEngine` fields.
 
 - [x] Add `AiCapabilityPolicy` types to `types.ts`.
 - [x] Parse policy in `AIPanel.checkServerStatus()`.

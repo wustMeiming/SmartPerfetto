@@ -33,10 +33,26 @@ describe('CodebaseRegistry', () => {
 
     expect(ref.rootRealpath).toBe(fs.realpathSync(tmpDir));
     expect(ref.consent.sendToProvider).toBe(true);
-    const summary = registry.list()[0] as any;
+    registry.updateIngestStatus(ref.codebaseId, {
+      lastIngestStatus: 'partial',
+      lastIngestAt: 123,
+      lastIngestError: 'one file was skipped',
+      chunkCount: 7,
+      blockedFileCount: 1,
+      redactionHitCount: 2,
+    }, {userId: 'user-a'});
+    const summary = registry.list({userId: 'user-a'})[0] as any;
     expect(summary.codebaseId).toBe(ref.codebaseId);
     expect(summary.rootPath).toBeUndefined();
     expect(summary.eligibleForSendToProvider).toBe(true);
+    expect(summary).toMatchObject({
+      lastIngestStatus: 'partial',
+      lastIngestAt: 123,
+      lastIngestError: 'one file was skipped',
+      chunkCount: 7,
+      blockedFileCount: 1,
+      redactionHitCount: 2,
+    });
   });
 
   it('persists across instances', () => {
@@ -50,5 +66,29 @@ describe('CodebaseRegistry', () => {
     const reloaded = new CodebaseRegistry(registryPath);
     expect(reloaded.get(ref.codebaseId)?.displayName).toBe('App');
   });
-});
 
+  it('deletes a registration only while holding its ingest lease', async () => {
+    const registryPath = path.join(tmpDir, 'registry.json');
+    const registry = new CodebaseRegistry(registryPath);
+    const scope = {tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'user-a'};
+    const ref = registry.register({
+      kind: 'app_source',
+      displayName: 'Private App',
+      rootPath: tmpDir,
+      ...scope,
+    });
+
+    const deleted = await registry.withIngestLease(ref.codebaseId, scope, lease => {
+      const deleting = lease.beginDeletion('user-a');
+      expect(deleting.lifecycleState).toBe('deleting');
+      expect(deleting.consent.sendToProvider).toBe(false);
+      return lease.deleteRegistration();
+    }, 'delete');
+
+    expect(deleted.codebaseId).toBe(ref.codebaseId);
+    expect(registry.get(ref.codebaseId, scope)).toBeUndefined();
+    expect(new CodebaseRegistry(registryPath).get(ref.codebaseId, scope)).toBeUndefined();
+    await expect(registry.withIngestLease(ref.codebaseId, scope, () => undefined))
+      .rejects.toThrow(`Codebase '${ref.codebaseId}' not found`);
+  });
+});

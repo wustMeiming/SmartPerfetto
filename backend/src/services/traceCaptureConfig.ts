@@ -80,6 +80,10 @@ const BINDER_EVENTS = [
 const CAMERA_MEMORY_EVENTS = [
   'dmabuf_heap/dma_heap_stat',
   'ion/ion_stat',
+  // Older Pixel/vendor kernels expose the legacy ION allocation pair rather
+  // than ion_stat. Unsupported ftrace events are ignored by traced.
+  'kmem/ion_heap_grow',
+  'kmem/ion_heap_shrink',
 ];
 
 const IO_EVENTS = [

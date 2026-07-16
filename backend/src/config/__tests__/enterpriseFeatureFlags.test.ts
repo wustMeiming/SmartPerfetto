@@ -41,6 +41,11 @@ describe('server port config', () => {
   it('keeps default backend and frontend ports', () => {
     expect(resolveServerConfig({}).port).toBe(DEFAULT_BACKEND_PORT);
     expect(resolveServerConfig({}).frontendPort).toBe(DEFAULT_FRONTEND_PORT);
+    expect(resolveServerConfig({}).bindHost).toBe('127.0.0.1');
+  });
+
+  it('requires an explicit opt-in before listening beyond loopback', () => {
+    expect(resolveServerConfig({SMARTPERFETTO_BIND_HOST: '0.0.0.0'}).bindHost).toBe('0.0.0.0');
   });
 
   it('prefers SMARTPERFETTO_BACKEND_PORT over PORT', () => {

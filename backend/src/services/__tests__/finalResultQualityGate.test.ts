@@ -2037,4 +2037,45 @@ describe('final result quality gate', () => {
 
     expect(issue?.code).toBe('kernel_blocking_claim_boundary');
   });
+
+  it('requires every known dual-trace package identity in the deliverable conclusion', () => {
+    const issue = assessFinalResultQuality({
+      result: result({
+        conclusion: [
+          '# 双 Trace 对比分析报告',
+          '',
+          '## 综合结论',
+          '',
+          '当前侧 com.example.heavy 的主线程阻塞明显高于右侧 demo。',
+        ].join('\n'),
+      }),
+      query: '对比两个 trace 的性能差异',
+      comparisonIdentity: {
+        currentPackageName: 'com.example.heavy',
+        referencePackageName: 'com.example.demo',
+      },
+    });
+
+    expect(issue?.code).toBe('comparison_identity_incomplete');
+    expect(issue?.message).toContain('com.example.demo');
+  });
+
+  it('accepts a dual-trace conclusion that explicitly names both package identities', () => {
+    expect(assessFinalResultQuality({
+      result: result({
+        conclusion: [
+          '# 双 Trace 对比分析报告',
+          '',
+          '## 综合结论',
+          '',
+          '当前侧 com.example.heavy 的主线程阻塞明显高于参考侧 com.example.demo。',
+        ].join('\n'),
+      }),
+      query: '对比两个 trace 的性能差异',
+      comparisonIdentity: {
+        currentPackageName: 'com.example.heavy',
+        referencePackageName: 'com.example.demo',
+      },
+    })).toBeUndefined();
+  });
 });

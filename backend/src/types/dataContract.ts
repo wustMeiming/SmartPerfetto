@@ -1067,10 +1067,55 @@ export interface AnalysisReceiptV1 {
 /**
  * Analysis Completed Event - SSE payload for final result
  */
+export interface AnalysisCompletedFinding {
+  id: string;
+  category?: string;
+  severity?: string;
+  title?: string;
+  description?: string;
+  timestampsNs?: unknown;
+  evidence?: unknown;
+  details?: unknown;
+  recommendations?: unknown;
+  confidence?: number;
+}
+
+export interface AnalysisCompletedHypothesis {
+  id?: string;
+  description?: string;
+  status?: string;
+  confidence?: number;
+  supportingEvidence?: unknown;
+  contradictingEvidence?: unknown;
+}
+
+export interface AnalysisCompletedConversationStep {
+  eventId: string;
+  ordinal: number;
+  phase: 'progress' | 'thinking' | 'tool' | 'result' | 'error';
+  role: 'agent' | 'system';
+  text: string;
+  timestamp: number;
+  sourceEventType?: string;
+}
+
+export interface AnalysisCompletedObservability {
+  runId?: string;
+  requestId?: string;
+  runSequence?: number;
+}
+
 export interface AnalysisCompletedEvent {
   type: 'analysis_completed';
+  architecture?: 'agent-driven';
+  runId?: string;
+  requestId?: string;
+  runSequence?: number;
   data: {
-    summary: string;
+    /** Legacy compatibility aliases. New emitters use conclusion. */
+    summary?: string;
+    answer?: string;
+    privateProjectionVersion?: number;
     conclusion?: string;
     conclusionContract?: import('../agent/core/conclusionContract').ConclusionContract;
     claimSupport?: import('./evidenceContract').ClaimSupportV1[];
@@ -1087,9 +1132,22 @@ export interface AnalysisCompletedEvent {
     quickRun?: import('../agent/core/orchestratorTypes').QuickRunReceipt;
     analysisReceipt?: AnalysisReceiptV1;
     uiActionProposals?: UiActionProposalV1[];
+    smartScenePreview?: import('../agent/scene/types').SmartScenePreviewPayload;
     terminalRunStatus?: 'completed' | 'quota_exceeded';
-    findings: DiagnosticFinding[];
-    suggestions: string[];
+    findings: AnalysisCompletedFinding[];
+    resultContract?: import('../assistant/contracts/assistantResultContract').AssistantResultContract;
+    hypotheses?: AnalysisCompletedHypothesis[];
+    agentDialogueCount?: number;
+    conversationTimelineCount?: number;
+    conversationTimeline?: AnalysisCompletedConversationStep[];
+    reportError?: string;
+    comparisonReportSection?: Omit<
+      import('../agentv3/sessionStateSnapshot').ComparisonReportSection,
+      'html'
+    > & {html?: string};
+    observability?: AnalysisCompletedObservability;
+    /** Legacy compatibility field; recommendations now live in findings/resultContract. */
+    suggestions?: string[];
   };
   timestamp: number;
 }

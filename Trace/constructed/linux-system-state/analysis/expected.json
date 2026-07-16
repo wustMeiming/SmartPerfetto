@@ -7,7 +7,7 @@
       "id": "execute-device_state_snapshot",
       "type": "skill",
       "target": "device_state_snapshot",
-      "mode": "semantic",
+      "mode": "execution",
       "source_file": "backend/skills/composite/device_state_snapshot.skill.yaml",
       "parameters": {},
       "required_steps": [

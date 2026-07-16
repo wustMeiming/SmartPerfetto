@@ -68,6 +68,13 @@ final_report_contract:
     - id: audience_recommendations
       label: App/系统分层建议
       description: '优化建议必须区分 App 层和系统/平台/ROM 层。'
+      recovery_text:
+        zh:
+          - 'App 层：仅对已完成阶段证据直接指向的应用瓶颈实施优化。'
+          - '系统/平台层：若已完成阶段没有平台归因证据，保持为未验证并继续监测。'
+        en:
+          - 'App layer: optimize only application bottlenecks directly supported by completed-phase evidence.'
+          - 'System/Platform: when completed phases contain no platform-attribution evidence, keep that path unverified and monitor it.'
       pattern_groups:
         - ['App\s*层', '应用\s*层', 'App\s+layer']
         - ['系统\s*/\s*平台\s*层', '系统\s*层', '平台\s*层', 'ROM\s*层', 'System/Platform', 'platform\s+layer']
@@ -86,7 +93,7 @@ final_report_contract:
 phase_hints:
   - id: detail_breakdown
     keywords: ['detail', '详情', '分解', 'breakdown', '阶段', 'startup_detail', '耗时']
-    constraints: '必须用 Phase 1 的 ttid_ts/ttfd_ts 作为 startup_detail 的时间边界参数。使用 self_ms（排除子切片）而非 wall-time。'
+    constraints: '必须把 Phase 1 的 startup_id/start_ts/end_ts/dur_ms/package/startup_type 原样传给 startup_detail；TTID/TTFD 只能作为可选 ttid_ms/ttfd_ms，不能充当时间边界。使用 self_ms（排除子切片）而非 wall-time。'
     critical_tools: ['startup_detail']
     critical: false
   - id: critical_artifacts
@@ -191,7 +198,7 @@ plan_template:
 - q4_blocking_chain: 当计划涉及 Q4/Sleeping/阻塞解释时，必须声明 blocking_chain_analysis；若 trace 缺少阻塞信号，执行阶段标记 skipped 并说明  (required: invoke_skill(blocking_chain_analysis) or compare_skill(blocking_chain_analysis))
 
 **Phase reminders**
-- detail_breakdown: 必须用 Phase 1 的 ttid_ts/ttfd_ts 作为 startup_detail 的时间边界参数。使用 self_ms（排除子切片）而非 wall-time。 工具: startup_detail
+- detail_breakdown: 必须把 Phase 1 的 startup_id/start_ts/end_ts/dur_ms/package/startup_type 原样传给 startup_detail；TTID/TTFD 只能作为可选 ttid_ms/ttfd_ms，不能充当时间边界。使用 self_ms（排除子切片）而非 wall-time。 工具: startup_detail
 - critical_artifacts: 此阶段不可跳过。必须获取关键 artifact（热点函数、阻塞调用、锁竞争）作为深钻输入。 工具: execute_sql, fetch_artifact
 - slow_reasons_validation: 冷启动必须调用 startup_slow_reasons 检查 DEX2OAT/baseline profile/debuggable 等官方因素。Q4(Sleeping) >25% 必须用 blocking_chain_analysis 追踪阻塞源。 工具: startup_slow_reasons, blocking_chain_analysis
 - webview_startup: 仅在架构检测或 trace 证据提示 WebView 时执行。SQL 必须说明正在验证 WebView/Chromium/V8/CrRendererMain 是否参与启动；若未命中 slice，应把 WebView 启动影响标为证据不足或可排除，而不是继续归到综合结论。 工具: execute_sql
