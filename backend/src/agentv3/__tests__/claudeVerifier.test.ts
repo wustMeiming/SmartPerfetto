@@ -177,6 +177,93 @@ describe('verifyHeuristic', () => {
       expect(findings[0].evidence?.[0]?.text).toContain('47-59ms');
       expect(issues.filter(issue => issue.type === 'missing_evidence')).toHaveLength(0);
     });
+
+    it('should bind a suffix severity heading to its following metric list', () => {
+      const conclusion = `
+### Frame 2 — workload_heavy **[CRITICAL]**
+
+- 耗时: 62.73ms (7.5x VSync 预算)，丢失 7 个 VSync
+- 主线程: \`Choreographer#doFrame\` 60.85ms，其中 animation 回调 59.02ms
+- 根因: 主线程同步重计算导致 RenderThread 等待
+
+这段结论说明量化条目属于 Frame 2 的严重发现，而不是脱离父标题的独立结论。
+`;
+      const findings = extractFindingsFromText(conclusion);
+      const issues = verifyHeuristic(findings, conclusion);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].title).toBe('Frame 2 — workload_heavy');
+      expect(findings[0].evidence?.[0]?.text).toContain('62.73ms');
+      expect(issues.filter(issue => issue.type === 'missing_evidence')).toHaveLength(0);
+    });
+
+    it('should not treat an unquantified metric list as critical evidence', () => {
+      const conclusion = `
+### Main thread issue **[CRITICAL]**
+
+- CPU: 主线程看起来很忙
+- 建议: 继续采集数据确认
+
+这段结论没有任何时间、比例、计数或证据引用，不能通过严重发现的证据门禁。
+`;
+      const findings = extractFindingsFromText(conclusion);
+      const issues = verifyHeuristic(findings, conclusion);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].evidence).toBeUndefined();
+      expect(issues.some(issue => issue.type === 'missing_evidence' && issue.severity === 'error')).toBe(true);
+    });
+
+    it('should not let a critical finding borrow evidence from the next suffix heading', () => {
+      const conclusion = `
+### First finding **[CRITICAL]**
+
+这里没有量化数据或证据引用。
+
+### Evidence: 62.73ms **[HIGH]**
+
+后一个发现有独立的量化标题证据，不能回流到前一个发现。
+`;
+      const findings = extractFindingsFromText(conclusion);
+      const issues = verifyHeuristic(findings, conclusion);
+
+      expect(findings).toHaveLength(2);
+      expect(findings[0].title).toBe('First finding');
+      expect(findings[0].evidence).toBeUndefined();
+      expect(issues.some(issue => issue.type === 'missing_evidence' && issue.severity === 'error')).toBe(true);
+    });
+
+    it('should ignore a severity marker at the end of an ordinary sentence', () => {
+      const conclusion = `
+The severity assigned by the model is **[CRITICAL]**
+
+This is explanatory prose rather than a structured finding heading, and it must not create a synthetic finding.
+`;
+      const findings = extractFindingsFromText(conclusion);
+
+      expect(findings).toHaveLength(0);
+    });
+
+    it.each([
+      ['预计优化值', '耗时: 预计优化后 10ms'],
+      ['中文预期值', '耗时: 预期 10ms'],
+      ['English expected value', 'duration: expected 10ms'],
+    ])('should not accept %s as observed evidence', (_caseName, metric) => {
+      const conclusion = `
+### Animation issue **[CRITICAL]**
+
+- ${metric}
+- 建议: 重写动画逻辑
+
+这段结论只包含目标值，没有当前 trace 的观测值或证据引用。
+`;
+      const findings = extractFindingsFromText(conclusion);
+      const issues = verifyHeuristic(findings, conclusion);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].evidence).toBeUndefined();
+      expect(issues.some(issue => issue.type === 'missing_evidence' && issue.severity === 'error')).toBe(true);
+    });
   });
 
   describe('Check 2: Too many CRITICALs', () => {
