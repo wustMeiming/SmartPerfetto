@@ -15,7 +15,9 @@ test('Docker carries static backend surfaces and a host-independent OpenCode bin
   assert.match(dockerfile, /COPY backend\/knowledge \.\/backend\/knowledge/);
   assert.match(dockerfile, /opencode-linux-x64-baseline\/bin\/opencode/);
   assert.match(dockerfile, /opencode-linux-arm64\/bin\/opencode/);
-  assert.match(dockerfile, /opencode\.exe --version/);
+  assert.match(dockerfile, /rm -f "\$OPENCODE_DEST"/);
+  assert.match(dockerfile, /ln "\$OPENCODE_SOURCE" "\$OPENCODE_DEST"/);
+  assert.match(dockerfile, /"\$OPENCODE_DEST" --version/);
 });
 
 test('npm and portable artifacts verify the same backend runtime surfaces', () => {

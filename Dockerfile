@@ -23,10 +23,12 @@ RUN set -eux; \
       aarch64) OPENCODE_SOURCE="node_modules/opencode-linux-arm64/bin/opencode" ;; \
       *) echo "Unsupported OpenCode architecture: $ARCH" >&2; exit 1 ;; \
     esac; \
+    OPENCODE_DEST="node_modules/opencode-ai/bin/opencode.exe"; \
     test -s "$OPENCODE_SOURCE"; \
-    cp "$OPENCODE_SOURCE" node_modules/opencode-ai/bin/opencode.exe; \
-    chmod +x node_modules/opencode-ai/bin/opencode.exe; \
-    node_modules/opencode-ai/bin/opencode.exe --version
+    rm -f "$OPENCODE_DEST"; \
+    ln "$OPENCODE_SOURCE" "$OPENCODE_DEST"; \
+    chmod +x "$OPENCODE_DEST"; \
+    "$OPENCODE_DEST" --version
 
 # Remove devDependencies to drastically reduce the final image size
 RUN npm prune --production
