@@ -76,6 +76,13 @@ final_report_contract:
     - id: peak_and_semantic_metrics
       label: 峰值/口径指标
       description: '说明总帧数、真实掉帧、假阳性/Buffer Stuffing、最长帧和最长连续丢帧等口径。'
+      recovery_text:
+        zh:
+          - '真实掉帧口径：以以下已完成阶段中确认的用户可感知卡顿为准；仅在阶段证据明确区分时排除假阳性/Buffer Stuffing，否则保留为口径限制。'
+          - '最长帧/峰值口径：以下阶段证据中的最长单帧与最长连续丢帧代表当前采集窗口峰值；缺失项保持为数据缺口。'
+        en:
+          - 'Real jank semantics: use user-visible jank confirmed by the completed phases below; exclude false positives or Buffer Stuffing only when the phase evidence distinguishes them, otherwise keep that boundary as a limitation.'
+          - 'Longest frame / peak semantics: the longest single frame and longest consecutive missed-frame interval in the phase evidence below represent the current capture-window peak; keep missing fields as data gaps.'
       pattern_groups:
         - ['真实掉帧', 'real[_\s-]?jank']
         - ['最长帧', 'longest frame', '峰值']

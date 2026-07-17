@@ -154,6 +154,54 @@ describe('runtime final report truncation recovery', () => {
     expect(repaired).toContain('### 阶段耗时分解');
   });
 
+  it('recovers scrolling metric semantics when the model uses near-synonym wording', () => {
+    const scrollingPlan = makePlan();
+    scrollingPlan.phases[0].summary =
+      '347 帧中 7 帧用户可感知卡顿(2.02%)，最长单帧 62.73ms，最长连续丢 7 个 VSync。';
+    const conclusion = [
+      '## 综合结论',
+      '',
+      '### 概览',
+      '',
+      '共 347 帧，7 帧用户可感知卡顿，最长单帧 62.73ms，最长连续丢 7 个 VSync。',
+      '',
+      '### 全帧根因分布',
+      '',
+      '| reason_code | 帧数 | 占比 |',
+      '|---|---:|---:|',
+      '| workload_heavy | 6 | 85.7% |',
+      '',
+      '### 代表帧分析',
+      '',
+      'Frame 59665234 帧耗时 62.73ms，超预算 7.5x，丢失 7 VSync。',
+    ].join('\n');
+    const missing = assessFinalReportContractCompleteness({
+      conclusion,
+      query: '分析滑动性能',
+      sceneType: 'scrolling',
+    });
+
+    expect(missing?.missingSections.map(section => section.id)).toEqual([
+      'peak_and_semantic_metrics',
+    ]);
+
+    const repaired = repairTruncatedFinalReport({
+      conclusion,
+      plan: scrollingPlan,
+      hypotheses: makeHypotheses(),
+      outputLanguage: 'zh-CN',
+      recoveryKind: 'missing_contract',
+      missingContractSections: missing?.missingSections,
+    });
+
+    expect(repaired).toContain('### 峰值/口径指标');
+    expect(assessFinalReportContractCompleteness({
+      conclusion: repaired || '',
+      query: '分析滑动性能',
+      sceneType: 'scrolling',
+    })).toBeUndefined();
+  });
+
   it('uses the scene-owned contract description to recover grouped startup sections', () => {
     const startupPlan = makePlan();
     startupPlan.phases[0].summary = '已确认 cold start，TTID 1912.2ms，TTFD 在 trace 中不可用。';
