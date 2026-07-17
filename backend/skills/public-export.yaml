@@ -1408,6 +1408,12 @@ strategies:
   backend/strategies/prompt-complexity-classifier.template.md:
     disposition: product-only
     reason: SmartPerfetto runtime, session, case, language, or codebase orchestration
+  backend/strategies/prompt-code-reference-contract-en.template.md:
+    disposition: product-only
+    reason: SmartPerfetto source lookup tools and codebase-aware report orchestration
+  backend/strategies/prompt-code-reference-contract-zh.template.md:
+    disposition: product-only
+    reason: SmartPerfetto source lookup tools and codebase-aware report orchestration
   backend/strategies/prompt-final-report-correction-system-en.template.md:
     disposition: product-only
     reason: SmartPerfetto final-report runtime orchestration
