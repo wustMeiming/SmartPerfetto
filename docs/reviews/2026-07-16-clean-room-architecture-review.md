@@ -221,6 +221,34 @@ Final SmartPerfetto impact decision: `required`.
 Final SmartPerfetto impact fingerprint:
 `fe62defae1724db001a2b467e92280c4958f96fd871f2e6e59590cdc9c2d1b94`.
 
+### Release-candidate resynchronization
+
+The release-candidate projection was regenerated from the exact clean
+SmartPerfetto commit `ff5d4a00696318f7bfc5868fb54c84b38c32b880` and committed
+in Perfetto-Skills as `718c5dcdd5de2feb920ce8719f69c8108f9f8317`. Both commits
+are reachable from their respective `origin/main` branches.
+
+This synchronization exports the scrolling final-report recovery contract in
+both Chinese and English. It also closes a policy gap found by the public
+exporter: the two SmartPerfetto-only CodeRef prompt templates are now explicitly
+classified as product-only because they depend on SmartPerfetto source lookup
+tools. The public inventory now covers all 103 Strategy/registry sources.
+
+The independent Perfetto-Skills gate passed after the update: 651 query
+definitions were statically valid, 6 real-fixture scenes and 11 semantic
+assertions executed, and all 170 tests passed with 1 existing skip. The only
+gate failure encountered during synchronization was the expected stale
+immutable-source assertion; its pin was updated to the new reviewed commit and
+the complete gate was rerun successfully.
+
+Release-candidate SmartPerfetto impact decision: `required`.
+
+Release-candidate SmartPerfetto impact fingerprint:
+`8488dfa3929030feac38ae23d13e60510584f81f9bbfc775b0acd49dbbf68301`.
+
+Release-candidate Perfetto-Skills impact fingerprint:
+`ae6d4b2a98cb58dbe246e7be1e722f54b54a2bec6b9b1c4a68211fc99adf1276`.
+
 ## Perfetto submodule landing closure
 
 The Perfetto UI changes are committed at
