@@ -167,17 +167,17 @@ function isListMarkerFragment(text: string): boolean {
 
 function extractEvidence(text: string): string | undefined {
   const labelPrefix = String.raw`\*{0,2}`;
-  const labelSuffix = String.raw`\*{0,2}\s*[：:]`;
+  const labelDelimiter = String.raw`(?:\s*[：:]\s*\*{0,2}|\*{0,2}\s*[：:])`;
   // Try explicit "证据:" or "Evidence:" label first
   const explicit = text.match(new RegExp(
-    `(?:${labelPrefix}证据(?:类型\\s*[/／]\\s*置信度|来源|链)?${labelSuffix}|${labelPrefix}Evidence(?:\\s*(?:Type\\s*[/／]\\s*Confidence|Sources?|Chain))?${labelSuffix})\\s*(.+?)(?=\\n(?:建议|Suggestion|Recommendation|${labelPrefix}\\[(?:CRITICAL|HIGH|MEDIUM|LOW|INFO)\\])|$)`,
+    `(?:${labelPrefix}证据(?:类型(?:\\s*[/／]\\s*置信度)?|来源|链)?${labelDelimiter}|${labelPrefix}Evidence(?:\\s*(?:Type(?:\\s*[/／]\\s*Confidence)?|Sources?|Chain))?${labelDelimiter})\\s*(.+?)(?=\\n(?:建议|Suggestion|Recommendation|${labelPrefix}\\[(?:CRITICAL|HIGH|MEDIUM|LOW|INFO)\\])|$)`,
     'is',
   ));
   if (explicit) return explicit[1].trim().substring(0, 500);
 
   // Also match "根因推理链:" format (used by strategy-compliant conclusions)
   const rootCause = text.match(new RegExp(
-    `(?:${labelPrefix}根因推理链${labelSuffix}|${labelPrefix}根因${labelSuffix}|${labelPrefix}Root\\s+Cause(?:\\s+Chain)?${labelSuffix})\\s*(.+?)(?=\\n(?:建议|结论|Suggestion|Recommendation|${labelPrefix}\\[(?:CRITICAL|HIGH|MEDIUM|LOW|INFO)\\])|$)`,
+    `(?:${labelPrefix}根因推理链${labelDelimiter}|${labelPrefix}根因${labelDelimiter}|${labelPrefix}Root\\s+Cause(?:\\s+Chain)?${labelDelimiter})\\s*(.+?)(?=\\n(?:建议|结论|Suggestion|Recommendation|${labelPrefix}\\[(?:CRITICAL|HIGH|MEDIUM|LOW|INFO)\\])|$)`,
     'is',
   ));
   if (rootCause) return rootCause[1].trim().substring(0, 500);
