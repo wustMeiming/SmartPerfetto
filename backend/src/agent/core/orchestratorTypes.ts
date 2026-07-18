@@ -341,6 +341,8 @@ export interface AnalysisOptions {
   knowledgeSourceIds?: string[];
   /** Internal non-secret partition for source/RAG capability continuity. */
   analysisContextFingerprint?: string;
+  /** Internal immutable public Knowledge Pack identity pinned to this session. */
+  androidInternalsPackPin?: import('../../services/androidInternalsPack/types').AndroidInternalsPackIdentity;
 
   /**
    * Enterprise persistence scope supplied by the route layer.

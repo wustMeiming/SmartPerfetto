@@ -13,6 +13,13 @@ import {redactSecrets} from '../security/secretPatterns';
 import {registerCodeAwareLookupForEcho} from '../security/codeAwareOutputRegistry';
 import type {ExternalKnowledgeScope} from '../externalKnowledgeSourceRegistry';
 import type {ExternalKnowledgeSourceRegistry} from '../externalKnowledgeSourceRegistry';
+import {
+  backgroundKnowledgeReferenceFromChunk,
+} from '../androidInternalsPack/backgroundKnowledgeReferences';
+import type {BackgroundKnowledgeReference} from '../../types/sparkContracts';
+import {
+  registerSessionBackgroundKnowledgeReferences,
+} from '../androidInternalsPack/sessionBackgroundKnowledgeRegistry';
 
 export interface SanitizedRagHit {
   chunkId: string;
@@ -38,6 +45,12 @@ export interface SanitizedRagHit {
     verifiedAt?: number;
     lastVerifiedAgainst?: string;
     contentFingerprint?: string;
+    articleId?: string;
+    sectionId?: string;
+    sectionHeading?: string;
+    chunkHash?: string;
+    knowledgePackVersion?: string;
+    knowledgePackFingerprint?: string;
     sourceDirty?: boolean;
     commitProvenance?: RagChunk['commitProvenance'];
   };
@@ -53,6 +66,7 @@ export interface SanitizedRagResult {
   retrievedAt: number;
   unsupportedReason?: string;
   legacyPath: boolean;
+  backgroundKnowledgeReferences?: BackgroundKnowledgeReference[];
 }
 
 export interface FilterContext {
@@ -92,6 +106,11 @@ function isExternalPrivateKnowledgeChunk(chunk: RagChunk): boolean {
     chunk.registryOrigin === 'external_knowledge_registry';
 }
 
+function isBuiltInKnowledgePackChunk(chunk: RagChunk): boolean {
+  return chunk.kind === 'android_internals_pack' &&
+    chunk.registryOrigin === 'built_in_knowledge_pack';
+}
+
 function metadata(chunk: RagChunk): SanitizedRagHit['metadata'] {
   return {
     kind: chunk.kind,
@@ -113,6 +132,16 @@ function metadata(chunk: RagChunk): SanitizedRagHit['metadata'] {
     ...(chunk.sourceConfidence ? {sourceConfidence: chunk.sourceConfidence} : {}),
     ...(chunk.lastVerifiedAgainst ? {lastVerifiedAgainst: chunk.lastVerifiedAgainst} : {}),
     ...(chunk.contentFingerprint ? {contentFingerprint: chunk.contentFingerprint} : {}),
+    ...(chunk.articleId ? {articleId: chunk.articleId} : {}),
+    ...(chunk.sectionId ? {sectionId: chunk.sectionId} : {}),
+    ...(chunk.sectionHeading ? {sectionHeading: chunk.sectionHeading} : {}),
+    ...(chunk.chunkHash ? {chunkHash: chunk.chunkHash} : {}),
+    ...(chunk.knowledgePackVersion
+      ? {knowledgePackVersion: chunk.knowledgePackVersion}
+      : {}),
+    ...(chunk.knowledgePackFingerprint
+      ? {knowledgePackFingerprint: chunk.knowledgePackFingerprint}
+      : {}),
     ...(chunk.sourceDirty !== undefined ? {sourceDirty: chunk.sourceDirty} : {}),
     ...(chunk.commitProvenance ? {commitProvenance: chunk.commitProvenance} : {}),
   };
@@ -146,6 +175,7 @@ export async function filterRagLookup(
   ctx: FilterContext,
 ): Promise<SanitizedRagResult> {
   const hits: SanitizedRagHit[] = [];
+  const backgroundKnowledgeReferences: BackgroundKnowledgeReference[] = [];
   let allLegacy = true;
 
   for (const hit of raw.results) {
@@ -182,6 +212,60 @@ export async function filterRagLookup(
     }
 
     allLegacy = false;
+    if (isBuiltInKnowledgePackChunk(chunk)) {
+      const redacted = redactSecrets(chunk.snippet);
+      const tokens = estimateTokens(chunk, redacted.text);
+      if (ctx.ledger && tokens > ctx.ledger.remainingTokens()) {
+        hits.push({
+          chunkId: hit.chunkId,
+          score: hit.score,
+          metadata: metadata(chunk),
+          unsupportedReason: 'budget_exceeded',
+          redactedCount: redacted.redactedCount,
+        });
+        ctx.ledger.record({
+          turn: ctx.turn,
+          ts: Date.now(),
+          toolName: ctx.toolName,
+          chunkIds: [],
+          consentApplied: false,
+          tokensSpent: 0,
+          outcome: 'budget_exceeded',
+          legacyPath: false,
+        });
+        continue;
+      }
+      const reference = backgroundKnowledgeReferenceFromChunk(chunk);
+      if (!reference) {
+        hits.push({
+          chunkId: hit.chunkId,
+          score: hit.score,
+          metadata: metadata(chunk),
+          unsupportedReason: 'invalid_background_knowledge_reference',
+          redactedCount: redacted.redactedCount,
+        });
+        continue;
+      }
+      backgroundKnowledgeReferences.push(reference);
+      hits.push({
+        chunkId: hit.chunkId,
+        score: hit.score,
+        metadata: metadata(chunk),
+        snippet: redacted.text,
+        redactedCount: redacted.redactedCount,
+      });
+      ctx.ledger?.record({
+        turn: ctx.turn,
+        ts: Date.now(),
+        toolName: ctx.toolName,
+        chunkIds: [chunk.chunkId],
+        consentApplied: false,
+        tokensSpent: tokens,
+        outcome: 'success',
+        legacyPath: false,
+      });
+      continue;
+    }
     if (isExternalPrivateKnowledgeChunk(chunk)) {
       const access = chunk.knowledgeSourceId && ctx.externalKnowledgeRegistry
         ? ctx.externalKnowledgeRegistry.evaluateAccess(
@@ -393,7 +477,12 @@ export async function filterRagLookup(
     retrievedAt: raw.retrievedAt,
     ...(raw.unsupportedReason ? {unsupportedReason: raw.unsupportedReason} : {}),
     legacyPath: allLegacy,
+    ...(backgroundKnowledgeReferences.length > 0 ? {backgroundKnowledgeReferences} : {}),
   };
+  registerSessionBackgroundKnowledgeReferences(
+    ctx.sessionId,
+    backgroundKnowledgeReferences,
+  );
   registerCodeAwareLookupForEcho(ctx.sessionId, sanitized);
   return sanitized;
 }

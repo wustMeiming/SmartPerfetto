@@ -4,7 +4,10 @@
 
 import {createHash} from 'crypto';
 
-import type {RagSourceKind} from '../../types/sparkContracts';
+import type {
+  BackgroundKnowledgeReference,
+  RagSourceKind,
+} from '../../types/sparkContracts';
 import type {CodeLookupOutcome} from '../codebase/codeLookupLedger';
 import type {SanitizedRagResult} from './lookupResponseFilter';
 
@@ -21,6 +24,12 @@ export interface ProjectedPayload {
     attribution?: string;
     sourceStatus?: string;
     sourceConfidence?: string;
+    articleId?: string;
+    sectionId?: string;
+    sectionHeading?: string;
+    chunkHash?: string;
+    knowledgePackVersion?: string;
+    knowledgePackFingerprint?: string;
     lastVerifiedAgainst?: string;
     commitHash?: string;
     sourceDirty?: boolean;
@@ -31,6 +40,7 @@ export interface ProjectedPayload {
   }>;
   outcome: CodeLookupOutcome;
   legacyPath: boolean;
+  backgroundKnowledgeReferences?: BackgroundKnowledgeReference[];
 }
 
 const SENSITIVE_RAG_TOOL_NAMES = new Set([
@@ -75,6 +85,18 @@ export function projectRagResultForSseAndLog(toolName: string, result: Sanitized
       ...(!privateWiki && hit.metadata?.sourceConfidence
         ? {sourceConfidence: hit.metadata.sourceConfidence}
         : {}),
+      ...(hit.metadata?.articleId ? {articleId: hit.metadata.articleId} : {}),
+      ...(hit.metadata?.sectionId ? {sectionId: hit.metadata.sectionId} : {}),
+      ...(hit.metadata?.sectionHeading
+        ? {sectionHeading: hit.metadata.sectionHeading}
+        : {}),
+      ...(hit.metadata?.chunkHash ? {chunkHash: hit.metadata.chunkHash} : {}),
+      ...(hit.metadata?.knowledgePackVersion
+        ? {knowledgePackVersion: hit.metadata.knowledgePackVersion}
+        : {}),
+      ...(hit.metadata?.knowledgePackFingerprint
+        ? {knowledgePackFingerprint: hit.metadata.knowledgePackFingerprint}
+        : {}),
       ...(!privateWiki && hit.metadata?.lastVerifiedAgainst
         ? {lastVerifiedAgainst: hit.metadata.lastVerifiedAgainst}
         : {}),
@@ -90,6 +112,9 @@ export function projectRagResultForSseAndLog(toolName: string, result: Sanitized
     chunkRefs,
     outcome,
     legacyPath: result.legacyPath,
+    ...(result.backgroundKnowledgeReferences
+      ? {backgroundKnowledgeReferences: result.backgroundKnowledgeReferences.map(item => ({...item}))}
+      : {}),
   };
 }
 
@@ -159,6 +184,18 @@ function projectRawRetrievalResult(toolName: string, candidate: Record<string, u
         ...(typeof chunk.lastVerifiedAgainst === 'string'
           ? {lastVerifiedAgainst: chunk.lastVerifiedAgainst}
           : {}),
+        ...(typeof chunk.articleId === 'string' ? {articleId: chunk.articleId} : {}),
+        ...(typeof chunk.sectionId === 'string' ? {sectionId: chunk.sectionId} : {}),
+        ...(typeof chunk.sectionHeading === 'string'
+          ? {sectionHeading: chunk.sectionHeading}
+          : {}),
+        ...(typeof chunk.chunkHash === 'string' ? {chunkHash: chunk.chunkHash} : {}),
+        ...(typeof chunk.knowledgePackVersion === 'string'
+          ? {knowledgePackVersion: chunk.knowledgePackVersion}
+          : {}),
+        ...(typeof chunk.knowledgePackFingerprint === 'string'
+          ? {knowledgePackFingerprint: chunk.knowledgePackFingerprint}
+          : {}),
         ...(typeof chunk.commitHash === 'string' ? {commitHash: chunk.commitHash} : {}),
         ...(typeof chunk.sourceDirty === 'boolean' ? {sourceDirty: chunk.sourceDirty} : {}),
         ...((chunk.commitProvenance === 'clean_git_revision' ||
@@ -200,6 +237,7 @@ export function projectSensitiveRagToolResult(
   if (!Array.isArray(result.hits)) return undefined;
   if (!result.hits.some(hit =>
     hit.metadata?.kind === 'android_internals_wiki' ||
+    hit.metadata?.kind === 'android_internals_pack' ||
     hit.metadata?.kind === 'app_source' ||
     hit.metadata?.kind === 'kernel_source' ||
     (hit.metadata?.kind === 'aosp' && Boolean(hit.metadata?.codebaseId)) ||

@@ -13,6 +13,7 @@ test('Docker carries static backend surfaces and a host-independent OpenCode bin
   const dockerfile = readFileSync(join(root, 'Dockerfile'), 'utf8');
   assert.match(dockerfile, /COPY backend\/public \.\/backend\/public/);
   assert.match(dockerfile, /COPY backend\/knowledge \.\/backend\/knowledge/);
+  assert.match(dockerfile, /npm run knowledge-pack:fetch && npm run build/);
   assert.match(dockerfile, /opencode-linux-x64-baseline\/bin\/opencode/);
   assert.match(dockerfile, /opencode-linux-arm64\/bin\/opencode/);
   assert.match(dockerfile, /rm -f "\$OPENCODE_DEST"/);
@@ -31,6 +32,8 @@ test('npm and portable artifacts verify the same backend runtime surfaces', () =
     'public/assistant-shell/index.html',
     'public/admin-control-plane/index.html',
     'knowledge/android-internals-capability-map.yaml',
+    'knowledge/aiw-pack/1.root.json',
+    'knowledge/aiw-pack/knowledge-packs.lock.json',
   ]) {
     assert.match(cliPackCheck, new RegExp(asset.replaceAll('/', '\\/')));
     assert.match(portableVerifier, new RegExp(asset.replaceAll('/', '\\/')));

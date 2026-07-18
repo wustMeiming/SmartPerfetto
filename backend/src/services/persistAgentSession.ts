@@ -42,6 +42,9 @@ import {
   projectPrivateTerminationMessage,
   sessionUsesPrivateKnowledge,
 } from './security/privateAnalysisProjection';
+import {
+  getSessionBackgroundKnowledgeReferences,
+} from './androidInternalsPack/sessionBackgroundKnowledgeRegistry';
 
 const MAX_SQL_RESULTS_PER_MESSAGE = 5;
 const MAX_SQL_RESULT_ENTRY_BYTES = 100 * 1024;
@@ -263,6 +266,11 @@ export function persistAgentTurn(input: PersistAgentTurnInput): void {
             agentRuntimeProviderSnapshotHash: session.providerSnapshotHash,
             continuityBreaks: session.continuityBreaks,
             analysisContextFingerprint: session.analysisContextFingerprint,
+            androidInternalsPackPin: (session as {
+              androidInternalsPackPin?: import('./androidInternalsPack/types').AndroidInternalsPackIdentity;
+            }).androidInternalsPackPin,
+            backgroundKnowledgeReferences:
+              getSessionBackgroundKnowledgeReferences(sessionId),
             lineage: session.lineage,
             codeAwareMode: (session as {codeAwareMode?: unknown}).codeAwareMode as any,
             codebaseIds: (session as {codebaseIds?: string[]}).codebaseIds,

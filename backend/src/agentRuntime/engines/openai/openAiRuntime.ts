@@ -2255,6 +2255,7 @@ export class OpenAIRuntime extends EventEmitter implements IOrchestrator {
         codebaseIds: options.codebaseIds,
         knowledgeSourceIds: options.knowledgeSourceIds,
         analysisContextFingerprint: options.analysisContextFingerprint,
+        androidInternalsPackPin: options.androidInternalsPackPin,
       });
       allowedTools = mcp.allowedTools;
       tools = createOpenAIToolsFromMcpDefinitions(mcp.toolDefinitions);

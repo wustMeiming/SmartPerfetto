@@ -54,7 +54,9 @@
     "verify:codebase-aware": "npm run validate:strategies && npm run validate:skills && npm run typecheck && npx jest src/cli-user/commands/__tests__/codebase.test.ts src/services/__tests__/htmlReportGenerator.codeAware.test.ts --runInBand && npm run codebase:e2e:all",
     "stdlib:generate-symbol-index": "node scripts/generate-stdlib-symbol-index.cjs",
     "stdlib:generate-sql-docs": "node scripts/generate-perfetto-sql-docs.cjs",
-    "prepack": "npm run build",
+    "knowledge-pack:fetch": "node scripts/fetch-aiw-knowledge-pack.cjs",
+    "knowledge-pack:verify": "node scripts/fetch-aiw-knowledge-pack.cjs --verify-only",
+    "prepack": "npm run knowledge-pack:fetch && npm run build",
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:case-evolution": "jest --runInBand src/services/caseEvolution/__tests__ src/routes/__tests__/agentRoutes.caseEvolution.test.ts src/routes/__tests__/strategyAdminRoutes.caseEvolution.test.ts",
@@ -138,6 +140,7 @@
     "multer": "^2.1.1",
     "openai": "^6.38.0",
     "sodium-native": "^5.1.0",
+    "tuf-js": "^6.0.0",
     "zod": "^4.4.3"
   },
   "overrides": {

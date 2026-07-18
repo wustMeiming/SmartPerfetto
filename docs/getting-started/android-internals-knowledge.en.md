@@ -1,12 +1,59 @@
-# Android Internals External Knowledge
+# Android Internals Knowledge Pack And Private Knowledge
 
 [English](android-internals-knowledge.en.md) | [中文](android-internals-knowledge.md)
 
-SmartPerfetto can use a local `android-internals-wiki` checkout as an optional, versioned external knowledge source. Repository prose is not copied into SmartPerfetto, npm packages, Docker images, or the public Skill. Content is available only after an operator explicitly registers and indexes a local checkout, and a request explicitly selects that source.
+SmartPerfetto ships a signed, version-locked public Android Internals Knowledge
+Pack by default. Users do not need the maintainer's local checkout or access to
+the private `android-internals-wiki` repository. npm, Docker, and portable
+artifacts carry the same verified snapshot. The runtime can independently update
+it through TUF and retains the last known good version if validation fails.
 
-This path provides Android background explanations; it does not change the evidence contract. A wiki hit cannot prove the root cause in the current trace. Diagnoses still require current-trace evidence from `execute_sql`, `invoke_skill`, or an equivalent evidence tool.
+Operators may separately register a local `android-internals-wiki` checkout they
+are authorized to use. That private path keeps its path allowlist, rights
+acknowledgement, and provider privacy consent; it does not weaken the public
+Pack boundary.
 
-## Security And License Boundaries
+Both paths provide Android background explanations only. A knowledge hit cannot
+prove the root cause in the current trace. Diagnoses still require current-trace
+evidence from `execute_sql`, `invoke_skill`, or an equivalent evidence tool.
+
+## Built-in Public Knowledge Pack
+
+- Every AIW `master` change builds a candidate. A scheduled job rebuilds from an
+  exact SHA at 00:30 Asia/Shanghai and promotes eligible changes.
+- Only strictly parsed, finalized, Task 6/Task 9-approved articles outside the
+  queue and blocklist are included.
+- An unchanged public-content fingerprint is a successful no-op. Changed content
+  receives an immutable `YYYY.MM.DD.N` version.
+- The public distribution repository contains TUF metadata, compressed SQLite,
+  an audit summary, and licenses—not Markdown sources, drafts, review logs,
+  queues, or local paths.
+- A session pins `contentVersion + contentFingerprint`. A background update
+  never silently switches an active session; emergency revocation requires a
+  new analysis context.
+- The model receives budgeted, secret-redacted snippets. Logs and SSE retain
+  citation metadata and snippet hashes only.
+
+Inspect or update it with:
+
+```bash
+smp knowledge-pack status
+smp knowledge-pack update --check
+smp knowledge-pack update
+```
+
+The default worker checks once per day. Use
+`SMARTPERFETTO_AIW_PACK_UPDATE_MODE=check|off`, or pin an installed,
+non-revoked version with `SMARTPERFETTO_AIW_PACK_PIN`. Mirrors can set
+`SMARTPERFETTO_AIW_PACK_METADATA_BASE_URL` and
+`SMARTPERFETTO_AIW_PACK_TARGET_BASE_URL`.
+
+Pack content is dual-licensed under
+`CC-BY-NC-SA-4.0 OR LicenseRef-AIW-Commercial`. Possessing the Pack does not
+grant commercial rights; commercial use requires separate written
+authorization. Each Pack carries the complete licenses and attribution.
+
+## Private Checkout Security And License Boundaries
 
 - Paths are denied by default. Only Markdown below `SMARTPERFETTO_KNOWLEDGE_ROOTS` can be previewed or indexed.
 - `rightsAcknowledged` is the operator's separate acknowledgement that they have the right to use the checkout; it grants no license. The connector records `CC-BY-NC-SA-4.0`. Commercial use requires the operator to obtain applicable authorization.

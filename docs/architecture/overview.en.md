@@ -79,9 +79,12 @@ boundaries. The LLM/agent checklist is in
       -> execute_sql -> trace_processor_shell
       -> invoke_skill -> SkillExecutor -> SQL / DataEnvelope
       -> lookup_knowledge / lookup_sql_schema / fetch_artifact
+      -> lookup_blog_knowledge(source=android_internals_pack)
+         -> session-pinned signed Pack -> FTS5/BM25 -> redacted, budgeted background citations
       -> lookup_blog_knowledge(source=android_internals_wiki)
          -> request source allowlist + live registry consent/scope check
          -> active RAG generation -> bounded attributed background context
+      (neither Android Internals source is current-trace evidence)
       -> resolve_symbol / lookup_app_source / lookup_aosp_source / lookup_kernel_source
          -> LookupResponseFilter -> CodeRef metadata
       -> propose_patch -> PatchProposer -> verified / sketch / unverified

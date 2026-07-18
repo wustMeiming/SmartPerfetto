@@ -527,6 +527,10 @@ export interface SessionStateSnapshot {
   continuityBreaks?: ProviderContinuityBreak[];
   /** Authorization partition for source/RAG continuation. */
   analysisContextFingerprint?: string;
+  /** Immutable public Knowledge Pack identity pinned to this analysis session. */
+  androidInternalsPackPin?: import('../services/androidInternalsPack/types').AndroidInternalsPackIdentity;
+  /** Public background citations, kept separate from current-trace evidence. */
+  backgroundKnowledgeReferences?: import('../types/sparkContracts').BackgroundKnowledgeReference[];
   /** Backend-session ancestry when a user-visible session had to bridge to a fresh backend session. */
   lineage?: SessionLineage;
   /** OpenAI Agents SDK history for cross-restart multi-turn continuation. */
@@ -610,6 +614,8 @@ export interface SessionFieldsForSnapshot {
   /** Append-only provider/runtime continuity breaks that forced fresh SDK context. */
   continuityBreaks?: ProviderContinuityBreak[];
   analysisContextFingerprint?: string;
+  androidInternalsPackPin?: SessionStateSnapshot['androidInternalsPackPin'];
+  backgroundKnowledgeReferences?: SessionStateSnapshot['backgroundKnowledgeReferences'];
   /** Backend-session ancestry when a user-visible session had to bridge to a fresh backend session. */
   lineage?: SessionLineage;
   codeAwareMode?: CodeAwareMode;
