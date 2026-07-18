@@ -13,6 +13,32 @@ Detailed commit-level history is available via `git log`.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-18
+
+### Added
+- SmartPerfetto now ships a signed, versioned Android Internals Knowledge Pack
+  containing the projected body content of every AIW article, including draft,
+  review, finalized, and deprecated workflow states.
+- The CLI, backend startup worker, runtime health, and report pipeline can
+  inspect, update, and attribute the Pack through a TUF-verified stable channel
+  while retaining the bundled snapshot as an offline fallback.
+- AI analysis can retrieve bounded Android internals background excerpts with
+  provenance, redaction, privacy projection, and explicit separation from
+  current-trace SQL/Skill evidence.
+
+### Changed
+- npm, Docker, source, and three-platform portable packages now carry the
+  locked compressed Pack, its aggregate audit, licenses, trusted root, and
+  channel configuration as runtime assets.
+- Knowledge Pack references are projected into reports and session snapshots
+  without exposing excerpt bodies through logs or streaming metadata.
+
+## [1.1.1] - 2026-07-17
+
+### Fixed
+- Docker builds normalize the OpenCode runtime link so the packaged provider
+  entry remains usable across image layers.
+
 ## [1.1.0] - 2026-07-17
 
 ### Added
@@ -128,7 +154,9 @@ Detailed commit-level history is available via `git log`.
 - HTML report generation and CSV / JSON export.
 - AGPL v3.0 licensing throughout.
 
-[Unreleased]: https://github.com/Gracker/SmartPerfetto/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Gracker/SmartPerfetto/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/Gracker/SmartPerfetto/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/Gracker/SmartPerfetto/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Gracker/SmartPerfetto/compare/v1.0.39...v1.1.0
 [1.0.21]: https://github.com/Gracker/SmartPerfetto/compare/v1.0.20...v1.0.21
 [0.1.0]: https://github.com/Gracker/SmartPerfetto/releases/tag/v0.1.0
