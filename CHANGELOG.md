@@ -13,6 +13,14 @@ Detailed commit-level history is available via `git log`.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-07-18
+
+### Fixed
+- Docker releases now distribute AMD64 and ARM64 builds across native,
+  platform-isolated runners before assembling and signing the final OCI
+  manifest, preventing the bundled AIW Knowledge Pack from exhausting a shared
+  runner's disk.
+
 ## [1.2.0] - 2026-07-18
 
 ### Added
@@ -154,7 +162,8 @@ Detailed commit-level history is available via `git log`.
 - HTML report generation and CSV / JSON export.
 - AGPL v3.0 licensing throughout.
 
-[Unreleased]: https://github.com/Gracker/SmartPerfetto/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/Gracker/SmartPerfetto/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/Gracker/SmartPerfetto/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Gracker/SmartPerfetto/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/Gracker/SmartPerfetto/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Gracker/SmartPerfetto/compare/v1.0.39...v1.1.0
