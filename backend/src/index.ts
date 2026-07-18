@@ -102,6 +102,9 @@ import { getPortPool, resetPortPool } from './services/portPool';
 import { failInterruptedAnalysisRunsOnStartup } from './services/analysisRunStore';
 import { startCaseEvolutionWorker } from './services/caseEvolution/caseEvolutionWorkerBootstrap';
 import { startPatternMemoryAutoConfirmSweep } from './agentv3/analysisPatternMemory';
+import {
+  startAndroidInternalsPackUpdateWorker,
+} from './services/androidInternalsPack/knowledgePackUpdateWorker';
 
 const app = express();
 const PORT = serverConfig.port;
@@ -342,6 +345,7 @@ recoverInterruptedEnterpriseRuns();
 
 const caseEvolutionWorkerHandle = startCaseEvolutionWorker();
 const patternMemorySweepHandle = startPatternMemoryAutoConfirmSweep();
+const androidInternalsPackUpdateWorkerHandle = startAndroidInternalsPackUpdateWorker();
 
 if (shouldCleanOrphanProcessorsOnStartup()) {
   killOrphanProcessors();
@@ -366,6 +370,9 @@ function gracefulShutdown(signal: string) {
 
   console.log('🧠 Stopping pattern memory sweep...');
   patternMemorySweepHandle.stop();
+
+  console.log('📚 Stopping Android Internals Knowledge Pack updater...');
+  androidInternalsPackUpdateWorkerHandle.stop();
 
   console.log('✅ Cleanup complete, exiting...');
   process.exit(0);

@@ -60,7 +60,7 @@ Agent wants a tool call
 | Tool | Purpose |
 |---|---|
 | `lookup_knowledge` | Load local performance knowledge, templates, or pipeline docs |
-| `lookup_blog_knowledge` | Query blog/external indexes; `source=android_internals_wiki` also requires a request-whitelisted `knowledge_source_id` |
+| `lookup_blog_knowledge` | Query blog or Android Internals background knowledge; `source=android_internals_pack` uses the signed built-in Pack, while `source=android_internals_wiki` uses a request-whitelisted private source id |
 | `lookup_aosp_source` | Query AOSP-related source knowledge |
 | `lookup_oem_sdk` | Query OEM SDK or vendor knowledge |
 | `lookup_baseline` | Fetch historical baselines |
@@ -70,12 +70,13 @@ Agent wants a tool call
 | `recall_similar_result` | Retrieve similar analysis-result snapshots as `navigation_hint_only` output |
 | `recall_patterns` | Retrieve patterns or anti-patterns, usually as internal analysis support |
 
-Knowledge and memory support the investigation; they must not override current trace evidence.
-The Android Internals branch rechecks scope, rights, provider consent, and the
-active generation on every call. The model can read budgeted hits, while
-Claude, OpenAI, Pi, and OpenCode SSE/log events retain only hash, length,
-license, attribution, and trust sidecars. See
-[Android Internals External Knowledge](../getting-started/android-internals-knowledge.en.md).
+Knowledge and memory support the investigation; they must not override current
+trace evidence. The built-in `android_internals_pack` pins a signed version and
+fingerprint. Private `android_internals_wiki` calls recheck scope, rights,
+provider consent, and the active generation. The model can read budgeted,
+redacted hits, while Claude, OpenAI, Pi, and OpenCode SSE/log events retain only
+versioned citations, hashes, lengths, licenses, attribution, and trust
+sidecars. See [Android Internals Knowledge Pack And Private Knowledge](../getting-started/android-internals-knowledge.en.md).
 
 ## Planning, Hypothesis, And Artifact Tools
 

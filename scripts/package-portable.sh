@@ -866,6 +866,9 @@ fi
 echo "Checking frontend prebuild..."
 node "$PROJECT_ROOT/scripts/check-frontend-prebuild.cjs"
 
+echo "Verifying bundled Android Internals Knowledge Pack..."
+(cd "$PROJECT_ROOT/backend" && npm run knowledge-pack:fetch)
+
 if [ "$SKIP_BACKEND_BUILD" = false ]; then
   echo "Building backend runtime..."
   (cd "$PROJECT_ROOT/backend" && npm run build)

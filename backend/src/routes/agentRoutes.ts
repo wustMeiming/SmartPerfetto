@@ -128,6 +128,9 @@ import {
   resolveAnalysisResultSceneType,
 } from '../services/analysisResultSnapshotPipeline';
 import { runClaimVerification } from '../services/verifier/claimVerificationRunner';
+import {
+  getDefaultAndroidInternalsPackResolver,
+} from '../services/androidInternalsPack/androidInternalsPackResolver';
 // Agent-Driven Architecture v2.0 - Focus tracking
 import type { FocusInteraction } from '../agent/context/focusStore';
 // DataEnvelope types for v2.0 data contract
@@ -962,6 +965,7 @@ interface AnalysisSession {
   codebaseIds?: string[];
   knowledgeSourceIds?: string[];
   analysisContextFingerprint?: string;
+  androidInternalsPackPin?: import('../services/androidInternalsPack/types').AndroidInternalsPackIdentity;
   /** Reference trace ID for comparison mode (dual-trace analysis) */
   referenceTraceId?: string;
   comparisonSource?: 'raw_trace_pair' | 'analysis_result_snapshots';
@@ -2447,6 +2451,14 @@ async function handleAnalyzeRequest(
         knowledgeScopeFromRequestContext(requestContext),
       );
       (options as AnalysisOptions).analysisContextFingerprint = analysisContextFingerprint;
+      const availablePack = getDefaultAndroidInternalsPackResolver().resolve();
+      if (availablePack) {
+        (options as AnalysisOptions).androidInternalsPackPin = {
+          contentVersion: availablePack.contentVersion,
+          contentFingerprint: availablePack.contentFingerprint,
+          sourceRevision: availablePack.sourceRevision,
+        };
+      }
       const prepared = analyzeSessionService.prepareSession({
         traceId,
         query,
@@ -2464,6 +2476,10 @@ async function handleAnalyzeRequest(
       sessionId = prepared.sessionId;
       preparedSession = prepared.session as AnalysisSession;
       preparedSession.analysisContextFingerprint = analysisContextFingerprint;
+      preparedSession.androidInternalsPackPin ??=
+        (options as AnalysisOptions).androidInternalsPackPin;
+      (options as AnalysisOptions).androidInternalsPackPin =
+        preparedSession.androidInternalsPackPin;
       isNewSession = prepared.isNewSession;
       if (isNewSession) {
         assignSessionOwner(preparedSession, requestContext);
@@ -5354,6 +5370,7 @@ async function runAgentDrivenAnalysis(sessionId: string, query: string, traceId:
               ? options.knowledgeSourceIds
               : undefined,
             analysisContextFingerprint: session.analysisContextFingerprint,
+            androidInternalsPackPin: session.androidInternalsPackPin,
             tenantId: session.tenantId,
             workspaceId: session.workspaceId,
             userId: session.userId,

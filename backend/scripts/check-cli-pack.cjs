@@ -43,6 +43,8 @@ const requiredFiles = [
   'skills/composite/scrolling_analysis.skill.yaml',
   'strategies/scrolling.strategy.md',
   'knowledge/android-internals-capability-map.yaml',
+  'knowledge/aiw-pack/1.root.json',
+  'knowledge/aiw-pack/knowledge-packs.lock.json',
   'public/assistant-shell/index.html',
   'public/assistant-shell/app.js',
   'public/admin-control-plane/index.html',
@@ -52,6 +54,26 @@ const requiredFiles = [
 
 for (const file of requiredFiles) {
   if (!files.has(file)) failures.push(`missing required package file: ${file}`);
+}
+
+const knowledgePackLock = JSON.parse(
+  fs.readFileSync(path.join(backendRoot, 'knowledge', 'aiw-pack', 'knowledge-packs.lock.json'), 'utf8'),
+);
+const bundledPackVersion = knowledgePackLock?.bundled?.contentVersion;
+if (typeof bundledPackVersion !== 'string') {
+  failures.push('invalid bundled Knowledge Pack version in lock');
+} else {
+  for (const file of [
+    'manifest.json',
+    'content.sqlite.gz',
+    'audit-summary.json',
+    'licenses/LICENSE',
+    'licenses/COMMERCIAL-LICENSE.md',
+    'licenses/KNOWLEDGE-PACK-LICENSE.md',
+  ]) {
+    const packedPath = `knowledge/aiw-pack/bundled/${bundledPackVersion}/${file}`;
+    if (!files.has(packedPath)) failures.push(`missing required package file: ${packedPath}`);
+  }
 }
 
 for (const document of pipelineCatalog.documents) {

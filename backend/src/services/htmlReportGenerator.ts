@@ -36,6 +36,7 @@ import type { ComparisonReportSection } from '../agentv3/sessionStateSnapshot';
 import type { ClaimVerificationResult } from '../types/claimVerification';
 import type { ClaimSupportV1 } from '../types/evidenceContract';
 import type { IdentityResolutionV1 } from '../types/identityContract';
+import type {BackgroundKnowledgeReference} from '../types/sparkContracts';
 
 interface ClaimSourceLookupEntry {
   label: string;
@@ -164,6 +165,8 @@ export interface AgentDrivenReportData {
   uncertaintyFlags?: Array<{ topic: string; assumption: string; question: string }>;
   /** Shared deterministic comparison section for raw or snapshot comparison reports. */
   comparisonReportSection?: ComparisonReportSection;
+  /** Public explanatory citations; never current-trace evidence. */
+  backgroundKnowledgeReferences?: BackgroundKnowledgeReference[];
 }
 
 export class HTMLReportGenerator {
@@ -4626,6 +4629,11 @@ export class HTMLReportGenerator {
 
     ${this.renderCodeAwareReferencesSection(result.conclusionContract, outputLanguage)}
 
+    ${this.renderBackgroundKnowledgeReferencesSection(
+      data.backgroundKnowledgeReferences,
+      outputLanguage,
+    )}
+
     ${this.renderCaseRecommendationsSection(result.conclusionContract, outputLanguage)}
 
     <div class="section">
@@ -5060,6 +5068,40 @@ export class HTMLReportGenerator {
         ${codeRefHtml}
         ${patchHtml}
       </div>
+    </div>`;
+  }
+
+  private renderBackgroundKnowledgeReferencesSection(
+    references: BackgroundKnowledgeReference[] | undefined,
+    outputLanguage: OutputLanguage,
+  ): string {
+    if (!references?.length) return '';
+    const items = references.map(reference => `
+      <div class="hypothesis-card" style="margin-bottom: 8px;">
+        <div class="hypothesis-title">${this.escapeHtml(reference.articleTitle)}</div>
+        <div style="font-size: 13px; color: #4b5563;">
+          ${this.escapeHtml(reference.sectionHeading)}
+          · <code>${this.escapeHtml(reference.packVersion)}</code>
+          · <code>${this.escapeHtml(reference.chunkId)}</code>
+        </div>
+        <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">
+          ${this.escapeHtml(reference.license)}
+          · source <code>${this.escapeHtml(reference.sourceRevision)}</code>
+        </div>
+      </div>`).join('');
+    return `
+    <div class="section">
+      <h2 class="section-title">${localize(
+        outputLanguage,
+        'Android Internals 背景引用',
+        'Android Internals Background References',
+      )}</h2>
+      <div class="empty-state" style="margin-bottom: 12px;">${localize(
+        outputLanguage,
+        '这些引用只解释系统背景，不能替代当前 Trace 的 SQL/Skill 证据。',
+        'These references explain system background only and do not replace current-trace SQL/Skill evidence.',
+      )}</div>
+      ${items}
     </div>`;
   }
 

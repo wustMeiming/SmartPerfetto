@@ -2900,6 +2900,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
           codebaseIds: options.codebaseIds,
           knowledgeSourceIds: options.knowledgeSourceIds,
           analysisContextFingerprint: options.analysisContextFingerprint,
+          androidInternalsPackPin: options.androidInternalsPackPin,
         });
         mcpServer = mcp.server;
         allowedTools = mcp.allowedTools;
@@ -3818,6 +3819,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
       codebaseIds: options.codebaseIds,
       knowledgeSourceIds: options.knowledgeSourceIds,
       analysisContextFingerprint: options.analysisContextFingerprint,
+      androidInternalsPackPin: options.androidInternalsPackPin,
     });
 
     // Phase 9: (removed — skillCatalog was populated but never used in prompt;

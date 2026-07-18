@@ -1,12 +1,49 @@
-# Android Internals 外部知识库
+# Android Internals 知识包与私有知识库
 
 [English](android-internals-knowledge.en.md) | [中文](android-internals-knowledge.md)
 
-SmartPerfetto 可以把本机 `android-internals-wiki` checkout 作为可选、版本化的外部知识源。仓库正文不会被复制进 SmartPerfetto、npm 包、Docker 镜像或公开 Skill；只有管理员显式注册并建立本地索引后，当前请求才可按需检索。
+SmartPerfetto 默认携带一个经过签名、版本锁定的公开 Android Internals
+Knowledge Pack。用户不需要维护者的本机目录，也不需要访问私有
+`android-internals-wiki` 仓库。npm、Docker 和 portable 发行物都包含同一个已验证
+快照；运行时可以通过 TUF 独立检查更新，并在校验失败时继续使用上一个已知可用版本。
 
-这条链路用于解释 Android 系统背景，不改变证据规则：Wiki 命中不能证明当前 trace 的根因。诊断仍要引用 `execute_sql`、`invoke_skill` 或其他当前 trace 证据。
+另外，操作者仍可把自己有权使用的本机 `android-internals-wiki` checkout 注册为
+私有外部知识源。这是另一条需要路径白名单、权利确认和 provider 隐私同意的链路，
+不会覆盖或放宽公开 Pack 的边界。
 
-## 安全与许可边界
+两条链路都只用于解释 Android 系统背景，不改变证据规则：知识命中不能证明当前
+trace 的根因。诊断仍要引用 `execute_sql`、`invoke_skill` 或其他当前 trace 证据。
+
+## 内置公开 Knowledge Pack
+
+- AIW `master` 每次变化都构建候选包；每天北京时间 00:30 重新从确定 SHA 构建并晋升。
+- 只有严格解析、状态定稿、Task 6/Task 9 审核通过且未在 queue/blocklist 中的文章进入。
+- 同一公开内容 fingerprint 不发布空版本；变化使用不可覆盖的 `YYYY.MM.DD.N`。
+- 公开分发仓库只包含 TUF metadata、压缩 SQLite、审计摘要和许可证，不包含 Markdown
+  源仓库、草稿、审稿日志、队列或本机路径。
+- 会话固定 `contentVersion + contentFingerprint`。后台更新不会让运行中的会话静默换库；
+  紧急撤回会要求重启分析上下文。
+- 模型收到的是预算受控并经过 secret redaction 的片段；日志和 SSE 只保留引用元数据与
+  snippet hash。
+
+查看与手动更新：
+
+```bash
+smp knowledge-pack status
+smp knowledge-pack update --check
+smp knowledge-pack update
+```
+
+默认每天异步检查一次。可用 `SMARTPERFETTO_AIW_PACK_UPDATE_MODE=check|off` 调整，
+或用 `SMARTPERFETTO_AIW_PACK_PIN` 固定已安装且未撤回的版本。镜像部署可配置
+`SMARTPERFETTO_AIW_PACK_METADATA_BASE_URL` 与
+`SMARTPERFETTO_AIW_PACK_TARGET_BASE_URL`。
+
+Pack 内容采用双许可：
+`CC-BY-NC-SA-4.0 OR LicenseRef-AIW-Commercial`。仅持有 Pack 不代表取得商业授权；
+商业使用需另有书面商业许可。完整许可证和归属随每个 Pack 一起分发。
+
+## 私有 checkout 的安全与许可边界
 
 - 路径默认拒绝。只有 `SMARTPERFETTO_KNOWLEDGE_ROOTS` 内的 Markdown 可预览和索引。
 - `rightsAcknowledged` 是操作者对“有权使用该仓库”的独立确认；它不是许可证授予。当前连接器记录源许可证为 `CC-BY-NC-SA-4.0`，商业使用需要自行取得适用授权。

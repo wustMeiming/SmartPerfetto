@@ -263,6 +263,7 @@ function createTestServer(options: {
   codebaseRegistry?: any;
   caseLibrary?: any;
   ragStore?: any;
+  androidInternalsPackStore?: any;
   externalKnowledgeRegistry?: any;
   knowledgeSourceIds?: string[];
   analysisResultSnapshotRepository?: TraceSimilaritySnapshotRepository;
@@ -331,6 +332,7 @@ function createTestServer(options: {
     codebaseRegistry: options.codebaseRegistry,
     caseLibrary: options.caseLibrary,
     ragStore: options.ragStore,
+    androidInternalsPackStore: options.androidInternalsPackStore ?? null,
     externalKnowledgeRegistry: options.externalKnowledgeRegistry,
     knowledgeSourceIds: options.knowledgeSourceIds,
     analysisResultSnapshotRepository: options.analysisResultSnapshotRepository,
@@ -4499,6 +4501,95 @@ describe('createClaudeMcpServer', () => {
       expect(detected.nonWaivableMissingAspectIds).toEqual(['architecture_specific_jank']);
       const blockedSql = await callTool(tools, 'execute_sql', { sql: 'SELECT 1 AS ok' });
       expect(blockedSql.action_required).toBe('revise_plan');
+    });
+  });
+
+  describe('built-in Android Internals Knowledge Pack', () => {
+    it('returns redacted background knowledge with versioned citation metadata', async () => {
+      const fingerprint = 'b'.repeat(64);
+      const revision = 'a'.repeat(40);
+      const androidInternalsPackStore = {
+        handle: {
+          contentVersion: '2026.07.18.1',
+          contentFingerprint: fingerprint,
+          sourceRevision: revision,
+          origin: 'bundled',
+          directory: '/immutable/aiw-pack',
+          databasePath: '/immutable/aiw-pack/content.sqlite',
+          manifest: {
+            licenses: {
+              expression: 'CC-BY-NC-SA-4.0 OR LicenseRef-AIW-Commercial',
+              attribution: 'Android Internals Wiki by Gracker',
+            },
+          },
+        },
+        search: jest.fn((query: string, _options?: {topK?: number}) => ({
+          ...makeSparkProvenance({source: 'android-internals-pack:2026.07.18.1'}),
+          query,
+          results: [{
+            chunkId: 'aiw-chunk-1',
+            score: 1,
+            chunk: {
+              chunkId: 'aiw-chunk-1',
+              kind: 'android_internals_pack',
+              registryOrigin: 'built_in_knowledge_pack',
+              uri: 'aiw-pack://2026.07.18.1/src/binder.md',
+              title: 'Binder 线程池',
+              snippet: "Binder 线程池 background api_key='sk-live-secret-value'",
+              indexedAt: Date.now(),
+              license: 'CC-BY-NC-SA-4.0 OR LicenseRef-AIW-Commercial',
+              attribution: 'Android Internals Wiki by Gracker',
+              commitHash: revision,
+              commitProvenance: 'clean_git_revision',
+              contentFingerprint: fingerprint,
+              articleId: 'article-1',
+              sectionId: 'section-1',
+              sectionHeading: '线程池饱和',
+              chunkHash: 'c'.repeat(64),
+              knowledgePackVersion: '2026.07.18.1',
+              knowledgePackFingerprint: fingerprint,
+            },
+          }],
+          probed: ['android_internals_pack'],
+          retrievedAt: Date.now(),
+        })),
+        close: jest.fn(),
+      };
+      const {tools} = createTestServer({androidInternalsPackStore});
+
+      const result = await callTool(tools, 'lookup_blog_knowledge', {
+        query: 'Binder 线程池',
+        source: 'android_internals_pack',
+      });
+
+      expect(result).toEqual(expect.objectContaining({
+        success: true,
+        dataTrust: 'untrusted_retrieved_data',
+        result: expect.objectContaining({
+          legacyPath: false,
+          hits: [expect.objectContaining({
+            chunkId: 'aiw-chunk-1',
+            snippet: expect.not.stringContaining('sk-live-secret-value'),
+            metadata: expect.objectContaining({
+              kind: 'android_internals_pack',
+              knowledgePackVersion: '2026.07.18.1',
+              knowledgePackFingerprint: fingerprint,
+              articleId: 'article-1',
+              sectionId: 'section-1',
+            }),
+          })],
+          backgroundKnowledgeReferences: [expect.objectContaining({
+            sourceKind: 'android_internals_pack',
+            packVersion: '2026.07.18.1',
+            articleId: 'article-1',
+            chunkHash: 'c'.repeat(64),
+          })],
+        }),
+      }));
+      expect(androidInternalsPackStore.search).toHaveBeenCalledWith(
+        'Binder 线程池',
+        {topK: 5},
+      );
     });
   });
 

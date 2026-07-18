@@ -120,6 +120,13 @@ import {PatchProposer} from '../services/codebase/patchProposer';
 import {normalizeCodeAwareMode, type CodeAwareMode} from '../services/codebase/codeAwareFeature';
 import {filterRagLookup} from '../services/rag/lookupResponseFilter';
 import {
+  getDefaultAndroidInternalsPackStore,
+  isAndroidInternalsPackRevoked,
+} from '../services/androidInternalsPack/androidInternalsPackResolver';
+import type {
+  AndroidInternalsPackStoreLike,
+} from '../services/androidInternalsPack/types';
+import {
   ExternalKnowledgeSourceRegistry,
   getDefaultExternalKnowledgeSourceRegistry,
 } from '../services/externalKnowledgeSourceRegistry';
@@ -1093,6 +1100,10 @@ export interface ClaudeMcpServerOptions {
   caseLibrary?: CaseLibrary;
   /** Test hook / alternate case RAG store. */
   ragStore?: RagStore;
+  /** Test hook / session-pinned built-in Android Internals Knowledge Pack. */
+  androidInternalsPackStore?: AndroidInternalsPackStoreLike | null;
+  /** Immutable public Knowledge Pack identity pinned by the session snapshot. */
+  androidInternalsPackPin?: import('../services/androidInternalsPack/types').AndroidInternalsPackIdentity;
   analysisResultSnapshotRepository?: TraceSimilaritySnapshotRepository;
 }
 
@@ -1129,6 +1140,9 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     getDefaultExternalKnowledgeSourceRegistry();
   const codebaseRegistry = options.codebaseRegistry ?? getDefaultCodebaseRegistry();
   const ragStore = options.ragStore ?? getRagStore();
+  const androidInternalsPackStore = options.androidInternalsPackStore === undefined
+    ? getDefaultAndroidInternalsPackStore(options.androidInternalsPackPin)
+    : options.androidInternalsPackStore ?? undefined;
   const analysisContextSelection = {codeAwareMode, codebaseIds, knowledgeSourceIds};
   const privateAnalysisContext = analysisContextUsesPrivateKnowledge(analysisContextSelection);
   const pinnedAnalysisContextFingerprint = options.analysisContextFingerprint ??
@@ -3693,18 +3707,55 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
   // never invents content.
   const lookupBlogKnowledge = tool(
     'lookup_blog_knowledge',
-    `Retrieve public blog or authorized private Wiki background; Wiki is not trace evidence.${knowledgeSourceCapabilityHint} ` +
+    `Retrieve public blog, signed built-in Android Internals Pack, or authorized private Wiki background; knowledge hits are not trace evidence.${knowledgeSourceCapabilityHint} ` +
     'On unsupportedReason, report unavailable without invention. ' +
     retrievedContextToolBoundary,
     {
       query: z.string().describe('Search query — natural language is fine; tokens are lowercased and matched against snippet + title.'),
       top_k: z.number().int().min(1).max(20).optional().describe('Maximum hits returned (1-20, default 5).'),
-      source: z.enum(['androidperformance.com', 'android_internals_wiki']).optional()
-        .describe('Knowledge source. Defaults to androidperformance.com for compatibility.'),
+      source: z.enum([
+        'androidperformance.com',
+        'android_internals_pack',
+        'android_internals_wiki',
+      ]).optional()
+        .describe('Knowledge source. Use android_internals_pack for bundled, signed Android system background; omission preserves the androidperformance.com default.'),
       knowledge_source_id: z.string().optional()
         .describe(`Request-whitelisted source id for Android Internals Wiki.${knowledgeSourceCapabilityHint}`),
     },
     async ({ query, top_k, source, knowledge_source_id }) => {
+      if (source === 'android_internals_pack') {
+        if (!androidInternalsPackStore) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                success: false,
+                unsupportedReason: 'android_internals_pack_unavailable',
+              }),
+            }],
+          };
+        }
+        if (isAndroidInternalsPackRevoked(androidInternalsPackStore.handle)) {
+          throw new Error('analysis_context_changed_restart_required');
+        }
+        const raw = androidInternalsPackStore.search(query, {topK: top_k ?? 5});
+        const filtered = await filterRagLookup(raw, {
+          toolName: 'lookup_blog_knowledge',
+          turn: 0,
+          ledger: codeLookupLedger,
+          sessionId: options.sessionId,
+        });
+        await codeLookupLedger?.flush();
+        if (isAndroidInternalsPackRevoked(androidInternalsPackStore.handle)) {
+          throw new Error('analysis_context_changed_restart_required');
+        }
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify(retrievedData({success: true, result: filtered})),
+          }],
+        };
+      }
       if (source === 'android_internals_wiki') {
         assertPrivateAnalysisContextCurrent();
         const sourceId = normalizeOptionalToolString(knowledge_source_id) ??

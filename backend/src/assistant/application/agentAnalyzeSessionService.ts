@@ -41,6 +41,9 @@ import {
   AssistantApplicationService,
   type ManagedAssistantSession,
 } from './assistantApplicationService';
+import {
+  registerSessionBackgroundKnowledgeReferences,
+} from '../../services/androidInternalsPack/sessionBackgroundKnowledgeRegistry';
 
 export interface AnalyzeSessionConversationStep {
   eventId: string;
@@ -97,6 +100,7 @@ export interface AnalyzeManagedSession extends ManagedAssistantSession {
   providerSnapshotChangeReason?: string;
   /** Authorization partition for source/RAG-aware runtime continuity. */
   analysisContextFingerprint?: string;
+  androidInternalsPackPin?: import('../../services/androidInternalsPack/types').AndroidInternalsPackIdentity;
   codeAwareMode?: import('../../services/codebase/codeAwareFeature').CodeAwareMode;
   codebaseIds?: string[];
   knowledgeSourceIds?: string[];
@@ -541,6 +545,10 @@ export class AgentAnalyzeSessionService<TSession extends AnalyzeManagedSession> 
       if (persistedSession && persistedSession.traceId === traceId) {
         const stateSnapshot =
           this.sessionPersistenceService.loadSessionStateSnapshot(requestedSessionId);
+        registerSessionBackgroundKnowledgeReferences(
+          requestedSessionId,
+          stateSnapshot?.backgroundKnowledgeReferences ?? [],
+        );
         const persistedReferenceTraceId = readPersistedReferenceTraceId(
           stateSnapshot,
           persistedSession.metadata,
@@ -737,6 +745,7 @@ export class AgentAnalyzeSessionService<TSession extends AnalyzeManagedSession> 
                 ? 'provider_snapshot_hash_mismatch'
                 : undefined,
               analysisContextFingerprint: input.analysisContextFingerprint,
+              androidInternalsPackPin: stateSnapshot?.androidInternalsPackPin,
               agentQuery: restoredAgentQuery,
               continuityBreaks: restoredContinuityBreaks.length > 0 ? restoredContinuityBreaks : undefined,
               lineage: restoredLineage,
@@ -837,6 +846,7 @@ export class AgentAnalyzeSessionService<TSession extends AnalyzeManagedSession> 
       providerSnapshotHash: sessionProviderSnapshotHash,
       providerSnapshotChanged: false,
       analysisContextFingerprint: input.analysisContextFingerprint,
+      androidInternalsPackPin: input.options?.androidInternalsPackPin,
       referenceTraceId: effectiveReferenceTraceId,
       comparisonSource: comparisonSourceForReference(effectiveReferenceTraceId),
       createdAt: Date.now(),

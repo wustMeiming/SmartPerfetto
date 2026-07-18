@@ -164,6 +164,7 @@ backend/data/scene-reports/
 backend/data/scene-job-artifacts/
 backend/data/agent-runtime/
 backend/data/self_improve/
+backend/data/knowledge-packs/
 
 # ===================
 # Root-level uploads (anchored to repo root only; backend/uploads/ keeps its own rule above)

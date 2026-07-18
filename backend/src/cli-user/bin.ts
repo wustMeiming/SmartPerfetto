@@ -45,6 +45,10 @@ import {
   runCodebaseReindexCommand,
   runCodebaseSymbolsCommand,
 } from './commands/codebase';
+import {
+  runKnowledgePackStatusCommand,
+  runKnowledgePackUpdateCommand,
+} from './commands/knowledgePack';
 import { DEFAULT_ANALYSIS_QUERY } from './constants';
 import type {CodeAwareMode} from '../services/codebase/codeAwareFeature';
 import type {CapturePresetId, CliAnalysisMode} from './types';
@@ -374,6 +378,36 @@ function main(): void {
       await runAndExit(() => runCodebaseListCommand({
         envFile: g.envFile,
         sessionDir: g.sessionDir,
+      }));
+    });
+
+  const knowledgePackCmd = program
+    .command('knowledge-pack')
+    .description('inspect or update the signed Android Internals Knowledge Pack');
+  knowledgePackCmd
+    .command('status')
+    .description('show the active, bundled, and signed-channel Pack state')
+    .option('--format <format>', 'output format: text or json')
+    .action(async (opts: {format?: string}) => {
+      const g = globals();
+      await runAndExit(() => runKnowledgePackStatusCommand({
+        envFile: g.envFile,
+        sessionDir: g.sessionDir,
+        format: textJsonFormat(opts.format) === 'json' ? 'json' : 'text',
+      }));
+    });
+  knowledgePackCmd
+    .command('update')
+    .description('refresh TUF metadata and atomically install the stable Pack')
+    .option('--check', 'check for an update without installing it', false)
+    .option('--format <format>', 'output format: text or json')
+    .action(async (opts: {check?: boolean; format?: string}) => {
+      const g = globals();
+      await runAndExit(() => runKnowledgePackUpdateCommand({
+        envFile: g.envFile,
+        sessionDir: g.sessionDir,
+        checkOnly: opts.check,
+        format: textJsonFormat(opts.format) === 'json' ? 'json' : 'text',
       }));
     });
 

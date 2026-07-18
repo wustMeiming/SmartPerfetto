@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "repository": {
+    "metadataBaseUrl": "https://raw.githubusercontent.com/Gracker/android-internals-knowledge-pack/main/metadata/",
+    "targetBaseUrl": "https://raw.githubusercontent.com/Gracker/android-internals-knowledge-pack/main/targets/"
+  },
+  "bundled": {
+    "contentVersion": "2026.07.18.1",
+    "contentFingerprint": "e042ba33dc8f11373082ab3150ea021c119d8985cbab87c86f571dc8a507938e",
+    "manifestSha256": "1295d0147fa0df43a76770a853bccf194733eadf54b34e35fa9b9399ea2becf5",
+    "publicRevision": "b4858a40d0bcb46a28a5f624ea2fc20e78b4b3ab",
+    "targets": {
+      "manifest": "packs/android-internals/2026.07.18.1/manifest.json",
+      "database": "packs/android-internals/2026.07.18.1/content.sqlite.gz",
+      "audit": "packs/android-internals/2026.07.18.1/audit-summary.json",
+      "licenses": {
+        "COMMERCIAL-LICENSE.md": "packs/android-internals/2026.07.18.1/licenses/COMMERCIAL-LICENSE.md",
+        "KNOWLEDGE-PACK-LICENSE.md": "packs/android-internals/2026.07.18.1/licenses/KNOWLEDGE-PACK-LICENSE.md",
+        "LICENSE": "packs/android-internals/2026.07.18.1/licenses/LICENSE"
+      }
+    }
+  }
+}

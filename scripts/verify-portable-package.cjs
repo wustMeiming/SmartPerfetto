@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const zlib = require('zlib');
 
 const TARGETS = {
   'windows-x64': {
@@ -30,6 +31,8 @@ const TARGETS = {
       'backend/public/assistant-shell/index.html',
       'backend/public/admin-control-plane/index.html',
       'backend/knowledge/android-internals-capability-map.yaml',
+      'backend/knowledge/aiw-pack/1.root.json',
+      'backend/knowledge/aiw-pack/knowledge-packs.lock.json',
       'frontend/index.html',
       'frontend/server.js',
       'backend/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
@@ -65,6 +68,8 @@ const TARGETS = {
       'SmartPerfetto.app/Contents/Resources/backend/public/assistant-shell/index.html',
       'SmartPerfetto.app/Contents/Resources/backend/public/admin-control-plane/index.html',
       'SmartPerfetto.app/Contents/Resources/backend/knowledge/android-internals-capability-map.yaml',
+      'SmartPerfetto.app/Contents/Resources/backend/knowledge/aiw-pack/1.root.json',
+      'SmartPerfetto.app/Contents/Resources/backend/knowledge/aiw-pack/knowledge-packs.lock.json',
       'SmartPerfetto.app/Contents/Resources/frontend/index.html',
       'SmartPerfetto.app/Contents/Resources/frontend/server.js',
       'SmartPerfetto.app/Contents/Resources/backend/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
@@ -98,6 +103,8 @@ const TARGETS = {
       'backend/public/assistant-shell/index.html',
       'backend/public/admin-control-plane/index.html',
       'backend/knowledge/android-internals-capability-map.yaml',
+      'backend/knowledge/aiw-pack/1.root.json',
+      'backend/knowledge/aiw-pack/knowledge-packs.lock.json',
       'frontend/index.html',
       'frontend/server.js',
       'backend/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
@@ -270,6 +277,10 @@ function assertBinaryKind(bytes, label, kind) {
 
 function sha256Resource(bytes) {
   return `sha256-${crypto.createHash('sha256').update(bytes).digest('base64')}`;
+}
+
+function sha256Hex(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
 function stableVersionFromIndex(indexHtml) {
@@ -451,6 +462,56 @@ function main() {
   );
 
   const backendRoot = backendRootForTarget(target);
+  const aiwAssetRoot = `${packageName}/${backendRoot}/knowledge/aiw-pack`;
+  const aiwLock = readExtractedJson(extractedRoot, `${aiwAssetRoot}/knowledge-packs.lock.json`);
+  assert(aiwLock.schemaVersion === 1, 'Knowledge Pack lock schema must be 1');
+  const aiwVersion = aiwLock.bundled?.contentVersion;
+  assert(
+    typeof aiwVersion === 'string' && /^\d{4}\.\d{2}\.\d{2}\.\d+$/.test(aiwVersion),
+    `Invalid bundled Knowledge Pack version: ${aiwVersion}`,
+  );
+  const aiwBundleRoot = `${aiwAssetRoot}/bundled/${aiwVersion}`;
+  const aiwRequired = [
+    'manifest.json',
+    'content.sqlite.gz',
+    'audit-summary.json',
+    'licenses/LICENSE',
+    'licenses/COMMERCIAL-LICENSE.md',
+    'licenses/KNOWLEDGE-PACK-LICENSE.md',
+  ];
+  for (const rel of aiwRequired) {
+    const entry = assertEntryExists(entries, packageName, `${backendRoot}/knowledge/aiw-pack/bundled/${aiwVersion}/${rel}`);
+    assertExtractedEntryNonEmpty(extractedRoot, entry);
+  }
+  const aiwManifestBytes = readExtractedBuffer(extractedRoot, `${aiwBundleRoot}/manifest.json`);
+  assert(
+    sha256Hex(aiwManifestBytes) === aiwLock.bundled.manifestSha256,
+    'Bundled Knowledge Pack manifest does not match lock',
+  );
+  const aiwManifest = JSON.parse(aiwManifestBytes.toString('utf8'));
+  assert(aiwManifest.contentVersion === aiwVersion, 'Bundled Knowledge Pack version mismatch');
+  assert(
+    aiwManifest.contentFingerprint === aiwLock.bundled.contentFingerprint,
+    'Bundled Knowledge Pack fingerprint mismatch',
+  );
+  assert(
+    aiwManifest.licenses?.expression === 'CC-BY-NC-SA-4.0 OR LicenseRef-AIW-Commercial',
+    'Bundled Knowledge Pack license mismatch',
+  );
+  const aiwDatabase = readExtractedBuffer(extractedRoot, `${aiwBundleRoot}/content.sqlite.gz`);
+  assert(
+    aiwDatabase.length === aiwManifest.database.compressedBytes &&
+      sha256Hex(aiwDatabase) === aiwManifest.database.sha256,
+    'Bundled Knowledge Pack compressed database mismatch',
+  );
+  const aiwUncompressed = zlib.gunzipSync(aiwDatabase, {
+    maxOutputLength: aiwManifest.database.uncompressedBytes,
+  });
+  assert(
+    aiwUncompressed.length === aiwManifest.database.uncompressedBytes &&
+      sha256Hex(aiwUncompressed) === aiwManifest.database.uncompressedSha256,
+    'Bundled Knowledge Pack database mismatch',
+  );
   const backendDistRoot = `${packageName}/${backendRoot}/dist/`;
   const staleBackendEntries = entries.filter(entry => (
     entry.startsWith(backendDistRoot) &&

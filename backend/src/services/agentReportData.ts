@@ -118,6 +118,7 @@ export function buildAgentDrivenReportData(
     analysisPlan?: unknown;
     uncertaintyFlags?: unknown[];
     comparisonReportSection?: AgentDrivenReportData['comparisonReportSection'];
+    backgroundKnowledgeReferences?: AgentDrivenReportData['backgroundKnowledgeReferences'];
   } })._lastSnapshot;
   const hypotheses = privateKnowledge
     ? projectPrivateHypotheses(session.sessionId, session.hypotheses as any[])
@@ -162,5 +163,6 @@ export function buildAgentDrivenReportData(
           snapshot?.comparisonReportSection ?? session.comparisonReportSection,
         )
       : snapshot?.comparisonReportSection ?? session.comparisonReportSection,
+    backgroundKnowledgeReferences: snapshot?.backgroundKnowledgeReferences,
   };
 }

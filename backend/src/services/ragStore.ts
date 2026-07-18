@@ -59,6 +59,7 @@ const LICENSE_REQUIRED_KINDS: ReadonlySet<RagSourceKind> = new Set([
   'oem_sdk',
   'kernel_source',
   'android_internals_wiki',
+  'android_internals_pack',
 ]);
 
 /** All RagSourceKind values. Kept here so getStats() can initialize a
@@ -197,10 +198,17 @@ function defaultRegistryOrigin(kind: RagSourceKind): RagChunk['registryOrigin'] 
       return 'codebase_registry';
     case 'android_internals_wiki':
       return 'external_knowledge_registry';
+    case 'android_internals_pack':
+      return 'built_in_knowledge_pack';
   }
 }
 
 function normalizeChunkForStorage(chunk: RagChunk): RagChunk {
+  if (chunk.kind === 'android_internals_pack') {
+    throw new Error(
+      'Built-in Android Internals Pack chunks must use AndroidInternalsPackStore',
+    );
+  }
   const registryOrigin = chunk.registryOrigin ?? defaultRegistryOrigin(chunk.kind);
   if ((chunk.kind === 'app_source' || chunk.kind === 'kernel_source') && !chunk.codebaseId) {
     throw new Error(

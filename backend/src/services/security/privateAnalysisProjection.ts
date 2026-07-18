@@ -358,6 +358,16 @@ export function projectPrivateSessionStateSnapshot(
     ...(snapshot.analysisContextFingerprint
       ? {analysisContextFingerprint: snapshot.analysisContextFingerprint}
       : {}),
+    ...(snapshot.androidInternalsPackPin
+      ? {androidInternalsPackPin: {...snapshot.androidInternalsPackPin}}
+      : {}),
+    ...(snapshot.backgroundKnowledgeReferences
+      ? {
+          backgroundKnowledgeReferences: snapshot.backgroundKnowledgeReferences.map(
+            reference => ({...reference}),
+          ),
+        }
+      : {}),
     ...(snapshot.codeAwareMode ? {codeAwareMode: snapshot.codeAwareMode} : {}),
     ...(snapshot.codebaseIds ? {codebaseIds: [...snapshot.codebaseIds]} : {}),
     ...(snapshot.codebaseSnapshot

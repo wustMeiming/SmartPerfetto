@@ -229,8 +229,9 @@ v1 使用 SQLite FTS5/BM25，不引入 embedding：
 
 1. 管理员显式 pin 的已验证版本；
 2. runtime data 中的 active 已知可用版本；
-3. 发行物携带的 bundled snapshot；
-4. 都不可用时关闭 AIW Pack，Trace 分析继续。
+3. runtime data 中的 last-known-good 已验证版本；
+4. 发行物携带的 bundled snapshot；
+5. 都不可用时关闭 AIW Pack，Trace 分析继续。
 
 运行时文件写入 `backendDataPath('knowledge-packs')`，不修改 npm 安装目录或只读容器层。目录包含 TUF metadata cache、下载暂存区、不可变版本目录、active 指针和 last-known-good 指针。
 
@@ -267,7 +268,8 @@ v1 使用 SQLite FTS5/BM25，不引入 embedding：
 
 客户端发现 active 版本被撤回时：
 
-- 有安全版本：安装后让新会话使用；
+- 有安全版本：从 `minimumSafeVersion` 对应的 TUF 不可变目标安装，或切换到已验证的本地
+  last-known-good，让新会话使用；
 - 离线或没有安全版本：禁用公共 AIW Pack，不继续使用已知不安全内容；
 - 正在运行的会话：下一次知识查询要求重启分析上下文；
 - Trace SQL、Skill 和不依赖 AIW 的分析能力继续可用。

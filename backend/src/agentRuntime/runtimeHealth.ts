@@ -13,6 +13,9 @@ import {
   getRuntimeDiagnostics,
 } from './runtimeDiagnostics';
 import { getAiCapabilityPolicy } from '../services/aiCapabilityPolicy';
+import {
+  getAndroidInternalsPackStatus,
+} from '../services/androidInternalsPack/knowledgePackStatus';
 
 export function buildRuntimeHealthPayload(now: Date = new Date()) {
   const aiPolicy = getAiCapabilityPolicy();
@@ -33,6 +36,7 @@ export function buildRuntimeHealthPayload(now: Date = new Date()) {
     environment: serverConfig.nodeEnv,
     version: getSmartPerfettoVersion(),
     aiPolicy,
+    androidInternalsKnowledgePack: getAndroidInternalsPackStatus(),
     aiEngine: {
       runtime: runtimeSelection.kind,
       model: selectedModel,
