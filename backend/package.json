@@ -169,5 +169,14 @@
     "@earendil-works/pi-agent-core": "^0.79.1",
     "@opencode-ai/sdk": "^1.15.13",
     "opencode-ai": "^1.15.13"
+  },
+  "allowScripts": {
+    "@google/genai@1.52.0": true,
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.28.0": true,
+    "fsevents@2.3.3": true,
+    "opencode-ai@1.17.15": true,
+    "protobufjs@7.6.4": true,
+    "unrs-resolver@1.12.2": true
   }
 }

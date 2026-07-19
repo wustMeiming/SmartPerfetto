@@ -54,5 +54,8 @@
     "js-yaml": "^4.3.0",
     "knip": "^6.26.0",
     "protobufjs": "^7.6.5"
+  },
+  "allowScripts": {
+    "protobufjs@7.6.5": true
   }
 }
