@@ -28,7 +28,7 @@ services:
       - runtime-data:/app/backend/runtime-data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f \"http://localhost:$${SMARTPERFETTO_BACKEND_PORT:-$${PORT:-3000}}/health\""]
+      test: ["CMD-SHELL", "curl -fsS \"http://localhost:$${SMARTPERFETTO_BACKEND_PORT:-$${PORT:-3000}}/health\" >/dev/null && curl -fsS \"http://localhost:$${SMARTPERFETTO_FRONTEND_PORT:-10000}/health\" >/dev/null"]
       interval: 30s
       timeout: 5s
       start_period: 15s

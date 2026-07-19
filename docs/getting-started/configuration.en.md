@@ -359,7 +359,23 @@ TRACE_PROCESSOR_PATH=/path/to/trace_processor_shell
 PERFETTO_PATH=/path/to/perfetto
 ```
 
-`TRACE_PROCESSOR_PATH` usually does not need manual configuration. If download is blocked, use:
+`TRACE_PROCESSOR_PATH` usually does not need manual configuration.
+`./start.sh` and `./scripts/start-dev.sh` prefer SHA256-pinned prebuilts. An
+explicit `TRACE_PROCESSOR_PATH` is a user-owned override: launchers and backend
+`predev` check only that it exists, is executable, and passes `--version`.
+They never chmod it, replace it with the pinned binary, or download into it.
+
+When changing Perfetto C++ or intentionally building the shell locally, use:
+
+```bash
+./scripts/start-dev.sh --build-from-source
+```
+
+This always runs the incremental `gn` / `ninja` source-build path for the
+current Perfetto checkout and selects
+`perfetto/out/ui/trace_processor_shell`, even when a prebuilt is present.
+
+If download is blocked, use:
 
 ```bash
 TRACE_PROCESSOR_PATH=/absolute/path/to/trace_processor_shell ./start.sh

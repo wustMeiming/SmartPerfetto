@@ -46,5 +46,5 @@
     "backend/strategies/**"
   ],
   "ignoreDependencies": ["@types/*"],
-  "ignoreBinaries": ["shellcheck", "tsc"]
+  "ignoreBinaries": ["lsof", "pgrep", "ps", "shellcheck", "tsc"]
 }

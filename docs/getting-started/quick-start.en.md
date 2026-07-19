@@ -50,7 +50,14 @@ Use this path for local use, backend debugging, strategy/Skill edits, or pull re
 
 Step 1: run `./start.sh`.
 
-`./start.sh` starts the backend and the repository's pre-built Perfetto UI. On first run it installs dependencies and downloads the pinned `trace_processor_shell` prebuilt binary. If your network cannot access Google's artifact bucket, prefer Docker, or set `TRACE_PROCESSOR_PATH`, `TRACE_PROCESSOR_DOWNLOAD_BASE`, or `TRACE_PROCESSOR_DOWNLOAD_URL` before running the script.
+`./start.sh` starts the backend and the repository's pre-built Perfetto UI and
+reports success only after both HTTP readiness checks pass. On first run it
+installs dependencies and downloads the pinned `trace_processor_shell`
+prebuilt binary. If your network cannot access Google's artifact bucket,
+prefer Docker, or set `TRACE_PROCESSOR_PATH`,
+`TRACE_PROCESSOR_DOWNLOAD_BASE`, or `TRACE_PROCESSOR_DOWNLOAD_URL` before
+running the script. If a process outside the current checkout owns a configured
+port, startup reports its owner and exits instead of killing it.
 
 | Service | Address |
 |---|---|

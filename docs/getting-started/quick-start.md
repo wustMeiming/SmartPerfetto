@@ -50,7 +50,7 @@
 
 步骤 1：运行 `./start.sh`。
 
-`./start.sh` 会同时启动后端和仓库内置的预构建 Perfetto UI。首次启动会安装依赖，并下载 version-pinned 的 `trace_processor_shell` 预编译产物。若当前网络无法访问 Google artifact bucket，优先改用 Docker 方式；或者设置 `TRACE_PROCESSOR_PATH` 指向已有 binary，设置 `TRACE_PROCESSOR_DOWNLOAD_BASE` / `TRACE_PROCESSOR_DOWNLOAD_URL` 指向可信镜像后再运行。服务地址：
+`./start.sh` 会同时启动后端和仓库内置的预构建 Perfetto UI；只有两端都通过 HTTP readiness 后才会报告启动成功。首次启动会安装依赖，并下载 version-pinned 的 `trace_processor_shell` 预编译产物。若当前网络无法访问 Google artifact bucket，优先改用 Docker 方式；或者设置 `TRACE_PROCESSOR_PATH` 指向已有 binary，设置 `TRACE_PROCESSOR_DOWNLOAD_BASE` / `TRACE_PROCESSOR_DOWNLOAD_URL` 指向可信镜像后再运行。若端口被当前 checkout 之外的进程占用，脚本会报告 owner 并退出，不会直接杀掉该进程。服务地址：
 
 | 服务 | 地址 |
 |---|---|

@@ -11,7 +11,7 @@ curl http://localhost:3000/health
 If there is no response:
 
 ```bash
-./scripts/start-dev.sh
+./start.sh
 ```
 
 If only backend config changed or the watcher is stuck:
@@ -83,11 +83,25 @@ Default ports:
 - Frontend: `10000`
 - trace_processor RPC: `9100-9900`
 
-Clean trace processors:
+Source launchers stop an old instance only when PID metadata proves it belongs
+to the current checkout. If another process or checkout owns a configured
+port, startup prints the `lsof` owner and exits non-zero instead of killing it.
+
+First stop services recorded by this checkout:
 
 ```bash
-pkill -f trace_processor_shell
+./scripts/stop-dev.sh
 ```
+
+Only after confirming every displayed port owner should stop, use:
+
+```bash
+./scripts/stop-dev.sh --force
+```
+
+`--force` is limited to the configured backend/frontend listening ports; it
+does not use broad process-name cleanup for watchers or
+`trace_processor_shell`.
 
 ## LLM Calls Are Slow or Failing
 

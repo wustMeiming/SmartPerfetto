@@ -41,6 +41,19 @@ packages, runtime/provider behavior, pre-built content, and Node version
 boundaries. The LLM/agent checklist is in
 [`../../.claude/rules/product-surface.md`](../../.claude/rules/product-surface.md).
 
+## Startup Lifecycle Boundary
+
+Source entry points share `scripts/service-lifecycle.sh`. PID metadata is
+written atomically and records the launch generation, OS process-start
+identity, executable, working directory, and a diagnostic command snapshot.
+Launchers stop only a process tree whose stable identity still matches the
+current checkout; port conflicts are diagnosed by default and never resolved
+through broad port or command-name kills. Backend and frontend are both
+required: an early exit, readiness timeout, or unexpected runtime exit stops
+the peer and returns non-zero. Docker uses `tini` for PID1 signal forwarding
+and child reaping, while both the entrypoint and container health cover backend
+and frontend readiness.
+
 ## Core Modules
 
 | Module | Location | Responsibility |

@@ -21,6 +21,13 @@ const path = require('path');
 
 const PORT = Number(safePort(process.env.SMARTPERFETTO_FRONTEND_PORT || process.env.PORT, '10000'));
 const DIST_DIR = __dirname;
+const REQUIRED_RUNTIME_ASSETS = [
+  'frontend_bundle.js',
+  'engine_bundle.js',
+  'frontend.css',
+  'trace_processor.wasm',
+  'trace_processor_memory64.wasm',
+];
 
 const MIME_TYPES = {
   '.html': 'text/html',
@@ -86,6 +93,41 @@ function injectRuntimeConfig(filePath, data) {
   return Buffer.from(`${script}\n${html}`);
 }
 
+function frontendHealth(distDir = DIST_DIR) {
+  try {
+    const indexPath = path.join(distDir, 'index.html');
+    const indexHtml = fs.readFileSync(indexPath, 'utf8');
+    const versionAttribute = /data-perfetto_version='([^']+)'/.exec(indexHtml)?.[1];
+    if (!versionAttribute) throw new Error('index.html does not declare a Perfetto version');
+
+    const version = JSON.parse(versionAttribute).stable;
+    if (typeof version !== 'string' || !/^v[0-9A-Za-z._-]+$/.test(version)) {
+      throw new Error('index.html has an invalid stable Perfetto version');
+    }
+
+    const versionDir = path.join(distDir, version);
+    const manifestPath = path.join(versionDir, 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    if (!manifest.resources || typeof manifest.resources !== 'object') {
+      throw new Error('manifest.json has no resources map');
+    }
+
+    for (const asset of REQUIRED_RUNTIME_ASSETS) {
+      if (!Object.hasOwn(manifest.resources, asset)) {
+        throw new Error(`manifest.json does not declare ${asset}`);
+      }
+      const stat = fs.statSync(path.join(versionDir, asset));
+      if (!stat.isFile() || stat.size === 0) {
+        throw new Error(`${asset} is missing or empty`);
+      }
+    }
+
+    return {status: 'OK', version};
+  } catch (error) {
+    return {status: 'ERROR', error: error.message};
+  }
+}
+
 const server = http.createServer((req, res) => {
   // CORS headers for cross-origin requests from Perfetto UI
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -93,6 +135,14 @@ const server = http.createServer((req, res) => {
   res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
 
   let urlPath = req.url.split('?')[0];
+
+  if (urlPath === '/health') {
+    const health = frontendHealth();
+    const body = JSON.stringify(health);
+    res.writeHead(health.status === 'OK' ? 200 : 503, {'Content-Type': 'application/json'});
+    res.end(body);
+    return;
+  }
 
   // Live reload endpoint (no-op stub so browser doesn't error)
   if (urlPath === '/live_reload') {
@@ -152,6 +202,14 @@ server.on('error', (err) => {
   throw err;
 });
 
-server.listen(PORT, () => {
-  console.log(`[Frontend] Serving Perfetto UI on http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`[Frontend] Serving Perfetto UI on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = {
+  REQUIRED_RUNTIME_ASSETS,
+  frontendHealth,
+  server,
+};

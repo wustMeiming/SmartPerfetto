@@ -355,11 +355,15 @@ TRACE_PROCESSOR_PATH=/path/to/trace_processor_shell
 PERFETTO_PATH=/path/to/perfetto
 ```
 
-默认不需要手动设置 `TRACE_PROCESSOR_PATH`。`./scripts/start-dev.sh` 会优先下载固定版本的 prebuilt `trace_processor_shell`，只有在修改 Perfetto C++ 或需要自编译时才使用：
+默认不需要手动设置 `TRACE_PROCESSOR_PATH`。普通 `./start.sh` 和开发模式 `./scripts/start-dev.sh` 都优先使用经过固定 SHA256 校验的 prebuilt。显式的 `TRACE_PROCESSOR_PATH` 是用户拥有的覆盖路径：启动和 backend `predev` 只检查文件存在、可执行以及 `--version`，不会改权限、按固定 SHA 替换或向该路径下载。
+
+只有在修改 Perfetto C++ 或需要自编译时才使用：
 
 ```bash
 ./scripts/start-dev.sh --build-from-source
 ```
+
+该参数会对当前 Perfetto checkout 执行 `gn` / `ninja` 增量源码构建并使用 `perfetto/out/ui/trace_processor_shell`，不会因为仓库里已有 prebuilt 而跳过。
 
 如果下载卡在 `commondatastorage.googleapis.com` 或 Google artifact bucket 无法访问，有三种出口：
 

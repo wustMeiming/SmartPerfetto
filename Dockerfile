@@ -95,6 +95,7 @@ FROM node:24-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -143,7 +144,8 @@ EXPOSE 3000 10000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f "http://localhost:${SMARTPERFETTO_BACKEND_PORT:-${PORT:-3000}}/health" || exit 1
+    CMD curl -fsS "http://localhost:${SMARTPERFETTO_BACKEND_PORT:-${PORT:-3000}}/health" >/dev/null && \
+        curl -fsS "http://localhost:${SMARTPERFETTO_FRONTEND_PORT:-10000}/health" >/dev/null || exit 1
 
 # Start both services
 COPY scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
@@ -151,4 +153,4 @@ RUN chmod +x /app/docker-entrypoint.sh && chown node:node /app/docker-entrypoint
 
 USER node
 
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/docker-entrypoint.sh"]
