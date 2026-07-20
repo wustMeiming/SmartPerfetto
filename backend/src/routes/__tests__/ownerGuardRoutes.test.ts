@@ -12,7 +12,7 @@ import request from 'supertest';
 import { authenticate } from '../../middleware/auth';
 import { registerAgentReportRoutes } from '../agentReportRoutes';
 import { registerAgentSessionCatalogRoutes } from '../agentSessionCatalogRoutes';
-import reportRoutes, { reportStore } from '../reportRoutes';
+import reportRoutes, { persistReport, reportStore } from '../reportRoutes';
 import traceRoutes from '../simpleTraceRoutes';
 import {
   clearCodeAwareOutputGuards,
@@ -271,6 +271,42 @@ describe('owner guard for trace and report routes', () => {
     const otherDelete = await authHeaders(request(app).delete('/api/reports/other-report'));
     expect(otherDelete.status).toBe(404);
     expect(reportStore.has('other-report')).toBe(true);
+  });
+
+  it('rejects decoded path separators for report reads and exports', async () => {
+    const escapedId = '../../frontend/index';
+    reportStore.set(escapedId, {
+      html: '<html><body>must not escape</body></html>',
+      generatedAt: Date.now(),
+      sessionId: 'unsafe-session',
+      tenantId: 'tenant-a',
+      workspaceId: 'workspace-a',
+      userId: API_USER_ID,
+    });
+    const app = makeResourceApp();
+
+    const readRes = await authHeaders(
+      request(app).get('/api/reports/..%2f..%2ffrontend%2findex'),
+    );
+    expect(readRes.status).toBe(404);
+    expect(readRes.text).not.toContain('must not escape');
+
+    const exportRes = await authHeaders(
+      request(app).get('/api/reports/..%2f..%2ffrontend%2findex/export'),
+    );
+    expect(exportRes.status).toBe(404);
+    expect(exportRes.text).not.toContain('must not escape');
+  });
+
+  it('rejects unsafe report IDs before caching or persistence', () => {
+    expect(() =>
+      persistReport('../escaped-report', {
+        html: '<html><body>must not persist</body></html>',
+        generatedAt: Date.now(),
+        sessionId: 'unsafe-session',
+      }),
+    ).toThrow('Unsafe report id');
+    expect(reportStore.has('../escaped-report')).toBe(false);
   });
 
   it('returns 404 for same-workspace reports when caller lacks report read permission', async () => {

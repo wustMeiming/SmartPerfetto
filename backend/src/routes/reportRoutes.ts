@@ -124,6 +124,10 @@ function recordReportAudit(
 
 const SAFE_REPORT_ID_RE = /^[a-zA-Z0-9._:-]+$/;
 
+function isSafeReportSegment(value: string): boolean {
+  return SAFE_REPORT_ID_RE.test(value) && value !== '.' && value !== '..';
+}
+
 function enterpriseReportStoreEnabled(): boolean {
   return enterpriseDbReadAuthorityEnabled();
 }
@@ -137,7 +141,7 @@ function legacyReportWritesEnabled(): boolean {
 }
 
 function assertSafeReportSegment(value: string, label: string): string {
-  if (!SAFE_REPORT_ID_RE.test(value) || value === '.' || value === '..') {
+  if (!isSafeReportSegment(value)) {
     throw new Error(`Unsafe ${label}: ${value}`);
   }
   return value;
@@ -355,7 +359,7 @@ function persistLegacyReport(reportId: string, entry: PersistedReport): void {
 }
 
 function loadEnterpriseReport(reportId: string): PersistedReport | null {
-  if (!SAFE_REPORT_ID_RE.test(reportId)) return null;
+  if (!isSafeReportSegment(reportId)) return null;
   try {
     return withEnterpriseReportDb((db) => {
       const row = db.prepare<unknown[], ReportArtifactRow>(`
@@ -438,13 +442,14 @@ export function upgradeLegacyReportHtml(html: string): string {
 
 /** Save a report to disk. Called externally when reports are generated. */
 export function persistReport(reportId: string, entry: PersistedReport): void {
-  reportStore.set(reportId, entry);
+  const safeReportId = assertSafeReportSegment(reportId, 'report id');
+  reportStore.set(safeReportId, entry);
   try {
     if (legacyReportWritesEnabled()) {
-      persistLegacyReport(reportId, entry);
+      persistLegacyReport(safeReportId, entry);
     }
     if (enterpriseReportDbWritesEnabled()) {
-      persistEnterpriseReport(reportId, entry);
+      persistEnterpriseReport(safeReportId, entry);
     }
   } catch (err) {
     console.warn('[ReportRoutes] Failed to persist report to disk:', (err as Error).message);
@@ -460,6 +465,7 @@ function loadReportFromDisk(reportId: string): PersistedReport | null {
 }
 
 function loadLegacyReportFromDisk(reportId: string): PersistedReport | null {
+  if (!isSafeReportSegment(reportId)) return null;
   try {
     const filePath = path.join(REPORTS_DIR, `${reportId}.html`);
     if (!fs.existsSync(filePath)) return null;
@@ -511,6 +517,7 @@ function loadLegacyReportFromDisk(reportId: string): PersistedReport | null {
 }
 
 function deleteLegacyReport(reportId: string): boolean {
+  if (!isSafeReportSegment(reportId)) return false;
   try {
     const htmlPath = path.join(REPORTS_DIR, `${reportId}.html`);
     const metaPath = path.join(REPORTS_DIR, `${reportId}.meta.json`);
@@ -524,7 +531,7 @@ function deleteLegacyReport(reportId: string): boolean {
 }
 
 function deleteEnterpriseReport(reportId: string): boolean {
-  if (!SAFE_REPORT_ID_RE.test(reportId)) return false;
+  if (!isSafeReportSegment(reportId)) return false;
   try {
     return withEnterpriseReportDb((db) => {
       const row = db.prepare<unknown[], ReportArtifactRow>(
@@ -558,6 +565,7 @@ function deletePersistedReport(reportId: string): boolean {
 }
 
 function getReportForContext(reportId: string, req: express.Request): PersistedReport | null {
+  if (!isSafeReportSegment(reportId)) return null;
   const context = requireRequestContext(req);
   const report = reportStore.get(reportId) || loadReportFromDisk(reportId);
   if (report && isReportExpired(report)) {
@@ -704,6 +712,9 @@ router.get('/:reportId', (req, res) => {
 router.delete('/:reportId', (req, res) => {
   try {
     const { reportId } = req.params;
+    if (!isSafeReportSegment(reportId)) {
+      return sendResourceNotFound(res, 'Report not found');
+    }
 
     const context = requireRequestContext(req);
     const report = reportStore.get(reportId) || loadReportFromDisk(reportId);
