@@ -30,12 +30,14 @@ interface CatalogColumn {
 
 interface CatalogStep {
   title: LocalizedText;
+  description?: LocalizedText;
   columns: Record<string, CatalogColumn>;
   synthesizeLabels: Record<string, LocalizedText>;
 }
 
 interface CatalogSkill {
   displayName: LocalizedText;
+  description: LocalizedText;
   type: string;
   steps: Record<string, CatalogStep>;
 }
@@ -82,6 +84,20 @@ function localizedTitle(authored: unknown, stableId: string): LocalizedText {
   return {
     'zh-CN': source && HAN_RE.test(source) ? source : identifierZh,
     en: source && !HAN_RE.test(source) ? source : identifierEn,
+  };
+}
+
+function localizedDescription(authored: unknown, stableId: string): LocalizedText {
+  const source = sentence(authored);
+  const identifierEn = humanizeIdentifier(stableId);
+  const identifierZh = humanizeIdentifierZh(stableId);
+  return {
+    'zh-CN': source && HAN_RE.test(source)
+      ? source
+      : `基于 Trace 指标与证据分析${identifierZh}。`,
+    en: source && !HAN_RE.test(source)
+      ? source
+      : `Analyzes ${identifierEn} using trace metrics and supporting evidence.`,
   };
 }
 
@@ -183,6 +199,9 @@ function collectSteps(skill: SkillDefinition): Record<string, CatalogStep> {
       const entry = result[stepId] || emptyStep(
         localizedTitle(displayTitle || raw.name, stepId),
       );
+      if (typeof raw.description === 'string' && raw.description.trim()) {
+        entry.description = localizedDescription(raw.description, stepId);
+      }
       collectColumns(entry, raw.display);
       collectSynthesizeLabels(entry, raw.synthesize);
       result[stepId] = entry;
@@ -218,6 +237,7 @@ function buildCatalog(skills: SkillDefinition[]): SkillLocalizationCatalog {
       .reduce((total, step) => total + Object.keys(step.columns).length, 0);
     catalogSkills[skill.name] = {
       displayName,
+      description: localizedDescription(skill.meta.description, skill.name),
       type: skill.type,
       steps,
     };

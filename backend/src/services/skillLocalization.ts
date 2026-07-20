@@ -20,12 +20,14 @@ interface CatalogColumn {
 
 interface CatalogStep {
   title: LocalizedText;
+  description?: LocalizedText;
   columns: Record<string, CatalogColumn>;
   synthesizeLabels: Record<string, LocalizedText>;
 }
 
 interface CatalogSkill {
   displayName: LocalizedText;
+  description: LocalizedText;
   type: string;
   steps: Record<string, CatalogStep>;
 }
@@ -252,6 +254,7 @@ export function localizeSkillListItem<T extends LocalizableSkillListItem>(
   return {
     ...item,
     displayName: skill.displayName[outputLanguage],
+    description: skill.description[outputLanguage],
     localizationStatus: 'catalog',
   };
 }
@@ -274,6 +277,9 @@ export function localizeSkillDefinition(
       return {
         ...raw,
         ...(raw.name !== undefined ? {name: step.title[outputLanguage]} : {}),
+        ...(raw.description !== undefined && step.description
+          ? {description: step.description[outputLanguage]}
+          : {}),
         ...(Array.isArray(raw.steps)
           ? {steps: projectSteps(raw.steps as SkillDefinition['steps'])}
           : {}),
@@ -284,6 +290,7 @@ export function localizeSkillDefinition(
     meta: {
       ...skill.meta,
       display_name: catalogSkill.displayName[outputLanguage],
+      description: catalogSkill.description[outputLanguage],
     },
     steps: projectSteps(skill.steps),
   };
