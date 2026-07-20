@@ -19,8 +19,9 @@ The other upstream Skills are not imported.
 3. Implement the native portable methodology and validator in Perfetto-Skills.
 4. Commit the portable implementation, then use that immutable commit as the
    evidence reference for the Android Skills decisions.
-5. Generate the Android upstream snapshot, lock, decisions, and report through
-   the synchronizer; run the public complete gate and commit the result.
+5. Generate the Android upstream metadata-only lock, decisions, and reviewed
+   gap report through the synchronizer; run the public complete gate and commit
+   the result. Do not persist an upstream source inventory or source body.
 6. Before the public governance commit, run the public impact gate against the
    exact SmartPerfetto source HEAD and record its fingerprint in that commit
    message.
@@ -144,7 +145,7 @@ Modify:
 Use the same bounded secondary-sweep and stop-condition contract as
 SmartPerfetto, expressed without product session/runtime dependencies.
 
-### 3. Reuse upstream inventory machinery for `android/skills`
+### 3. Compare `android/skills` without persisting its corpus
 
 Refactor/add:
 
@@ -154,17 +155,20 @@ Refactor/add:
 - focused synchronizer and lock tests;
 - `upstreams/android-skills.lock.json`;
 - `upstreams/android-skills-decisions.json`;
-- `upstreams/snapshots/android-skills/profilers.json`;
 - `upstreams/reports/android-skills-gap.json`;
 - `docs/maintenance/upstream-sync.md`.
 - `.github/workflows/upstream-sync.yml`;
 - `.github/workflows/upstream-canary.yml`;
 - workflow contract tests.
 
-The lock pins the repository commit, the two subtree paths/tree IDs, and the
-snapshot hash. The synchronizer remains dry-run by default; `--apply` refuses
-unresolved decisions. Every changed upstream path/hash becomes
-`pending_review` until an exact decision supplies local evidence.
+The schema-v2 lock pins only the repository, commit, two subtree paths, and
+their Git tree IDs. The synchronizer inventories the pinned and candidate
+commits inside the supplied disposable checkout, then writes only the minimal
+reviewed classifications needed for the gap report. It never writes an
+upstream source inventory or source body. The synchronizer remains dry-run by
+default; `--apply` refuses unresolved decisions. Every changed upstream
+path/hash becomes `pending_review` until an exact decision supplies local
+evidence.
 
 The eleven initial decisions classify SQL/analysis entrypoints as adopted and the
 domain hint/stdlib references as already covered by named local paths/tests.
@@ -172,9 +176,10 @@ No Google runtime downloader, workspace scratchpad, or unversioned stdlib dump
 becomes a product dependency.
 
 The explicit sync workflow accepts an immutable Android Skills commit and
-builds a disposable candidate. The scheduled canary inventories Android Skills
-`main` without applying it, so changed path/hash pairs surface as unresolved
-review instead of being silently adopted.
+builds a disposable candidate. The scheduled canary compares Android Skills
+`main` transiently without applying or retaining its corpus, so changed
+path/hash pairs surface as unresolved review instead of being silently
+adopted.
 
 ## Tests and gates
 
@@ -184,6 +189,8 @@ review instead of being silently adopted.
 cd backend
 npx jest src/services/__tests__/sqlGuardrailAnalyzer.test.ts \
   src/agentv3/__tests__/generalStrategyContract.test.ts --runInBand
+npx jest tests/skill-eval/sql_guardrail_span_join.eval.ts --runInBand \
+  --testTimeout=120000 --forceExit
 npm run validate:strategies
 npm run test:scene-trace-regression
 ```
@@ -196,11 +203,13 @@ uv run python -m unittest \
   tests.unit.test_all_query_validation \
   tests.unit.test_android_skills_sync \
   tests.unit.test_upstream_locks \
-  tests.unit.test_skill_contract
+  tests.unit.test_skill_contract \
+  tests.integration.test_real_trace.RealTraceTest.test_guarded_span_join_executes_with_non_overlap_witnesses
 ```
 
 Run synchronizer dry-run and apply from the pinned local Android Skills
-checkout while producing the initial snapshot.
+checkout. The checkout is a transient comparison input; only the metadata-only
+lock and reviewed gap report are committed.
 
 ### Complete gates
 
@@ -269,7 +278,8 @@ Confirmed revisions from that review:
 - **Open-ended analysis loops:** the closing sweep has a domain cap and explicit
   stop conditions.
 - **Generated-file drift:** public generated references remain untouched; the
-  Android snapshot/report are written by the synchronizer.
+  Android lock/report are written by the synchronizer, and no Android source
+  inventory or body is retained.
 - **Paired provenance drift:** both impact tools receive immutable refs that
   exactly equal the paired checkout HEAD at validation time.
 - **Unsupported new Skills:** IRQ/RT/catch-up candidates remain documented
