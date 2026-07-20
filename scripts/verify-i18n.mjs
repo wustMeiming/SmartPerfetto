@@ -88,8 +88,15 @@ if (catalogSource) {
   }
   for (const [skillId, skill] of skillEntries) {
     verifyLocalizedText(skill.displayName, `skills.${skillId}.displayName`);
+    verifyLocalizedText(skill.description, `skills.${skillId}.description`);
     for (const [stepId, step] of Object.entries(skill.steps || {})) {
       verifyLocalizedText(step.title, `skills.${skillId}.steps.${stepId}.title`);
+      if (step.description) {
+        verifyLocalizedText(
+          step.description,
+          `skills.${skillId}.steps.${stepId}.description`,
+        );
+      }
       for (const [columnId, column] of Object.entries(step.columns || {})) {
         verifyLocalizedText(
           column.label,
@@ -176,6 +183,14 @@ const criticalPathRoute = 'backend/src/routes/criticalPathRoutes.ts';
 expectIncludes(criticalPathRoute, read(criticalPathRoute), [
   'analysis: rawAnalysis',
   'presentationAnalysis: projectCriticalPathAnalysis(',
+]);
+
+const skillControllerPath = 'backend/src/controllers/skillController.ts';
+expectIncludes(skillControllerPath, read(skillControllerPath), [
+  'localizedError(',
+  'localizedFailure(',
+  "zh: '缺少 Skill ID'",
+  "zh: '无法执行 Skill'",
 ]);
 
 const localeAwareFrontendFiles = [

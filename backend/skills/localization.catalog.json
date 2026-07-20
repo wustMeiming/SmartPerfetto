@@ -19,6 +19,10 @@
         "zh-CN": "AMS 分析",
         "en": "Ams Module"
       },
+      "description": {
+        "zh-CN": "分析应用生命周期、进程管理和启动时序",
+        "en": "Analyzes Ams Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -88,6 +92,10 @@
       "displayName": {
         "zh-CN": "Bitmap 内存（按进程）",
         "en": "Android Bitmap Memory Per Process"
+      },
+      "description": {
+        "zh-CN": "每进程 Bitmap counter、heap graph metadata 和跨进程来源归因",
+        "en": "Analyzes Android Bitmap Memory Per Process using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -263,6 +271,10 @@
         "zh-CN": "DVFS Counter 统计",
         "en": "Android Dvfs Counter Stats"
       },
+      "description": {
+        "zh-CN": "CPU/GPU/DDR 频率统计（min/max/avg）",
+        "en": "Analyzes Android Dvfs Counter Stats using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -327,6 +339,10 @@
         "zh-CN": "AndroidGPUWorkPeriodTrack",
         "en": "GPU Work Period"
       },
+      "description": {
+        "zh-CN": "GPU 实际工作区间（功耗模型前置数据）",
+        "en": "Analyzes Android GPU Work Period Track using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -378,6 +394,10 @@
       "displayName": {
         "zh-CN": "AndroidHeapDominatorPathExtract",
         "en": "Android Heap Dominator Path Extract"
+      },
+      "description": {
+        "zh-CN": "基于 Trace 指标与证据分析AndroidHeapDominatorPathExtract。",
+        "en": "Extract bounded per-dump dominator class paths with propagated root identity and retained size"
       },
       "type": "composite",
       "steps": {
@@ -512,6 +532,10 @@
       "displayName": {
         "zh-CN": "AndroidHeapGraphLeakCandidates",
         "en": "Android Heap Graph Leak Candidates"
+      },
+      "description": {
+        "zh-CN": "基于 Java heap graph、生命周期切片和引用关系识别 Activity/Fragment 泄漏候选",
+        "en": "Analyzes Android Heap Graph Leak Candidates using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -682,6 +706,10 @@
       "displayName": {
         "zh-CN": "AndroidHeapGraph摘要",
         "en": "Android Heap Graph Summary"
+      },
+      "description": {
+        "zh-CN": "检查 Android Java heap graph 数据，并按 retained/cumulative size 找出主要 class retainer",
+        "en": "Analyzes Android Heap Graph Summary using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -898,6 +926,10 @@
         "zh-CN": "JobScheduler 事件",
         "en": "Android Job Scheduler Events"
       },
+      "description": {
+        "zh-CN": "JobScheduler 后台任务执行序列",
+        "en": "Analyzes Android Job Scheduler Events using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -961,6 +993,10 @@
       "displayName": {
         "zh-CN": "Kernel Wakelock 汇总",
         "en": "Android Kernel Wakelock Summary"
+      },
+      "description": {
+        "zh-CN": "kernel wakelock 持有时长（阻止 suspend 的源头）",
+        "en": "Analyzes Android Kernel Wakelock Summary using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -1037,6 +1073,10 @@
       "displayName": {
         "zh-CN": "Android内存V57AIDiagnostics",
         "en": "Android Memory v57 AI Diagnostics"
+      },
+      "description": {
+        "zh-CN": "基于 Trace 指标与证据分析Android内存V57AIDiagnostics。",
+        "en": "Translate Perfetto v57 Android memory Agent Skill SQL into deterministic heap graph and heap profile evidence"
       },
       "type": "composite",
       "steps": {
@@ -1293,6 +1333,10 @@
       "displayName": {
         "zh-CN": "ANR 分析",
         "en": "ANR Analysis"
+      },
+      "description": {
+        "zh-CN": "检测和分析应用程序无响应 (ANR) 事件",
+        "en": "Analyzes ANR Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -1912,6 +1956,10 @@
         "zh-CN": "ANR 上下文提取",
         "en": "ANR Context In Range"
       },
+      "description": {
+        "zh-CN": "提取首个 ANR 事件的时间窗口参数，供后续分析步骤复用",
+        "en": "Analyzes ANR Context In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -1979,6 +2027,10 @@
       "displayName": {
         "zh-CN": "ANR 详情分析",
         "en": "ANR Detail"
+      },
+      "description": {
+        "zh-CN": "深入分析单个 ANR 事件的原因",
+        "en": "Analyzes ANR Detail using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -2707,6 +2759,10 @@
         "zh-CN": "ANR 主线程阻塞链分析",
         "en": "ANR Main Thread Blocking"
       },
+      "description": {
+        "zh-CN": "深度分析 ANR 事件中主线程的阻塞原因：线程状态、阻塞函数、唤醒链、Binder、锁竞争",
+        "en": "Analyzes ANR Main Thread Blocking using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -2958,6 +3014,10 @@
         "zh-CN": "应用帧生产分析",
         "en": "App Frame Production"
       },
+      "description": {
+        "zh-CN": "分析应用主线程的帧生产情况",
+        "en": "Analyzes App Frame Production using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -3046,6 +3106,10 @@
         "zh-CN": "应用生命周期事件 (区间)",
         "en": "App Lifecycle In Range"
       },
+      "description": {
+        "zh-CN": "追踪区间内 Activity/Fragment 生命周期事件（onCreate/onResume 等）",
+        "en": "Analyzes App Lifecycle In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -3120,6 +3184,10 @@
         "zh-CN": "应用进程启动汇总",
         "en": "App Process Starts Summary"
       },
+      "description": {
+        "zh-CN": "系统层面所有应用进程 fork 事件（含后台/service 进程）",
+        "en": "Analyzes App Process Starts Summary using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -3177,6 +3245,10 @@
       "displayName": {
         "zh-CN": "ART 运行时分析",
         "en": "ART Module"
+      },
+      "description": {
+        "zh-CN": "分析 GC、JIT 编译和内存分配",
+        "en": "Analyzes ART Module using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -3256,6 +3328,10 @@
         "zh-CN": "电池电量时间线",
         "en": "Battery Charge Timeline"
       },
+      "description": {
+        "zh-CN": "电池电量/电压/电流采样时间序列",
+        "en": "Analyzes Battery Charge Timeline using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -3319,6 +3395,10 @@
       "displayName": {
         "zh-CN": "Doze 休眠状态时间线",
         "en": "Battery Doze State Timeline"
+      },
+      "description": {
+        "zh-CN": "Deep/Light idle 区间时间线",
+        "en": "Analyzes Battery Doze State Timeline using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -3386,6 +3466,10 @@
       "displayName": {
         "zh-CN": "掉电归因分析",
         "en": "Battery Drain Attribution"
+      },
+      "description": {
+        "zh-CN": "组合 battery、Doze、wakelock、job、network、suspend/wakeup 证据，分析掉电和待机耗电原因",
+        "en": "Analyzes Battery Drain Attribution using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -3492,6 +3576,10 @@
         "zh-CN": "掉电速率摘要",
         "en": "Battery Drain Rate Summary"
       },
+      "description": {
+        "zh-CN": "基于 battery counters 计算窗口掉电速率、电流/电压摘要和充电不可判定状态",
+        "en": "Analyzes Battery Drain Rate Summary using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -3585,6 +3673,10 @@
       "displayName": {
         "zh-CN": "Binder 分析",
         "en": "Binder Analysis"
+      },
+      "description": {
+        "zh-CN": "系统级 Binder 通信性能分析",
+        "en": "Analyzes Binder Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -4112,6 +4204,10 @@
         "zh-CN": "Binder 阻塞分析",
         "en": "Binder Blocking In Range"
       },
+      "description": {
+        "zh-CN": "分析同步 Binder 调用中对端进程的响应延迟",
+        "en": "Analyzes Binder Blocking In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -4179,6 +4275,10 @@
       "displayName": {
         "zh-CN": "Binder 详情分析",
         "en": "Binder Detail"
+      },
+      "description": {
+        "zh-CN": "深入分析单个 Binder 事务",
+        "en": "Analyzes Binder Detail using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -4401,6 +4501,10 @@
         "zh-CN": "Binder 事务分析 (区间)",
         "en": "Binder In Range"
       },
+      "description": {
+        "zh-CN": "分析指定时间范围内的 Binder 事务",
+        "en": "Analyzes Binder In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -4469,6 +4573,10 @@
         "zh-CN": "Binder IPC 分析",
         "en": "Binder Module"
       },
+      "description": {
+        "zh-CN": "分析跨进程 Binder 调用、阻塞事务和调用延迟",
+        "en": "Analyzes Binder Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -4525,6 +4633,10 @@
       "displayName": {
         "zh-CN": "Binder 根因归因",
         "en": "Binder Root Cause"
+      },
+      "description": {
+        "zh-CN": "分析慢 Binder 事务的服务端/客户端阻塞原因（GC/锁/IO/内存回收）",
+        "en": "Analyzes Binder Root Cause using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -4653,6 +4765,10 @@
       "displayName": {
         "zh-CN": "Binder 风暴检测",
         "en": "Binder Storm Detection"
+      },
+      "description": {
+        "zh-CN": "检测 Binder 事务风暴：短时间内过多 IPC 调用导致延迟或 ANR",
+        "en": "Analyzes Binder Storm Detection using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -4870,6 +4986,10 @@
       "displayName": {
         "zh-CN": "Block I/O 分析",
         "en": "Block I/O Analysis"
+      },
+      "description": {
+        "zh-CN": "分析块设备 I/O 操作和线程阻塞（D 状态）",
+        "en": "Analyzes Block I/O Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -5197,6 +5317,10 @@
         "zh-CN": "阻塞链分析",
         "en": "Blocking Chain Analysis"
       },
+      "description": {
+        "zh-CN": "分析指定时间范围内主线程的阻塞链：谁阻塞了主线程？唤醒者是谁？唤醒者在做什么？",
+        "en": "Analyzes Blocking Chain Analysis using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -5364,6 +5488,10 @@
         "zh-CN": "Buffer Transaction 生命周期",
         "en": "Buffer Transaction Lifecycle"
       },
+      "description": {
+        "zh-CN": "追踪 BLAST Transaction 在 SF 侧的真实计数点（S01 §⑥），区分 queueBuffer 与 Transaction 到达时机",
+        "en": "Analyzes Buffer Transaction Lifecycle using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -5501,6 +5629,10 @@
         "zh-CN": "缓存未命中影响",
         "en": "Cache Miss Impact"
       },
+      "description": {
+        "zh-CN": "统计 cache-miss 计数器并评估波动",
+        "en": "Analyzes Cache Miss Impact using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -5562,6 +5694,10 @@
       "displayName": {
         "zh-CN": "调用栈分析 (Flamegraph)",
         "en": "Callstack Analysis"
+      },
+      "description": {
+        "zh-CN": "生成火焰图并分析热点函数",
+        "en": "Analyzes Callstack Analysis using trace metrics and supporting evidence."
       },
       "type": "deep",
       "steps": {
@@ -5829,6 +5965,10 @@
       "displayName": {
         "zh-CN": "Camera Trace 证据",
         "en": "Camera Trace Evidence"
+      },
+      "description": {
+        "zh-CN": "枚举 Camera 相关 identity、slice、Binder、系统上下文、DMA-BUF/legacy ION 与可选 Pixel stage 证据",
+        "en": "Analyzes Camera Trace Evidence using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -6353,6 +6493,10 @@
         "zh-CN": "Choreographer 分析",
         "en": "Choreographer Module"
       },
+      "description": {
+        "zh-CN": "分析 VSYNC 时序、doFrame 回调和渲染流水线",
+        "en": "Analyzes Choreographer Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -6458,6 +6602,10 @@
       "displayName": {
         "zh-CN": "ChromeScrollJank帧时间线",
         "en": "Chrome Scroll Jank / Frame Timeline"
+      },
+      "description": {
+        "zh-CN": "分析 Chrome scroll jank v3/v4、scroll frame stages 与 Chrome preferred frame timeline availability",
+        "en": "Analyzes Chrome Scroll Jank Frame Timeline using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -6724,6 +6872,10 @@
       "displayName": {
         "zh-CN": "点击响应分析",
         "en": "Click Response Analysis"
+      },
+      "description": {
+        "zh-CN": "分析已完成 ACK 的点击事件响应延迟，并在有帧关联时补充 input-to-frame 延迟",
+        "en": "Analyzes Click Response Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -7358,6 +7510,10 @@
         "zh-CN": "点击详情分析",
         "en": "Click Response Detail"
       },
+      "description": {
+        "zh-CN": "深入分析单个点击事件的处理流程",
+        "en": "Analyzes Click Response Detail using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -7981,6 +8137,10 @@
         "zh-CN": "代码定位线索",
         "en": "Code Pinpoint"
       },
+      "description": {
+        "zh-CN": "从 trace 中提取可用于 codebase-aware resolve_symbol / lookup_source 的线程、slice、module 和 symbol 线索",
+        "en": "Analyzes Code Pinpoint using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -8065,6 +8225,10 @@
       "displayName": {
         "zh-CN": "Compose 重组热点检测",
         "en": "Compose Recomposition Hotspot"
+      },
+      "description": {
+        "zh-CN": "检测 Jetpack Compose 重组热点：过多或过慢的 Recomposition",
+        "en": "Analyzes Compose Recomposition Hotspot using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -8315,6 +8479,10 @@
         "zh-CN": "Consumer Jank 检测",
         "en": "Consumer Jank Detection"
       },
+      "description": {
+        "zh-CN": "检测 Consumer (SurfaceFlinger) 侧的卡顿",
+        "en": "Analyzes Consumer Jank Detection using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -8513,6 +8681,10 @@
       "displayName": {
         "zh-CN": "CPU 分析",
         "en": "CPU Analysis"
+      },
+      "description": {
+        "zh-CN": "全方位的 CPU 性能分析",
+        "en": "Analyzes CPU Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -9143,6 +9315,10 @@
         "zh-CN": "CPU 簇负载分析",
         "en": "CPU Cluster Load In Range"
       },
+      "description": {
+        "zh-CN": "计算大核簇和小核簇的整体 CPU 负载百分比（动态拓扑检测）",
+        "en": "Analyzes CPU Cluster Load In Range using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -9227,6 +9403,10 @@
         "zh-CN": "CPU 大小核映射",
         "en": "CPU Cluster Mapping View"
       },
+      "description": {
+        "zh-CN": "CPU 编号 → cluster 类型映射",
+        "en": "Analyzes CPU Cluster Mapping View using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -9272,6 +9452,10 @@
       "displayName": {
         "zh-CN": "CPU 高频驻留摘要",
         "en": "CPU Freq Residency Summary"
+      },
+      "description": {
+        "zh-CN": "按大小核/频点桶统计窗口内 CPU 频率驻留和高频占比",
+        "en": "Analyzes CPU Freq Residency Summary using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -9348,6 +9532,10 @@
       "displayName": {
         "zh-CN": "CPU 频率变化时间线",
         "en": "CPU Freq Timeline"
+      },
+      "description": {
+        "zh-CN": "分析指定时间范围内各 CPU 核心的频率变化",
+        "en": "Analyzes CPU Freq Timeline using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -9441,6 +9629,10 @@
         "zh-CN": "CPU Idle C-State 分析",
         "en": "CPU Idle Analysis"
       },
+      "description": {
+        "zh-CN": "分析 CPU idle 状态分布，检测深度 idle 对唤醒延迟的影响",
+        "en": "Analyzes CPU Idle Analysis using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -9502,6 +9694,10 @@
       "displayName": {
         "zh-CN": "CPU Idle 驻留",
         "en": "CPU Idle State Residency"
+      },
+      "description": {
+        "zh-CN": "每 CPU 各 idle 状态的驻留计数",
+        "en": "Analyzes CPU Idle State Residency using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -9567,6 +9763,10 @@
         "zh-CN": "CPU 负载区间分析",
         "en": "CPU Load In Range"
       },
+      "description": {
+        "zh-CN": "分析指定时间范围内各 CPU 核心的负载情况",
+        "en": "Analyzes CPU Load In Range using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -9623,6 +9823,10 @@
       "displayName": {
         "zh-CN": "CPU 硬件分析",
         "en": "CPU Module"
+      },
+      "description": {
+        "zh-CN": "分析 CPU 频率、热节流和电源状态",
+        "en": "Analyzes CPU Module using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -9702,6 +9906,10 @@
         "zh-CN": "进程 CPU 利用率",
         "en": "CPU Process Utilization Period"
       },
+      "description": {
+        "zh-CN": "按进程聚合的 CPU 利用率周期采样",
+        "en": "Analyzes CPU Process Utilization Period using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -9747,6 +9955,10 @@
       "displayName": {
         "zh-CN": "CPU 深度调优",
         "en": "CPU Profiling"
+      },
+      "description": {
+        "zh-CN": "综合分析 Scheduling, Frequency, Idle 状态",
+        "en": "Analyzes CPU Profiling using trace metrics and supporting evidence."
       },
       "type": "deep",
       "steps": {
@@ -10167,6 +10379,10 @@
         "zh-CN": "CPU Slice 分析",
         "en": "CPU Slice Analysis"
       },
+      "description": {
+        "zh-CN": "分析 CPU 时间片分布（动态拓扑检测）",
+        "en": "Analyzes CPU Slice Analysis using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -10251,6 +10467,10 @@
         "zh-CN": "线程 CPU 利用率（周期）",
         "en": "CPU Thread Utilization Period"
       },
+      "description": {
+        "zh-CN": "按线程统计 CPU 利用率，已频率归一化",
+        "en": "Analyzes CPU Thread Utilization Period using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -10302,6 +10522,10 @@
       "displayName": {
         "zh-CN": "CPU 限频检测",
         "en": "CPU Throttling In Range"
+      },
+      "description": {
+        "zh-CN": "检测 CPU 热控限频情况（动态拓扑检测）",
+        "en": "Analyzes CPU Throttling In Range using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -10387,6 +10611,10 @@
         "zh-CN": "每帧 CPU 时间",
         "en": "CPU Time Per Frame"
       },
+      "description": {
+        "zh-CN": "每帧渲染期间该应用 CPU 累计活跃时长",
+        "en": "Analyzes CPU Time Per Frame using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -10432,6 +10660,10 @@
       "displayName": {
         "zh-CN": "CPU 拓扑检测",
         "en": "CPU Topology Detection"
+      },
+      "description": {
+        "zh-CN": "基于共享 _cpu_topology 视图检测 CPU 大小核拓扑",
+        "en": "Analyzes CPU Topology Detection using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -10589,6 +10821,10 @@
         "zh-CN": "CPU 拓扑关系初始化",
         "en": "CPU Topology View"
       },
+      "description": {
+        "zh-CN": "创建物化 CPU 拓扑分类关系，供后续 SQL JOIN 使用",
+        "en": "Analyzes CPU Topology View using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -10709,6 +10945,10 @@
         "zh-CN": "系统 CPU 利用率",
         "en": "CPU Utilization Per Period"
       },
+      "description": {
+        "zh-CN": "整机 CPU 利用率按周期采样",
+        "en": "Analyzes CPU Utilization Per Period using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -10760,6 +11000,10 @@
       "displayName": {
         "zh-CN": "设备环境状态快照",
         "en": "Device State Snapshot"
+      },
+      "description": {
+        "zh-CN": "采集 trace 期间的设备环境信息（屏幕、电量、温度、CPU、内存、idle 窗口等）",
+        "en": "Analyzes Device State Snapshot using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -10859,6 +11103,10 @@
       "displayName": {
         "zh-CN": "设备状态时间线",
         "en": "Device State Timeline"
+      },
+      "description": {
+        "zh-CN": "追踪设备状态随时间的变化（CPU 频率、GPU 频率、温度、内存压力）",
+        "en": "Analyzes Device State Timeline using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -11052,6 +11300,10 @@
       "displayName": {
         "zh-CN": "DMA-BUF 内存分析",
         "en": "Dmabuf Analysis"
+      },
+      "description": {
+        "zh-CN": "分析图形内存 (DMA-BUF) 使用情况和潜在泄漏",
+        "en": "Analyzes Dmabuf Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -11402,6 +11654,10 @@
         "zh-CN": "Fence 等待分解（acquire/present/release）",
         "en": "Fence Wait Decomposition"
       },
+      "description": {
+        "zh-CN": "按 3 种 fence 分类计时，归因 jank 到具体 fence 类型；内置 5ms/16ms 阈值是启发式，报告高刷新率场景时需结合 vsync_config/present_fence_timing",
+        "en": "Analyzes Fence Wait Decomposition using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -11572,6 +11828,10 @@
         "zh-CN": "文件系统 I/O 分析",
         "en": "Filesystem Module"
       },
+      "description": {
+        "zh-CN": "分析块 I/O、文件操作、数据库访问和 I/O 延迟",
+        "en": "Analyzes Filesystem Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -11665,6 +11925,10 @@
       "displayName": {
         "zh-CN": "Flutter 滑动分析",
         "en": "Flutter Scrolling Analysis"
+      },
+      "description": {
+        "zh-CN": "Flutter 应用帧渲染分析：UI 线程 + Raster 线程 + 帧时序",
+        "en": "Analyzes Flutter Scrolling Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -11833,6 +12097,10 @@
         "zh-CN": "FPSGO 策略分析 (MTK)",
         "en": "Fpsgo Analysis"
       },
+      "description": {
+        "zh-CN": "检测 MTK FPSGO 帧感知调度框架的运行状态（FSTB/FBT/急拉/频率地板）",
+        "en": "Analyzes Fpsgo Analysis using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -11882,6 +12150,10 @@
       "displayName": {
         "zh-CN": "帧阻塞调用分析",
         "en": "Frame Blocking Calls"
+      },
+      "description": {
+        "zh-CN": "识别每个掉帧帧期间的阻塞调用（GC、Binder、锁竞争、IO 等）",
+        "en": "Analyzes Frame Blocking Calls using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -11969,6 +12241,10 @@
         "zh-CN": "Frame Overrun 汇总",
         "en": "Frame Overrun Summary"
       },
+      "description": {
+        "zh-CN": "超 budget 的帧（jank 候选）",
+        "en": "Analyzes Frame Overrun Summary using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -12026,6 +12302,10 @@
       "displayName": {
         "zh-CN": "帧管线方差分析",
         "en": "Frame Pipeline Variance"
+      },
+      "description": {
+        "zh-CN": "检测帧时长抖动与高方差区间",
+        "en": "Analyzes Frame Pipeline Variance using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -12088,6 +12368,10 @@
       "displayName": {
         "zh-CN": "帧生产 Gap 分析",
         "en": "Frame Production Gap"
+      },
+      "description": {
+        "zh-CN": "检测帧间隙（缺帧）并分析 UI Thread/RenderThread 在 gap 期间的活动状态",
+        "en": "Analyzes Frame Production Gap using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -12222,6 +12506,10 @@
         "zh-CN": "每帧 UI 时间",
         "en": "Frame UI Time Breakdown"
       },
+      "description": {
+        "zh-CN": "每帧 UI thread 总耗时",
+        "en": "Analyzes Frame UI Time Breakdown using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -12267,6 +12555,10 @@
       "displayName": {
         "zh-CN": "Futex 等待分布",
         "en": "Futex Wait Distribution"
+      },
+      "description": {
+        "zh-CN": "统计 futex/mutex 锁等待分布与耗时",
+        "en": "Analyzes Futex Wait Distribution using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -12323,6 +12615,10 @@
       "displayName": {
         "zh-CN": "游戏帧率分析",
         "en": "Game FPS Analysis"
+      },
+      "description": {
+        "zh-CN": "针对游戏的帧率分析，支持 30/45/60fps 固定帧率模式",
+        "en": "Analyzes Game FPS Analysis using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -12539,6 +12835,10 @@
         "zh-CN": "游戏主循环卡顿检测",
         "en": "Game Main Loop Jank"
       },
+      "description": {
+        "zh-CN": "检测 Unity/Unreal/Cocos/Godot 主循环、Tick、渲染线程中的超预算帧切片",
+        "en": "Analyzes Game Main Loop Jank using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -12689,6 +12989,10 @@
       "displayName": {
         "zh-CN": "GC 行为分析",
         "en": "GC Analysis"
+      },
+      "description": {
+        "zh-CN": "深入分析垃圾回收行为和影响",
+        "en": "Analyzes GC Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -13117,6 +13421,10 @@
         "zh-CN": "GC 事件查询",
         "en": "GC Events In Range"
       },
+      "description": {
+        "zh-CN": "查询 GC 事件并分类，供后续分析步骤复用",
+        "en": "Analyzes GC Events In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -13190,6 +13498,10 @@
       "displayName": {
         "zh-CN": "独立 GL/Vulkan Swap 卡顿",
         "en": "Gl Standalone Swap Jank"
+      },
+      "description": {
+        "zh-CN": "检测 eglSwapBuffers/vkQueuePresent/queueBuffer 间隔异常，定位 GLSurfaceView/NativeActivity 自渲染掉帧",
+        "en": "Analyzes Gl Standalone Swap Jank using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -13323,6 +13635,10 @@
       "displayName": {
         "zh-CN": "全局 Trace Sanity 检查",
         "en": "Global Trace Sanity Check"
+      },
+      "description": {
+        "zh-CN": "在目标时间窗内快速枚举最长 slice、D 状态、Runnable 等待、Runqueue 压力和 CPU 热点进程",
+        "en": "Analyzes Global Trace Sanity Check using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -13787,6 +14103,10 @@
         "zh-CN": "GPU 分析",
         "en": "GPU Analysis"
       },
+      "description": {
+        "zh-CN": "分析 GPU 频率分布、内存使用和帧渲染关联，识别 GPU 瓶颈",
+        "en": "Analyzes GPU Analysis using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -14142,6 +14462,10 @@
         "zh-CN": "GPUComputeKernel分析",
         "en": "GPU Compute Kernel Analysis"
       },
+      "description": {
+        "zh-CN": "基于 Trace 指标与证据分析GPUComputeKernel分析。",
+        "en": "Vendor-neutral GPU compute kernel timing and producer-provided launch configuration evidence"
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -14380,6 +14704,10 @@
         "zh-CN": "GPU 频率分析",
         "en": "GPU Freq In Range"
       },
+      "description": {
+        "zh-CN": "分析 GPU 频率变化情况",
+        "en": "Analyzes GPU Freq In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -14442,6 +14770,10 @@
         "zh-CN": "GPU 频率分析",
         "en": "GPU Frequency Analysis"
       },
+      "description": {
+        "zh-CN": "分析 GPU 频率变化和 thermal throttling",
+        "en": "Analyzes GPU Frequency Analysis using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -14485,6 +14817,10 @@
       "displayName": {
         "zh-CN": "GPU 指标分析",
         "en": "GPU Metrics"
+      },
+      "description": {
+        "zh-CN": "分析 GPU 频率、利用率和渲染性能",
+        "en": "Analyzes GPU Metrics using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -14761,6 +15097,10 @@
         "zh-CN": "GPU 硬件分析",
         "en": "GPU Module"
       },
+      "description": {
+        "zh-CN": "分析 GPU 渲染、频率和显存使用",
+        "en": "Analyzes GPU Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -14834,6 +15174,10 @@
       "displayName": {
         "zh-CN": "GPU 功耗状态分析",
         "en": "GPU Power State Analysis"
+      },
+      "description": {
+        "zh-CN": "分析 GPU 频率状态切换，识别降频压力与抖动",
+        "en": "Analyzes GPU Power State Analysis using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -14909,6 +15253,10 @@
         "zh-CN": "GPU 渲染分析",
         "en": "GPU Render In Range"
       },
+      "description": {
+        "zh-CN": "分析 GPU 渲染耗时和 Fence 等待",
+        "en": "Analyzes GPU Render In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -14964,6 +15312,10 @@
       "displayName": {
         "zh-CN": "GPUV57AIDiagnostics",
         "en": "GPU v57 AI Diagnostics"
+      },
+      "description": {
+        "zh-CN": "基于 Trace 指标与证据分析GPUV57AIDiagnostics。",
+        "en": "Translate Perfetto v57 GPU Agent Skill SQL into deterministic inventory, occupancy, frequency, ramp, and throttle evidence"
       },
       "type": "composite",
       "steps": {
@@ -15392,6 +15744,10 @@
         "zh-CN": "输入事件列表 (区间)",
         "en": "Input Events In Range"
       },
+      "description": {
+        "zh-CN": "提取区间内已完成 ACK 的输入事件（触摸、按键），包含 dispatch/handling/ACK 和可用的 frame 关联延迟",
+        "en": "Analyzes Input Events In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -15484,6 +15840,10 @@
         "zh-CN": "Input 分析",
         "en": "Input Module"
       },
+      "description": {
+        "zh-CN": "分析触摸延迟、输入派发和点击响应",
+        "en": "Analyzes Input Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -15553,6 +15913,10 @@
       "displayName": {
         "zh-CN": "逐帧 Input-to-Display 延迟",
         "en": "Input To Frame Latency"
+      },
+      "description": {
+        "zh-CN": "基于 android_input_events 测量每个 MotionEvent 到对应帧 present 的延迟，用于跟手度分析",
+        "en": "Analyzes Input To Frame Latency using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -15822,6 +16186,10 @@
       "displayName": {
         "zh-CN": "IO 压力分析",
         "en": "I/O Pressure"
+      },
+      "description": {
+        "zh-CN": "从系统层面分析 IO 压力和瓶颈",
+        "en": "Analyzes I/O Pressure using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -16199,6 +16567,10 @@
       "displayName": {
         "zh-CN": "IRQ 中断分析",
         "en": "Irq Analysis"
+      },
+      "description": {
+        "zh-CN": "分析硬件中断和软中断对系统性能的影响",
+        "en": "Analyzes Irq Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -16651,6 +17023,10 @@
       "displayName": {
         "zh-CN": "掉帧详情分析",
         "en": "Jank Frame Detail"
+      },
+      "description": {
+        "zh-CN": "分析特定掉帧的详细原因",
+        "en": "Analyzes Jank Frame Detail using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -17314,6 +17690,10 @@
         "zh-CN": "Launcher 分析",
         "en": "Launcher Module"
       },
+      "description": {
+        "zh-CN": "分析桌面启动器性能、应用启动和小部件更新",
+        "en": "Analyzes Launcher Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -17424,6 +17804,10 @@
         "zh-CN": "IRQ 中断汇总",
         "en": "Linux Irq Summary"
       },
+      "description": {
+        "zh-CN": "硬/软中断次数与耗时统计",
+        "en": "Analyzes Linux Irq Summary using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -17481,6 +17865,10 @@
       "displayName": {
         "zh-CN": "LinuxPerfCounterHotspots",
         "en": "Linux Perf Counter Hotspots"
+      },
+      "description": {
+        "zh-CN": "基于 linux.perf.counters stdlib 汇总 perf sample counter 热点；无 PMU 数据时返回空",
+        "en": "Analyzes Linux Perf Counter Hotspots using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -17552,6 +17940,10 @@
         "zh-CN": "Linux 进程 RSS/Swap 时间线",
         "en": "Linux Process RSS Swap Timeline"
       },
+      "description": {
+        "zh-CN": "基于 linux.memory.process stdlib 汇总进程 RSS、anon RSS 和 swap 峰值",
+        "en": "Analyzes Linux Process RSS Swap Timeline using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -17615,6 +18007,10 @@
       "displayName": {
         "zh-CN": "Linux Runqueue 深度时间线",
         "en": "Linux Runqueue Depth Timeline"
+      },
+      "description": {
+        "zh-CN": "基于 sched.thread_level_parallelism stdlib 输出 runnable thread count 时间线和高压区间",
+        "en": "Analyzes Linux Runqueue Depth Timeline using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -17701,6 +18097,10 @@
         "zh-CN": "Linux 调度延迟分布",
         "en": "Linux Sched Latency Distribution"
       },
+      "description": {
+        "zh-CN": "基于 sched.latency stdlib 汇总 Runnable→Running 调度等待分布",
+        "en": "Analyzes Linux Sched Latency Distribution using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -17783,6 +18183,10 @@
         "zh-CN": "LinuxSystemdJournald分析",
         "en": "Linux systemd-journald Analysis"
       },
+      "description": {
+        "zh-CN": "基于 Trace 指标与证据分析LinuxSystemdJournald分析。",
+        "en": "Summarize v57 linux.systemd_journald log entries, prioritizing warning and error evidence"
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -17862,6 +18266,10 @@
       "displayName": {
         "zh-CN": "LMK 事件分析",
         "en": "LMK Analysis"
+      },
+      "description": {
+        "zh-CN": "分析 Low Memory Killer 事件",
+        "en": "Analyzes LMK Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -18204,6 +18612,10 @@
         "zh-CN": "LMK 杀进程归因",
         "en": "LMK Kill Attribution"
       },
+      "description": {
+        "zh-CN": "Low Memory Killer 杀进程事件列表",
+        "en": "Analyzes LMK Kill Attribution using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -18262,6 +18674,10 @@
         "zh-CN": "锁/Binder 等待分析",
         "en": "Lock Binder Wait"
       },
+      "description": {
+        "zh-CN": "下钻 reason_code=lock_binder_wait 的帧窗口，检查主线程睡眠、唤醒链、锁竞争和同步 Binder 阻塞",
+        "en": "Analyzes Lock Binder Wait using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -18310,6 +18726,10 @@
       "displayName": {
         "zh-CN": "锁竞争分析",
         "en": "Lock Contention Analysis"
+      },
+      "description": {
+        "zh-CN": "分析应用中的线程锁竞争情况，识别热点锁、锁链和持锁线程阻塞原因",
+        "en": "Analyzes Lock Contention Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -18835,6 +19255,10 @@
         "zh-CN": "锁竞争分析 (区间)",
         "en": "Lock Contention In Range"
       },
+      "description": {
+        "zh-CN": "分析指定时间范围内的锁竞争情况",
+        "en": "Analyzes Lock Contention In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -19119,6 +19543,10 @@
         "zh-CN": "锁竞争分析",
         "en": "Lock Contention Module"
       },
+      "description": {
+        "zh-CN": "分析 Mutex/Monitor 竞争、死锁和优先级反转",
+        "en": "Analyzes Lock Contention Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -19221,6 +19649,10 @@
         "zh-CN": "Logcat 异常信号检测",
         "en": "Logcat Analysis"
       },
+      "description": {
+        "zh-CN": "检测 trace 期间的 Logcat 中 ANR/GC/Binder/StrictMode 等关键系统警告",
+        "en": "Analyzes Logcat Analysis using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -19283,6 +19715,10 @@
         "zh-CN": "主线程文件 IO (区间)",
         "en": "Main Thread File I/O In Range"
       },
+      "description": {
+        "zh-CN": "统计区间内主线程文件/SQLite 命名切片耗时；命名切片是线索，不单独证明底层存储阻塞",
+        "en": "Analyzes Main Thread File I/O In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -19344,6 +19780,10 @@
       "displayName": {
         "zh-CN": "主线程 Handler 回调切片",
         "en": "Main Thread Handler Callback Slices"
+      },
+      "description": {
+        "zh-CN": "统计 trace 中实际观测到的主线程 Handler 回调执行切片；不代表消息排队等待或根因",
+        "en": "Analyzes Main Thread Handler Callback Slices using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -19445,6 +19885,10 @@
         "zh-CN": "主线程调度延迟 (区间)",
         "en": "Main Thread Sched Latency In Range"
       },
+      "description": {
+        "zh-CN": "统计主线程 Runnable 等待时间分布",
+        "en": "Analyzes Main Thread Sched Latency In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -19512,6 +19956,10 @@
       "displayName": {
         "zh-CN": "主线程切片热点 (区间)",
         "en": "Main Thread Slices In Range"
+      },
+      "description": {
+        "zh-CN": "统计区间内主线程切片耗时分布",
+        "en": "Analyzes Main Thread Slices In Range using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -19587,6 +20035,10 @@
         "zh-CN": "主线程状态分布 (区间)",
         "en": "Main Thread States In Range"
       },
+      "description": {
+        "zh-CN": "统计区间内主线程状态、阻塞函数与占比",
+        "en": "Analyzes Main Thread States In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -19661,6 +20113,10 @@
         "zh-CN": "Mali GPU 电源状态",
         "en": "Mali GPU Power State"
       },
+      "description": {
+        "zh-CN": "Mali GPU 电源状态变化序列",
+        "en": "Analyzes Mali GPU Power State using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -19712,6 +20168,10 @@
       "displayName": {
         "zh-CN": "媒体 Codec 活动分析",
         "en": "Media Codec Activity"
+      },
+      "description": {
+        "zh-CN": "检测 MediaCodec/Codec2/OMX/CCodec 相关线程和 buffer API 切片，定位慢解码、queue/dequeue 和 releaseOutputBuffer 问题",
+        "en": "Analyzes Media Codec Activity using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -19839,6 +20299,10 @@
       "displayName": {
         "zh-CN": "内存性能分析",
         "en": "Memory Analysis"
+      },
+      "description": {
+        "zh-CN": "分析应用内存使用、GC 行为和潜在内存问题",
+        "en": "Analyzes Memory Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -20351,6 +20815,10 @@
         "zh-CN": "内存增长检测",
         "en": "Memory Growth Detector"
       },
+      "description": {
+        "zh-CN": "基于 linux.memory.process stdlib 按 UPID 比较 RSS/Swap 趋势、跳跃和峰均异常",
+        "en": "Analyzes Memory Growth Detector using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -20487,6 +20955,10 @@
         "zh-CN": "内存分析",
         "en": "Memory Module"
       },
+      "description": {
+        "zh-CN": "分析内存使用、LMK 事件、dmabuf 和内存压力",
+        "en": "Analyzes Memory Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -20597,6 +21069,10 @@
         "zh-CN": "内存PressureInRange",
         "en": "memory_pressure_in_range"
       },
+      "description": {
+        "zh-CN": "基于 Trace 指标与证据分析内存PressureInRange。",
+        "en": "Analyze memory pressure indicators during a specific time range."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -20674,7 +21150,11 @@
               }
             }
           },
-          "synthesizeLabels": {}
+          "synthesizeLabels": {},
+          "description": {
+            "zh-CN": "基于 Trace 指标与证据分析内存Pressure分析。",
+            "en": "Analyze memory pressure indicators in the given time range"
+          }
         },
         "root": {
           "title": {
@@ -20690,6 +21170,10 @@
       "displayName": {
         "zh-CN": "进程 RSS 内存峰值",
         "en": "Memory RSS High Watermark"
+      },
+      "description": {
+        "zh-CN": "每进程 RSS 内存最高水位（高内存 = 风险源头）",
+        "en": "Analyzes Memory RSS High Watermark using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -20736,6 +21220,10 @@
       "displayName": {
         "zh-CN": "Modem Rail 与网络相关性",
         "en": "Modem Network Correlation Summary"
+      },
+      "description": {
+        "zh-CN": "将 modem/cellular/radio rail 能耗与 android.network_packets 按包名/UID/socket_tag 相关联",
+        "en": "Analyzes Modem Network Correlation Summary using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -20819,6 +21307,10 @@
         "zh-CN": "MultiTraceResult对比",
         "en": "Multi Trace Result Comparison"
       },
+      "description": {
+        "zh-CN": "基于 Trace 指标与证据分析MultiTraceResult对比。",
+        "en": "Builds a comparison matrix from persisted analysis result snapshots, not live raw trace-pair panes."
+      },
       "type": "comparison",
       "steps": {
         "__synthesize_summary__": {
@@ -20843,6 +21335,10 @@
       "displayName": {
         "zh-CN": "Native Heap 分解",
         "en": "Native Heap Breakdown"
+      },
+      "description": {
+        "zh-CN": "基于 heapprofd summary tree 输出 native heap 未释放和累计分配热点",
+        "en": "Analyzes Native Heap Breakdown using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -20950,6 +21446,10 @@
       "displayName": {
         "zh-CN": "界面跳转分析",
         "en": "Navigation Analysis"
+      },
+      "description": {
+        "zh-CN": "分析 Activity/Fragment 跳转性能、生命周期耗时、主线程阻塞",
+        "en": "Analyzes Navigation Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -21454,6 +21954,10 @@
       "displayName": {
         "zh-CN": "网络活动分析",
         "en": "Network Analysis"
+      },
+      "description": {
+        "zh-CN": "分析网络包收发活动、协议分布和功耗影响",
+        "en": "Analyzes Network Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -22036,6 +22540,10 @@
         "zh-CN": "OOM Score 时间线",
         "en": "OOM Adjuster Score Timeline"
       },
+      "description": {
+        "zh-CN": "进程 oom_score_adj 变化区间",
+        "en": "Analyzes OOM Adjuster Score Timeline using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -22100,6 +22608,10 @@
         "zh-CN": "缺页异常分析",
         "en": "Page Fault In Range"
       },
+      "description": {
+        "zh-CN": "分析 Page Fault 和内存回收对性能的影响",
+        "en": "Analyzes Page Fault In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -22155,6 +22667,10 @@
       "displayName": {
         "zh-CN": "Pipeline 4 轴辅助证据评分",
         "en": "Pipeline 4feature Scoring"
+      },
+      "description": {
+        "zh-CN": "归一化 Producer/Layer/BufferQueue/节奏证据；不能脱离 S02-S14 最小证据集单独定型",
+        "en": "Analyzes Pipeline 4feature Scoring using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -22314,6 +22830,10 @@
         "zh-CN": "管线AndroidPipFreeform",
         "en": "Android PIP/Freeform"
       },
+      "description": {
+        "zh-CN": "画中画和自由窗口模式，特殊窗口管理与合成",
+        "en": "Analyzes Pipeline Android Pip Freeform using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22338,6 +22858,10 @@
       "displayName": {
         "zh-CN": "Android View 混合渲染",
         "en": "Pipeline Android View Mixed"
+      },
+      "description": {
+        "zh-CN": "View + SurfaceView 混合渲染，常见于视频播放器、内嵌游戏",
+        "en": "Analyzes Pipeline Android View Mixed using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -22364,6 +22888,10 @@
         "zh-CN": "Android View 多窗口",
         "en": "Pipeline Android View Multi Window"
       },
+      "description": {
+        "zh-CN": "同进程多窗口渲染 (Dialog/PopupWindow)，RenderThread 串行化",
+        "en": "Analyzes Pipeline Android View Multi Window using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22388,6 +22916,10 @@
       "displayName": {
         "zh-CN": "Android View 软件渲染",
         "en": "Pipeline Android View Software"
+      },
+      "description": {
+        "zh-CN": "CPU Skia 软件渲染，无 RenderThread，用于低端设备或特殊场景",
+        "en": "Analyzes Pipeline Android View Software using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -22414,6 +22946,10 @@
         "zh-CN": "标准 Android View (BLAST)",
         "en": "Pipeline Android View Standard Blast"
       },
+      "description": {
+        "zh-CN": "Android 11+/12+ 常见的 HWUI + 现代 Transaction/BLAST 提交流程",
+        "en": "Analyzes Pipeline Android View Standard Blast using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22438,6 +22974,10 @@
       "displayName": {
         "zh-CN": "标准 Android View (Legacy)",
         "en": "Pipeline Android View Standard Legacy"
+      },
+      "description": {
+        "zh-CN": "Android 12 之前的 HWUI + Legacy BufferQueue 渲染管线",
+        "en": "Analyzes Pipeline Android View Standard Legacy using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -22464,6 +23004,10 @@
         "zh-CN": "管线AngleGLESVulkan",
         "en": "ANGLE (GLES over Vulkan)"
       },
+      "description": {
+        "zh-CN": "通过 ANGLE 将 OpenGL ES 翻译为 Vulkan",
+        "en": "Analyzes Pipeline Angle GLES Vulkan using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22488,6 +23032,10 @@
       "displayName": {
         "zh-CN": "相机管线",
         "en": "Pipeline Camera Pipeline"
+      },
+      "description": {
+        "zh-CN": "Camera2/HAL3 多流相机渲染",
+        "en": "Analyzes Pipeline Camera Pipeline using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -22514,6 +23062,10 @@
         "zh-CN": "管线ChromeBrowserViz",
         "en": "Chrome Browser (Viz)"
       },
+      "description": {
+        "zh-CN": "Chrome 浏览器 Viz 合成器管线，多进程架构 (Browser/Renderer/GPU)",
+        "en": "Analyzes Pipeline Chrome Browser Viz using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22538,6 +23090,10 @@
       "displayName": {
         "zh-CN": "管线ComposeStandard",
         "en": "Jetpack Compose (Standard)"
+      },
+      "description": {
+        "zh-CN": "基于 Trace 指标与证据分析管线ComposeStandard。",
+        "en": "Jetpack Compose + HWUI RenderThread, Recomposition driven"
       },
       "type": "pipeline_definition",
       "steps": {
@@ -22564,6 +23120,10 @@
         "zh-CN": "管线FlutterSurfaceviewImpeller",
         "en": "Flutter SurfaceView (Impeller)"
       },
+      "description": {
+        "zh-CN": "Flutter + Impeller，引擎常见于 SurfaceView render mode",
+        "en": "Analyzes Pipeline Flutter Surfaceview Impeller using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22588,6 +23148,10 @@
       "displayName": {
         "zh-CN": "管线FlutterSurfaceviewSkia",
         "en": "Flutter SurfaceView (Skia)"
+      },
+      "description": {
+        "zh-CN": "Flutter + Skia 引擎，运行时 Shader 编译 (Runtime Shader Compilation)",
+        "en": "Analyzes Pipeline Flutter Surfaceview Skia using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -22614,6 +23178,10 @@
         "zh-CN": "管线FlutterTextureview",
         "en": "Flutter TextureView"
       },
+      "description": {
+        "zh-CN": "Flutter TextureView render mode，宿主侧纹理合成路径",
+        "en": "Analyzes Pipeline Flutter Textureview using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22638,6 +23206,10 @@
       "displayName": {
         "zh-CN": "游戏引擎",
         "en": "Pipeline Game Engine"
+      },
+      "description": {
+        "zh-CN": "Unity/Unreal/Godot 等游戏引擎渲染",
+        "en": "Analyzes Pipeline Game Engine using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -22664,6 +23236,10 @@
         "zh-CN": "管线HardwareBufferRenderer",
         "en": "HardwareBufferRenderer"
       },
+      "description": {
+        "zh-CN": "Android 14+ HBR API，直接 Buffer 渲染",
+        "en": "Analyzes Pipeline Hardware Buffer Renderer using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22689,6 +23265,10 @@
         "zh-CN": "ImageReader 渲染管线",
         "en": "Pipeline Imagereader Pipeline"
       },
+      "description": {
+        "zh-CN": "通过 ImageReader API 获取渲染帧的管线，常见于 ML 推理、屏幕录制、自定义相机处理和部分 Chrome 渲染模式",
+        "en": "Analyzes Pipeline Imagereader Pipeline using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22713,6 +23293,10 @@
       "displayName": {
         "zh-CN": "管线关键 Slice 时间线",
         "en": "Pipeline Key Slices Overlay"
+      },
+      "description": {
+        "zh-CN": "查询管线关键 Slice 的实际 ts/dur 数据用于时间线 overlay",
+        "en": "Analyzes Pipeline Key Slices Overlay using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -22808,6 +23392,10 @@
         "zh-CN": "管线OpenglEs",
         "en": "OpenGL ES"
       },
+      "description": {
+        "zh-CN": "直接 OpenGL ES / EGL 渲染，用于游戏和自定义渲染引擎",
+        "en": "Analyzes Pipeline Opengl Es using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22832,6 +23420,10 @@
       "displayName": {
         "zh-CN": "管线RnNewArch",
         "en": "React Native New Arch (Fabric + JSI)"
+      },
+      "description": {
+        "zh-CN": "RN 新架构：JSI 直接 C++ 调用 + Fabric C++ Shadow tree + TurboModules + 宿主 HWUI",
+        "en": "Analyzes Pipeline Rn New Arch using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -22858,6 +23450,10 @@
         "zh-CN": "管线RnOldArch",
         "en": "React Native Old Arch (Paper + Bridge)"
       },
+      "description": {
+        "zh-CN": "RN 老架构：JavaScriptCore/Hermes + Bridge JSON 序列化 + Shadow tree + Yoga + 宿主 HWUI",
+        "en": "Analyzes Pipeline Rn Old Arch using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22882,6 +23478,10 @@
       "displayName": {
         "zh-CN": "管线RnSkia",
         "en": "React Native Skia (@shopify/react-native-skia)"
+      },
+      "description": {
+        "zh-CN": "RN + Skia 自绘渲染，绕过 HWUI 直接用 Skia 在 GPU 上画",
+        "en": "Analyzes Pipeline Rn Skia using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -22908,6 +23508,10 @@
         "zh-CN": "软件合成回退",
         "en": "Pipeline Software Compositing"
       },
+      "description": {
+        "zh-CN": "SurfaceFlinger CPU 软件合成回退，GPU 合成不可用时的降级路径",
+        "en": "Analyzes Pipeline Software Compositing using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22932,6 +23536,10 @@
       "displayName": {
         "zh-CN": "管线SurfaceControlAPI",
         "en": "SurfaceControl API"
+      },
+      "description": {
+        "zh-CN": "NDK SurfaceControl 直接事务提交，低级别表面控制",
+        "en": "Analyzes Pipeline Surface Control API using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -22958,6 +23566,10 @@
         "zh-CN": "管线SurfaceviewBlast",
         "en": "SurfaceView (BLAST)"
       },
+      "description": {
+        "zh-CN": "独立 SurfaceView + BLAST 同步，用于自定义 GL 渲染、媒体播放",
+        "en": "Analyzes Pipeline Surfaceview Blast using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -22982,6 +23594,10 @@
       "displayName": {
         "zh-CN": "TextureView 标准",
         "en": "Pipeline Textureview Standard"
+      },
+      "description": {
+        "zh-CN": "SurfaceTexture 纹理采样/合成模式，与 View 层次集成",
+        "en": "Analyzes Pipeline Textureview Standard using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -23008,6 +23624,10 @@
         "zh-CN": "可变刷新率 (VRR)",
         "en": "Pipeline Variable Refresh Rate"
       },
+      "description": {
+        "zh-CN": "VRR/ARR + FrameTimeline 动态刷新率",
+        "en": "Analyzes Pipeline Variable Refresh Rate using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -23032,6 +23652,10 @@
       "displayName": {
         "zh-CN": "视频 Overlay (HWC)",
         "en": "Pipeline Video Overlay HWC"
+      },
+      "description": {
+        "zh-CN": "HWC 视频层硬件加速叠加",
+        "en": "Analyzes Pipeline Video Overlay HWC using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -23058,6 +23682,10 @@
         "zh-CN": "管线VulkanNative",
         "en": "Vulkan Native"
       },
+      "description": {
+        "zh-CN": "原生 Vulkan 渲染，现代高性能图形 API",
+        "en": "Analyzes Pipeline Vulkan Native using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -23082,6 +23710,10 @@
       "displayName": {
         "zh-CN": "管线WebviewGlFunctor",
         "en": "WebView GL Functor"
+      },
+      "description": {
+        "zh-CN": "传统 WebView 渲染，App RenderThread 同步等待",
+        "en": "Analyzes Pipeline Webview Gl Functor using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -23108,6 +23740,10 @@
         "zh-CN": "管线WebviewSurfaceControl",
         "en": "WebView Surface Control"
       },
+      "description": {
+        "zh-CN": "现代 WebView + Viz/OOP-R，独立合成",
+        "en": "Analyzes Pipeline Webview Surface Control using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -23132,6 +23768,10 @@
       "displayName": {
         "zh-CN": "管线WebviewSurfaceviewWrapper",
         "en": "WebView SurfaceView Wrapper"
+      },
+      "description": {
+        "zh-CN": "WebView 全屏视频包装模式",
+        "en": "Analyzes Pipeline Webview Surfaceview Wrapper using trace metrics and supporting evidence."
       },
       "type": "pipeline_definition",
       "steps": {
@@ -23158,6 +23798,10 @@
         "zh-CN": "WebView TextureView (定制内核)",
         "en": "Pipeline Webview Textureview Custom"
       },
+      "description": {
+        "zh-CN": "X5/UC 等定制 WebView 内核，使用 TextureView",
+        "en": "Analyzes Pipeline Webview Textureview Custom using trace metrics and supporting evidence."
+      },
       "type": "pipeline_definition",
       "steps": {
         "__synthesize_summary__": {
@@ -23182,6 +23826,10 @@
       "displayName": {
         "zh-CN": "功耗总览分析",
         "en": "Power Consumption Overview"
+      },
+      "description": {
+        "zh-CN": "组合 Wattson rail/thread、battery、wakelock、DVFS、GPU work period 等证据，输出功耗问题总览",
+        "en": "Analyzes Power Consumption Overview using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -23312,6 +23960,10 @@
         "zh-CN": "电源管理分析",
         "en": "Power Module"
       },
+      "description": {
+        "zh-CN": "分析 Wakelock、CPU 空闲状态和电源策略",
+        "en": "Analyzes Power Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -23414,6 +24066,10 @@
         "zh-CN": "Power Rails 实测能耗分解",
         "en": "Power Rails Energy Breakdown"
       },
+      "description": {
+        "zh-CN": "基于 android.power_rails 统计窗口内 rail 能耗、平均功率和数据来源等级",
+        "en": "Analyzes Power Rails Energy Breakdown using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -23496,6 +24152,10 @@
         "zh-CN": "Present Fence 时序分析",
         "en": "Present Fence Timing"
       },
+      "description": {
+        "zh-CN": "分析 Present Fence 的时序，检测实际显示延迟",
+        "en": "Analyzes Present Fence Timing using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -23571,6 +24231,10 @@
       "displayName": {
         "zh-CN": "进程身份交叉解析",
         "en": "Process Identity Resolver"
+      },
+      "description": {
+        "zh-CN": "交叉 process、android_process_metadata、cmdline、线程名、FrameTimeline layer、OOM adj 和 battery_stats.top，确认下游 Skill 应使用的真实 process.name",
+        "en": "Analyzes Process Identity Resolver using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -23754,6 +24418,10 @@
         "zh-CN": "进程 Slice CPU 热点",
         "en": "Process Slice CPU Hotspots"
       },
+      "description": {
+        "zh-CN": "按进程聚合 named slice 的实际 Running CPU 时间",
+        "en": "Analyzes Process Slice CPU Hotspots using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -23858,6 +24526,10 @@
         "zh-CN": "渲染流水线时延",
         "en": "Render Pipeline Latency"
       },
+      "description": {
+        "zh-CN": "分解帧渲染全链路各阶段耗时",
+        "en": "Analyzes Render Pipeline Latency using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -23901,6 +24573,10 @@
       "displayName": {
         "zh-CN": "渲染线程 Slice 分析",
         "en": "Render Thread Slices"
+      },
+      "description": {
+        "zh-CN": "分析渲染线程的时间片分布",
+        "en": "Analyzes Render Thread Slices using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -23965,6 +24641,10 @@
       "displayName": {
         "zh-CN": "渲染管线检测 (YAML 驱动)",
         "en": "Rendering Pipeline Detection"
+      },
+      "description": {
+        "zh-CN": "从 catalog 与 pipeline YAML 生成子路径评分、主出图类型、候选与正交特性",
+        "en": "Analyzes Rendering Pipeline Detection using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -24118,6 +24798,10 @@
         "zh-CN": "RN Bridge 到帧卡顿关联",
         "en": "Rn Bridge To Frame Jank"
       },
+      "description": {
+        "zh-CN": "关联 React Native old-arch Bridge/JS/UIManager 工作与掉帧帧窗口",
+        "en": "Analyzes Rn Bridge To Frame Jank using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -24218,6 +24902,10 @@
         "zh-CN": "RN Fabric/JSI 渲染卡顿",
         "en": "Rn Fabric Render Jank"
       },
+      "description": {
+        "zh-CN": "关联 React Native New Architecture 的 Fabric/JSI/Mounting 同步工作与掉帧帧窗口",
+        "en": "Analyzes Rn Fabric Render Jank using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -24317,6 +25005,10 @@
       "displayName": {
         "zh-CN": "场景还原",
         "en": "Scene Reconstruction"
+      },
+      "description": {
+        "zh-CN": "通过用户输入和屏幕状态还原用户操作场景",
+        "en": "Analyzes Scene Reconstruction using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -25316,6 +26008,10 @@
         "zh-CN": "调度延迟分析",
         "en": "Sched Latency In Range"
       },
+      "description": {
+        "zh-CN": "分析线程调度等待时间分布，检测 CPU 争抢",
+        "en": "Analyzes Sched Latency In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -25377,6 +26073,10 @@
       "displayName": {
         "zh-CN": "内核调度分析",
         "en": "Scheduler Module"
+      },
+      "description": {
+        "zh-CN": "分析线程调度延迟、CPU 利用率和大小核分配",
+        "en": "Analyzes Scheduler Module using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -25442,6 +26142,10 @@
       "displayName": {
         "zh-CN": "调度延迟分析",
         "en": "Scheduling Analysis"
+      },
+      "description": {
+        "zh-CN": "分析线程调度延迟 (Runnability)",
+        "en": "Analyzes Scheduling Analysis using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -25517,6 +26221,10 @@
         "zh-CN": "熄屏后台 CPU 归因",
         "en": "Screen Off Background CPU Attribution"
       },
+      "description": {
+        "zh-CN": "在 screen-off / doze 窗口内按进程/线程聚合 CPU runtime，定位后台偷跑",
+        "en": "Analyzes Screen Off Background CPU Attribution using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -25587,6 +26295,10 @@
         "zh-CN": "滚动响应延迟 (区间)",
         "en": "Scroll Response Latency"
       },
+      "description": {
+        "zh-CN": "基于 android_input_events 测量滚动手势从 MOVE dispatch 到首帧开始的候选响应延迟",
+        "en": "Analyzes Scroll Response Latency using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -25642,6 +26354,10 @@
       "displayName": {
         "zh-CN": "滑动会话分析",
         "en": "Scroll Session Analysis"
+      },
+      "description": {
+        "zh-CN": "分析滑动操作的流畅度",
+        "en": "Analyzes Scroll Session Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -25985,6 +26701,10 @@
       "displayName": {
         "zh-CN": "滑动性能分析",
         "en": "Scrolling Analysis"
+      },
+      "description": {
+        "zh-CN": "基于 Perfetto FrameTimeline 与 android.input 的滑动分析，分层展示：概览 → 区间 → 帧详情",
+        "en": "Analyzes Scrolling Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -27041,6 +27761,10 @@
         "zh-CN": "选区 CPU 调度与频率摘要",
         "en": "Selection Range CPU Sched Summary"
       },
+      "description": {
+        "zh-CN": "面向用户选区/可见窗口的快速 CPU 摆核、Running 排名、四象限和频率分布分析",
+        "en": "Analyzes Selection Range CPU Sched Summary using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -27284,6 +28008,10 @@
         "zh-CN": "SF 合成分析",
         "en": "Sf Composition In Range"
       },
+      "description": {
+        "zh-CN": "分析 SurfaceFlinger 合成延迟",
+        "en": "Analyzes Sf Composition In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -27339,6 +28067,10 @@
       "displayName": {
         "zh-CN": "SurfaceFlinger 帧消费分析",
         "en": "Sf Frame Consumption"
+      },
+      "description": {
+        "zh-CN": "分析 SurfaceFlinger 消费帧的情况",
+        "en": "Analyzes Sf Frame Consumption using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -27397,6 +28129,10 @@
       "displayName": {
         "zh-CN": "SF 图层数统计",
         "en": "Sf Layer Count In Range"
+      },
+      "description": {
+        "zh-CN": "统计时间范围内 SurfaceFlinger 活跃图层数量，辅助 SF 合成性能诊断",
+        "en": "Analyzes Sf Layer Count In Range using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -27500,6 +28236,10 @@
       "displayName": {
         "zh-CN": "应用启动分析",
         "en": "Startup Analysis"
+      },
+      "description": {
+        "zh-CN": "全方位的应用启动性能分析",
+        "en": "Analyzes Startup Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -28341,6 +29081,10 @@
         "zh-CN": "启动 Binder 总览 (区间)",
         "en": "Startup Binder In Range"
       },
+      "description": {
+        "zh-CN": "统计启动阶段 Binder 调用分布",
+        "en": "Analyzes Startup Binder In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -28415,6 +29159,10 @@
         "zh-CN": "Binder 线程池分析",
         "en": "Startup Binder Pool Analysis"
       },
+      "description": {
+        "zh-CN": "分析启动期间 Binder 线程池利用率和饱和度",
+        "en": "Analyzes Startup Binder Pool Analysis using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -28458,6 +29206,10 @@
       "displayName": {
         "zh-CN": "启动归因分解 (区间)",
         "en": "Startup Breakdown In Range"
+      },
+      "description": {
+        "zh-CN": "统计启动阶段各归因原因耗时占比",
+        "en": "Analyzes Startup Breakdown In Range using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -28527,6 +29279,10 @@
         "zh-CN": "启动类加载分析 (区间)",
         "en": "Startup Class Loading In Range"
       },
+      "description": {
+        "zh-CN": "统计启动阶段类加载切片耗时",
+        "en": "Analyzes Startup Class Loading In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -28588,6 +29344,10 @@
       "displayName": {
         "zh-CN": "启动摆核时序分析",
         "en": "Startup CPU Placement Timeline"
+      },
+      "description": {
+        "zh-CN": "按时间桶分析主线程的核类型变化，检测启动初期被困小核",
+        "en": "Analyzes Startup CPU Placement Timeline using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -28656,6 +29416,10 @@
       "displayName": {
         "zh-CN": "启动关键任务发现",
         "en": "Startup Critical Tasks"
+      },
+      "description": {
+        "zh-CN": "自动识别启动区间内所有活跃线程，按 CPU 时间排序，提供每线程四象限 + 摆核分析",
+        "en": "Analyzes Startup Critical Tasks using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -28766,6 +29530,10 @@
       "displayName": {
         "zh-CN": "启动详情分析",
         "en": "Startup Detail"
+      },
+      "description": {
+        "zh-CN": "深入分析单个启动过程的性能瓶颈",
+        "en": "Analyzes Startup Detail using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -29750,6 +30518,10 @@
         "zh-CN": "启动事件列表 (区间)",
         "en": "Startup Events In Range"
       },
+      "description": {
+        "zh-CN": "查询启动事件及 TTID/TTFD 指标",
+        "en": "Analyzes Startup Events In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -29854,6 +30626,10 @@
         "zh-CN": "启动 CPU 频率爬升",
         "en": "Startup Freq Rampup"
       },
+      "description": {
+        "zh-CN": "分析冷启动初期 CPU 频率爬升速度，检测升频延迟",
+        "en": "Analyzes Startup Freq Rampup using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -29915,6 +30691,10 @@
       "displayName": {
         "zh-CN": "启动 GC 分析 (区间)",
         "en": "Startup GC In Range"
+      },
+      "description": {
+        "zh-CN": "统计启动阶段 GC 相关切片及主线程占比",
+        "en": "Analyzes Startup GC In Range using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -29983,6 +30763,10 @@
       "displayName": {
         "zh-CN": "热点 Slice 线程状态分布",
         "en": "Startup Hot Slice States"
+      },
+      "description": {
+        "zh-CN": "分析启动区间内 Top N 热点 Slice 各自的线程状态分布（Running/S/D/R）及 blocked_functions",
+        "en": "Analyzes Startup Hot Slice States using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -30064,6 +30848,10 @@
         "zh-CN": "启动 JIT 影响分析",
         "en": "Startup Jit Analysis"
       },
+      "description": {
+        "zh-CN": "分析 JIT 编译线程对启动速度的影响（CPU 竞争、Code Cache GC、Baseline Profile 缺失信号）",
+        "en": "Analyzes Startup Jit Analysis using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -30107,6 +30895,10 @@
       "displayName": {
         "zh-CN": "启动主线程 Binder 阻塞 (区间)",
         "en": "Startup Main Thread Binder Blocking In Range"
+      },
+      "description": {
+        "zh-CN": "分析启动阶段主线程同步 Binder 阻塞明细",
+        "en": "Analyzes Startup Main Thread Binder Blocking In Range using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -30175,6 +30967,10 @@
       "displayName": {
         "zh-CN": "启动主线程文件 IO (区间)",
         "en": "Startup Main Thread File I/O In Range"
+      },
+      "description": {
+        "zh-CN": "统计启动阶段主线程文件 IO 相关切片",
+        "en": "Analyzes Startup Main Thread File I/O In Range using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -30249,6 +31045,10 @@
       "displayName": {
         "zh-CN": "启动主线程切片热点 (区间)",
         "en": "Startup Main Thread Slices In Range"
+      },
+      "description": {
+        "zh-CN": "统计启动阶段主线程切片热点",
+        "en": "Analyzes Startup Main Thread Slices In Range using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -30336,6 +31136,10 @@
         "zh-CN": "启动主线程状态分布 (区间)",
         "en": "Startup Main Thread States In Range"
       },
+      "description": {
+        "zh-CN": "统计启动阶段主线程 Running/Runnable/Blocked 状态占比",
+        "en": "Analyzes Startup Main Thread States In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -30410,6 +31214,10 @@
         "zh-CN": "启动主线程同步 Binder (区间)",
         "en": "Startup Main Thread Sync Binder In Range"
       },
+      "description": {
+        "zh-CN": "统计启动阶段主线程同步 Binder 调用耗时",
+        "en": "Analyzes Startup Main Thread Sync Binder In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -30478,6 +31286,10 @@
         "zh-CN": "启动调度延迟 (区间)",
         "en": "Startup Sched Latency In Range"
       },
+      "description": {
+        "zh-CN": "统计启动阶段主线程 Runnable 等待时延",
+        "en": "Analyzes Startup Sched Latency In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -30539,6 +31351,10 @@
       "displayName": {
         "zh-CN": "启动慢原因（官方分类）",
         "en": "Startup Slow Reasons"
+      },
+      "description": {
+        "zh-CN": "检测 20+ 种已知的启动慢原因，交叉验证自有分析",
+        "en": "Analyzes Startup Slow Reasons using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -30667,6 +31483,10 @@
         "zh-CN": "启动线程阻塞关系图",
         "en": "Startup Thread Blocking Graph"
       },
+      "description": {
+        "zh-CN": "分析启动期间线程间的 block/wakeup 关系，定位阻塞根因",
+        "en": "Analyzes Startup Thread Blocking Graph using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -30758,6 +31578,10 @@
       "displayName": {
         "zh-CN": "连续状态时间线",
         "en": "State Timeline"
+      },
+      "description": {
+        "zh-CN": "从 Trace 起始到结束，按泳道展示设备/用户/应用/系统的连续状态",
+        "en": "Analyzes State Timeline using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -31236,6 +32060,10 @@
         "zh-CN": "SurfaceFlinger 分析",
         "en": "Surfaceflinger Analysis"
       },
+      "description": {
+        "zh-CN": "分析 SurfaceFlinger 帧合成性能，包括 GPU/HWC 合成比例、慢合成检测和 Fence 等待",
+        "en": "Analyzes Surfaceflinger Analysis using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -31618,6 +32446,10 @@
         "zh-CN": "SurfaceFlinger 分析",
         "en": "Surfaceflinger Module"
       },
+      "description": {
+        "zh-CN": "分析帧渲染时序、卡顿原因和 GPU 合成",
+        "en": "Analyzes Surfaceflinger Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -31704,6 +32536,10 @@
       "displayName": {
         "zh-CN": "休眠唤醒分析",
         "en": "Suspend Wakeup Analysis"
+      },
+      "description": {
+        "zh-CN": "分析系统挂起和唤醒原因、休眠质量和功耗影响",
+        "en": "Analyzes Suspend Wakeup Analysis using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -32200,6 +33036,10 @@
         "zh-CN": "系统负载分析",
         "en": "System Load In Range"
       },
+      "description": {
+        "zh-CN": "分析系统整体 CPU 利用率和进程活跃度",
+        "en": "Analyzes System Load In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -32237,6 +33077,10 @@
       "displayName": {
         "zh-CN": "SystemUI 分析",
         "en": "Systemui Module"
+      },
+      "description": {
+        "zh-CN": "分析状态栏、通知中心、快捷设置和导航栏性能",
+        "en": "Analyzes Systemui Module using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -32364,6 +33208,10 @@
         "zh-CN": "任务迁移分析",
         "en": "Task Migration In Range"
       },
+      "description": {
+        "zh-CN": "分析线程在大小核之间的迁移频率（动态拓扑检测）",
+        "en": "Analyzes Task Migration In Range using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -32441,6 +33289,10 @@
       "displayName": {
         "zh-CN": "TextureView 生产端帧时序",
         "en": "Textureview Producer Frame Timing"
+      },
+      "description": {
+        "zh-CN": "检测非 Flutter TextureView / SurfaceTexture 生产端 queueBuffer、swapBuffers、onFrameAvailable 的帧间隔异常",
+        "en": "Analyzes Textureview Producer Frame Timing using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -32581,6 +33433,10 @@
         "zh-CN": "热管理分析",
         "en": "Thermal Module"
       },
+      "description": {
+        "zh-CN": "分析温度传感器、热节流和散热策略",
+        "en": "Analyzes Thermal Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -32679,6 +33535,10 @@
         "zh-CN": "热控风险预测",
         "en": "Thermal Predictor"
       },
+      "description": {
+        "zh-CN": "基于 CPU 频率趋势预测热限频风险",
+        "en": "Analyzes Thermal Predictor using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -32740,6 +33600,10 @@
       "displayName": {
         "zh-CN": "热节流分析",
         "en": "Thermal Throttling"
+      },
+      "description": {
+        "zh-CN": "分析系统温度、热节流对 CPU 频率和性能的影响",
+        "en": "Analyzes Thermal Throttling using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -33304,6 +34168,10 @@
         "zh-CN": "温控降频链路分析",
         "en": "Thermal Throttling Chain"
       },
+      "description": {
+        "zh-CN": "组合温度、DVFS、CPU idle/util、GPU work period 和 Mali power state，分析热节流因果链",
+        "en": "Analyzes Thermal Throttling Chain using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -33385,6 +34253,10 @@
         "zh-CN": "应用分析",
         "en": "Third Party Module"
       },
+      "description": {
+        "zh-CN": "分析第三方应用性能、卡顿和资源使用",
+        "en": "Analyzes Third Party Module using trace metrics and supporting evidence."
+      },
       "type": "composite",
       "steps": {
         "__synthesize_summary__": {
@@ -33459,6 +34331,10 @@
         "zh-CN": "线程亲和性异常",
         "en": "Thread Affinity Violation"
       },
+      "description": {
+        "zh-CN": "检测主线程/RenderThread 的高频迁核行为",
+        "en": "Analyzes Thread Affinity Violation using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -33526,6 +34402,10 @@
       "displayName": {
         "zh-CN": "触摸到显示延迟 (区间)",
         "en": "Touch To Display Latency"
+      },
+      "description": {
+        "zh-CN": "基于 android_input_events 的 5 维延迟分解，测量每个输入事件的端到端延迟",
+        "en": "Analyzes Touch To Display Latency using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -33625,6 +34505,10 @@
         "zh-CN": "TraceStateTrack摘要",
         "en": "Trace State Track Summary"
       },
+      "description": {
+        "zh-CN": "基于 Trace 指标与证据分析TraceStateTrack摘要。",
+        "en": "Summarize Perfetto v57 state table intervals by track, category, and symbolic value"
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -33711,6 +34595,10 @@
         "zh-CN": "Util 建模分析",
         "en": "Util Tracking Analysis"
       },
+      "description": {
+        "zh-CN": "分析 EAS util tracking 信号（eas_util/sugov_util），检测 WALT/PELT 建模滞后",
+        "en": "Analyzes Util Tracking Analysis using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -33760,6 +34648,10 @@
       "displayName": {
         "zh-CN": "VRR/LTPO 检测",
         "en": "VRR Detection"
+      },
+      "description": {
+        "zh-CN": "检测可变刷新率 (VRR/LTPO/AdaptiveSync) 模式",
+        "en": "Analyzes VRR Detection using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -33904,6 +34796,10 @@
         "zh-CN": "VSync 对齐分析",
         "en": "Vsync Alignment In Range"
       },
+      "description": {
+        "zh-CN": "分析帧与 VSync 信号的对齐情况",
+        "en": "Analyzes Vsync Alignment In Range using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -33941,6 +34837,10 @@
       "displayName": {
         "zh-CN": "VSync 配置分析",
         "en": "Vsync Config"
+      },
+      "description": {
+        "zh-CN": "分析 VSync 周期和刷新率配置",
+        "en": "Analyzes Vsync Config using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -34006,6 +34906,10 @@
         "zh-CN": "VsyncPeriod检测",
         "en": "vsync_period_detection"
       },
+      "description": {
+        "zh-CN": "基于 Trace 指标与证据分析VsyncPeriod检测。",
+        "en": "Detect VSync period from trace data using median of VSYNC-sf intervals."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -34065,7 +34969,11 @@
               }
             }
           },
-          "synthesizeLabels": {}
+          "synthesizeLabels": {},
+          "description": {
+            "zh-CN": "基于 Trace 指标与证据分析检测VsyncPeriod。",
+            "en": "Detect VSync period using multiple data sources"
+          }
         },
         "root": {
           "title": {
@@ -34081,6 +34989,10 @@
       "displayName": {
         "zh-CN": "VSync 相位对齐分析",
         "en": "Vsync Phase Alignment"
+      },
+      "description": {
+        "zh-CN": "基于 android_input_events 分析输入事件与 VSync 信号的相位关系",
+        "en": "Analyzes Vsync Phase Alignment using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -34218,6 +35130,10 @@
       "displayName": {
         "zh-CN": "Wake Lock 追踪",
         "en": "Wakelock Tracking"
+      },
+      "description": {
+        "zh-CN": "追踪 Wake Lock 持有情况，检测电池功耗异常",
+        "en": "Analyzes Wakelock Tracking using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -34430,6 +35346,10 @@
         "zh-CN": "唤醒频率摘要",
         "en": "Wakeup Frequency Summary"
       },
+      "description": {
+        "zh-CN": "区分设备级 wakeup 与 CPU idle exit churn，按分钟归一化",
+        "en": "Analyzes Wakeup Frequency Summary using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -34506,6 +35426,10 @@
         "zh-CN": "应用启动期能耗",
         "en": "Wattson App Startup Power"
       },
+      "description": {
+        "zh-CN": "每次应用启动期间的总能耗（mWs）",
+        "en": "Analyzes Wattson App Startup Power using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -34575,6 +35499,10 @@
       "displayName": {
         "zh-CN": "Power Rails 能耗分解",
         "en": "Wattson Rails Power Breakdown"
+      },
+      "description": {
+        "zh-CN": "按 Wattson 子系统统计估算能耗（mWs）和平均功率（mW）",
+        "en": "Analyzes Wattson Rails Power Breakdown using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -34652,6 +35580,10 @@
         "zh-CN": "线程功耗归因",
         "en": "Wattson Thread Power Attribution"
       },
+      "description": {
+        "zh-CN": "按线程归因 CPU 能耗（mWs）—— 排查偷电进程",
+        "en": "Analyzes Wattson Thread Power Attribution using trace metrics and supporting evidence."
+      },
       "type": "atomic",
       "steps": {
         "__synthesize_summary__": {
@@ -34721,6 +35653,10 @@
       "displayName": {
         "zh-CN": "WebView GL Functor 卡顿链路",
         "en": "Webview Drawfunctor Jank Chain"
+      },
+      "description": {
+        "zh-CN": "关联 WebView/Chromium JS 长任务、GL Functor 绘制和宿主帧掉帧窗口",
+        "en": "Analyzes Webview Drawfunctor Jank Chain using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {
@@ -34880,6 +35816,10 @@
       "displayName": {
         "zh-CN": "WebView V8 性能分析",
         "en": "Webview V8 Analysis"
+      },
+      "description": {
+        "zh-CN": "分析 WebView V8 引擎性能：GC 事件、脚本编译、执行时间",
+        "en": "Analyzes Webview V8 Analysis using trace metrics and supporting evidence."
       },
       "type": "atomic",
       "steps": {
@@ -35097,6 +36037,10 @@
       "displayName": {
         "zh-CN": "WMS 窗口管理分析",
         "en": "Wms Module"
+      },
+      "description": {
+        "zh-CN": "分析窗口动画、Activity 转场和窗口状态变化",
+        "en": "Analyzes Wms Module using trace metrics and supporting evidence."
       },
       "type": "composite",
       "steps": {

@@ -13,8 +13,9 @@ MCP, and CLI projections. Every built-in Skill is represented by the generated
 stable Skill IDs, step IDs, SQL, enum values, evidence references, timestamps,
 and report provenance remain untranslated.
 
-The audit found 16 issue classes. All are fixed in this change. The repository
-now fails `npm run verify:i18n` when the built-in Skill catalog is stale, an
+The audit and independent follow-up review found 18 issue classes. All are
+fixed in this change. The repository now fails `npm run verify:i18n` when the
+built-in Skill catalog is stale, an
 English catalog entry contains Han characters, a required feature surface loses
 its locale-aware projection, the README pairs drift structurally, or a known
 single-language UI regression returns.
@@ -64,7 +65,8 @@ Eighteen entries are module experts and overlap the runtime types above. The
 catalog also covers 1,223 display steps and 3,468 explicitly declared columns.
 `npm run verify:i18n` traverses every Skill, step, column, tooltip, and
 synthesized label. The catalog is the complete per-Skill review ledger: each
-stable Skill ID has non-empty `zh-CN` and `en` display metadata.
+stable Skill ID has non-empty `zh-CN` and `en` names, descriptions, and display
+metadata; the few explicit step descriptions are covered by the same gate.
 
 External Skill packs are intentionally reported as `external_authored`.
 SmartPerfetto does not invent translations for third-party content, and it does
@@ -76,7 +78,7 @@ not silently treat an external Skill as a missing built-in localization.
 |---|---|---|---|
 | I18N-01 | The Web UI implicitly followed `navigator.language` and had no explicit preference. | Settings, all UI text | Added persistent `auto`, `zh-CN`, and `en` selection. |
 | I18N-02 | Changing language could continue an existing backend session and mix languages. | Sessions, streamed analysis | A language change retires the current backend agent session before the next analysis. |
-| I18N-03 | Built-in Skill names, descriptions, step titles, columns, and synthesized metrics had no complete bilingual source. | All 234 built-in Skills | Added a registry-generated, strict localization catalog and freshness check. |
+| I18N-03 | Built-in Skill names, step titles, columns, and synthesized metrics had no complete bilingual source. | All 234 built-in Skills | Added a registry-generated, strict localization catalog and freshness check. |
 | I18N-04 | Authored Skill narrative in the other language could leak into a selected locale. | Summaries, execution messages, diagnostics, empty states | Added locale-matched neutral fallbacks and retained raw narrative in explicit provenance fields. |
 | I18N-05 | Missing built-in localization could fall back silently, while external packs were not distinguished. | Skill list/invoke/compare | Built-ins now fail closed; external packs carry `external_authored` status. |
 | I18N-06 | REST, agent adapter, MCP, and CLI Skill projections did not consistently resolve the requested output language. | API, MCP, CLI | Propagated canonical output language through list, definition, invocation, comparison, and diagnostics. |
@@ -90,6 +92,8 @@ not silently treat an external Skill as a missing built-in localization.
 | I18N-14 | Slash commands, ANR/Jank helpers, reconnect, export, query review, SQL tables, charts, Markdown, and Mermaid errors had hard-coded copy. | Chat utilities and data presentation | Replaced direct strings with the shared language projection. |
 | I18N-15 | README documented only the backend environment variable and did not explain the Web preference or precedence. | `README.md`, `README.zh-CN.md` | Documented UI selection, persistence, session retirement, canonical values, and env fallback. |
 | I18N-16 | There was no repository gate to detect Skill localization or paired-document drift. | CI and maintainer workflow | Added `npm run verify:i18n` and included it in `verify:pr`. |
+| I18N-17 | The first catalog omitted Skill `description`; an English list probe still found Han text in 224 of 234 built-in Skills. | Skill list, detail, and intent detection | The independent review added Skill/step descriptions to the catalog, runtime projection, full-registry tests, and the gate. |
+| I18N-18 | Skill REST validation and failure responses remained hard-coded in English. | Skill list, detail, execution, analysis, intent, and vendor detection | Error headings and parameter guidance now follow the request language while technical error details remain verbatim. |
 
 ## Fixes
 
@@ -110,7 +114,7 @@ not silently treat an external Skill as a missing built-in localization.
 
 - The generator reads the live built-in registry rather than a hard-coded Skill
   list or count.
-- Display names, descriptions, step titles, explicit column labels/tooltips,
+- Display names, descriptions, step titles/descriptions, explicit column labels/tooltips,
   and synthesized metric labels have both locales.
 - Inferred schema labels use a locale-aware identifier humanizer.
 - A built-in Skill missing from the catalog is a runtime and verification
@@ -165,10 +169,11 @@ Perfetto-Skills impact review: `not_required`. This change only affects
 SmartPerfetto presentation and request-language routing; it does not change
 portable Skill YAML, SQL, evidence semantics, export policy, or the public
 runtime contract. Change fingerprint:
-`6d7c1d808d94de5eda17354ff29fc44a27d1f7f7103a667ac78937345e7bf08e`.
+`d41858fdf581769dae84321e1fe0e85ede06b319a0d8ed08678ae5dc0ef8ca70`.
 
-Exact command outcomes are recorded in the commit handoff rather than frozen in
-this durable design report.
+Exact command outcomes are summarized in the final delivery. This durable
+report records the reproducible gates and does not claim the commit message
+contains a verification log.
 
 ## Residual Boundaries
 

@@ -9,6 +9,7 @@ import {
 } from '../skillEngine/skillLoader';
 import {
   assertBuiltInSkillLocalizationCoverage,
+  localizeSkillDefinition,
   localizeSkillDiagnostics,
   localizeSkillDisplayResults,
   localizeSkillListItem,
@@ -43,7 +44,7 @@ describe('Skill localization catalog', () => {
     expect(localizeSkillListItem(source, 'en')).toMatchObject({
       id: 'scrolling_analysis',
       displayName: 'Scrolling Analysis',
-      description: source.description,
+      description: expect.not.stringMatching(/\p{Script=Han}/u),
       localizationStatus: 'catalog',
     });
     expect(localizeSkillListItem(source, 'zh-CN')).toMatchObject({
@@ -51,6 +52,29 @@ describe('Skill localization catalog', () => {
       displayName: '滑动性能分析',
       localizationStatus: 'catalog',
     });
+  });
+
+  it('projects descriptions for every built-in Skill in both locales', async () => {
+    await ensureSkillRegistryInitialized();
+    for (const skill of skillRegistry.getAllSkills()) {
+      const origin = skillRegistry.getSkillOrigin(skill.name);
+      const source = {
+        id: skill.name,
+        displayName: skill.meta.display_name,
+        description: skill.meta.description,
+        origin,
+      };
+      const english = localizeSkillListItem(source, 'en');
+      const chinese = localizeSkillListItem(source, 'zh-CN');
+      const englishDefinition = localizeSkillDefinition(skill, 'en');
+
+      expect(english.description).toBeTruthy();
+      expect(english.description).not.toMatch(/\p{Script=Han}/u);
+      expect(chinese.description).toBeTruthy();
+      expect(englishDefinition.meta.description).toBe(
+        english.description,
+      );
+    }
   });
 
   it('projects only presentation fields and preserves structured evidence', () => {
