@@ -82,6 +82,52 @@ function moduleName(value: string): string {
   return MODULE_EN.get(value) ?? value;
 }
 
+const REASON_ZH = new Map<string, string>([
+  ['Sleeping', '睡眠'],
+  ['Runnable', '可运行'],
+  ['Waking', '唤醒中'],
+  ['Parked', '停驻'],
+  ['Running', '运行中'],
+  ['Unknown state', '未知状态'],
+]);
+
+function projectReason(
+  value: string,
+  outputLanguage: OutputLanguage,
+): string {
+  if (outputLanguage === 'en') return translateEvidence(value);
+  return REASON_ZH.get(value) ?? value;
+}
+
+function projectWarning(
+  value: string,
+  outputLanguage: OutputLanguage,
+): string {
+  if (outputLanguage === 'en') {
+    return value.replace(
+      /^critical path 结果较大，已按前 (\d+) 个链路段截断展示。$/,
+      'The critical-path result is large and was truncated to the first $1 chain segments.',
+    );
+  }
+
+  const rules: Array<[RegExp, string]> = [
+    [/^invalid threadStateId$/u, '无效的 threadStateId'],
+    [/^waker query failed:/u, 'waker 查询失败：'],
+    [/^thread_state (.+) not found$/u, '未找到 thread_state $1'],
+    [/^no recorded waker \(waker_id is NULL\)$/u, '没有记录 waker（waker_id 为 NULL）'],
+    [/^frames\.timeline include failed:/u, '加载 frames.timeline 失败：'],
+    [/^frame timeline query failed:/u, 'frame timeline 查询失败：'],
+    [/^stdlib table missing:/u, '缺少 stdlib 表：'],
+    [/^schema mismatch:/u, 'schema 不匹配：'],
+    [/^query failed:/u, '查询失败：'],
+    [/^INCLUDE (.+) failed$/u, '加载模块 $1 失败'],
+  ];
+  for (const [pattern, replacement] of rules) {
+    if (pattern.test(value)) return value.replace(pattern, replacement);
+  }
+  return value;
+}
+
 function translateDetail(value: string): string {
   const number = (index: number): string =>
     value.match(/[0-9]+(?:\.[0-9]+)?/g)?.[index] ?? '0';
@@ -142,12 +188,20 @@ function projectAnomaly(anomaly: CriticalPathAnomaly): CriticalPathAnomaly {
   };
 }
 
-function projectSegment(segment: CriticalPathSegment): CriticalPathSegment {
+function projectSegment(
+  segment: CriticalPathSegment,
+  outputLanguage: OutputLanguage,
+): CriticalPathSegment {
   return {
     ...segment,
-    modules: segment.modules.map(moduleName),
-    reasons: segment.reasons.map(translateEvidence),
-    children: segment.children?.map(projectSegment),
+    modules:
+      outputLanguage === 'en' ? segment.modules.map(moduleName) : segment.modules,
+    reasons: segment.reasons.map(reason =>
+      projectReason(reason, outputLanguage),
+    ),
+    children: segment.children?.map(child =>
+      projectSegment(child, outputLanguage),
+    ),
   };
 }
 
@@ -183,10 +237,22 @@ export function projectCriticalPathAnalysis(
   analysis: CriticalPathAnalysis,
   outputLanguage: OutputLanguage,
 ): CriticalPathAnalysis {
-  if (outputLanguage !== 'en') return analysis;
+  if (outputLanguage !== 'en') {
+    return {
+      ...analysis,
+      wakeupChain: analysis.wakeupChain.map(segment =>
+        projectSegment(segment, outputLanguage),
+      ),
+      warnings: analysis.warnings.map(value =>
+        projectWarning(value, outputLanguage),
+      ),
+    };
+  }
   return {
     ...analysis,
-    wakeupChain: analysis.wakeupChain.map(projectSegment),
+    wakeupChain: analysis.wakeupChain.map(segment =>
+      projectSegment(segment, outputLanguage),
+    ),
     moduleBreakdown: analysis.moduleBreakdown.map((item) => ({
       ...item,
       module: moduleName(item.module),
@@ -196,11 +262,8 @@ export function projectCriticalPathAnalysis(
     recommendations: analysis.recommendations.map(
       (value) => RECOMMENDATION_EN.get(value) ?? value,
     ),
-    warnings: analysis.warnings.map((value) =>
-      value.replace(
-        /^critical path 结果较大，已按前 (\d+) 个链路段截断展示。$/,
-        'The critical-path result is large and was truncated to the first $1 chain segments.',
-      ),
+    warnings: analysis.warnings.map(value =>
+      projectWarning(value, outputLanguage),
     ),
   };
 }

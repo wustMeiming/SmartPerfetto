@@ -67,4 +67,30 @@ describe('criticalPathLocalization', () => {
     expect(projected.anomalies[0].evidence).toEqual(['stable_evidence_id']);
     expect(analysis).toEqual(raw);
   });
+
+  it('projects technical warnings and state reasons for Chinese output', () => {
+    const fixture: CriticalPathAnalysis = {
+      ...structuredClone(analysis),
+      wakeupChain: [{
+        ...structuredClone(analysis.wakeupChain[0]),
+        reasons: ['Sleeping', 'stable_slice_name'],
+      }],
+      warnings: [
+        'invalid threadStateId',
+        'frame timeline query failed: no such table',
+      ],
+    };
+    const raw = structuredClone(fixture);
+    const projected = projectCriticalPathAnalysis(fixture, 'zh-CN');
+
+    expect(projected.wakeupChain[0].reasons).toEqual([
+      '睡眠',
+      'stable_slice_name',
+    ]);
+    expect(projected.warnings).toEqual([
+      '无效的 threadStateId',
+      'frame timeline 查询失败： no such table',
+    ]);
+    expect(fixture).toEqual(raw);
+  });
 });

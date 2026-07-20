@@ -161,6 +161,12 @@ The change is covered by:
   frontend prebuild synchronization, and the repository `verify:pr` gate.
 - Independent read-only code review after implementation.
 
+Perfetto-Skills impact review: `not_required`. This change only affects
+SmartPerfetto presentation and request-language routing; it does not change
+portable Skill YAML, SQL, evidence semantics, export policy, or the public
+runtime contract. Change fingerprint:
+`6d7c1d808d94de5eda17354ff29fc44a27d1f7f7103a667ac78937345e7bf08e`.
+
 Exact command outcomes are recorded in the commit handoff rather than frozen in
 this durable design report.
 

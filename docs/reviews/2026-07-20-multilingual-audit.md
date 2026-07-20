@@ -138,6 +138,11 @@ projector 生成可见文案。
   frontend 预编译同步和仓库 `verify:pr`。
 - 实现完成后的独立只读代码审查。
 
+Perfetto-Skills 影响审查结论为 `not_required`：本次修改只改变
+SmartPerfetto 呈现与请求语言路由，不改变可移植 Skill YAML、SQL、证据语义、
+导出策略或公共运行时契约。变更指纹：
+`6d7c1d808d94de5eda17354ff29fc44a27d1f7f7103a667ac78937345e7bf08e`。
+
 精确命令结果记录在提交交付信息中，不固化在长期设计文档里。
 
 ## 剩余边界
