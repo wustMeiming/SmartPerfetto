@@ -166,7 +166,7 @@ snapshot hash. The synchronizer remains dry-run by default; `--apply` refuses
 unresolved decisions. Every changed upstream path/hash becomes
 `pending_review` until an exact decision supplies local evidence.
 
-The ten initial decisions classify SQL/analysis entrypoints as adopted and the
+The eleven initial decisions classify SQL/analysis entrypoints as adopted and the
 domain hint/stdlib references as already covered by named local paths/tests.
 No Google runtime downloader, workspace scratchpad, or unversioned stdlib dump
 becomes a product dependency.
