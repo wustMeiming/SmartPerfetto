@@ -3,9 +3,20 @@
 
 # Upstream Perfetto AI Skill Translation SOP
 
-This SOP converts upstream `perfetto/ai/skills/*/SKILL.md` runbooks into
-SmartPerfetto runtime assets. Do not copy upstream markdown skills into a second
-agent skill runtime.
+This SOP translates reviewed upstream analysis runbooks into SmartPerfetto
+runtime assets. Do not copy upstream markdown skills into a second agent skill
+runtime.
+
+## Distinct Upstream Sources
+
+| Source | Reviewed surface | Role |
+|---|---|---|
+| `https://github.com/google/perfetto` | `ai/skills/perfetto/**` at the pinned Perfetto release | Release-coupled Perfetto SQL/workflow gap check |
+| `https://github.com/android/skills` | `profilers/perfetto-sql/**` and `profilers/perfetto-trace-analysis/**` at an independently pinned commit | Android Skills methodology gap check |
+
+These repositories have separate locks, commits, reports, and review decisions.
+An Android Skills repository release or `main` update never changes the pinned
+Perfetto stdlib, trace processor, or official Perfetto AI Skill identity.
 
 ## Translation Rule
 
@@ -34,6 +45,27 @@ agent skill runtime.
 7. Run `validate:skills`, relevant skill evals, `typecheck`, `build`, and the
    repository PR gate before pushing.
 
+## Android Skills Translation Boundaries
+
+- Adopt analysis order, stop conditions, SQL invariants, and domain checklists
+  only when they improve an existing SmartPerfetto contract.
+- Do not adopt the Android CLI downloader/runtime. SmartPerfetto uses its pinned
+  trace processor pool and the public repository uses its checksum-verified
+  bootstrap.
+- Do not adopt the trace-adjacent scratchpad convention. SmartPerfetto already
+  separates evidence, plan logs, reports, snapshots, CLI artifacts, and chat
+  projection.
+- `PARTITIONED` limits SPAN_JOIN entity matching; it does not prove that either
+  input is non-overlapping inside a partition. Require a fixture/assertion or a
+  bounded witness query and reference it with
+  `perfetto-span-join-non-overlap-proof`.
+- Treat blanket upstream advice as review input, not an unconditional rule.
+  For example, Perfetto's own stdlib contains valid view-backed SPAN_JOIN
+  inputs, so SmartPerfetto does not prohibit all views.
+- Keep IRQ-versus-runnable delay, RT kernel-thread policy, and catch-up-storm
+  diagnostics as candidates until a data-present trace fixture and semantic
+  assertion prove their portable evidence contracts.
+
 ## Current Mappings
 
 | Upstream skill | SmartPerfetto mapping | Status |
@@ -52,6 +84,9 @@ agent skill runtime.
 | `perfetto` v57 Agent Skill: Java/native allocation profile scripts | `native_heap_breakdown`, `android_memory_v57_ai_diagnostics` heap-profile hotspot step | Implemented |
 | v57 `linux.systemd_journald` stdlib | `linux_systemd_journald_analysis` | Implemented |
 | v57 `state` table / state tracks | `trace_state_track_summary`; existing `state_timeline` remains the higher-level interaction timeline | Implemented |
+| `android/skills` `profilers/perfetto-sql` | SQL guardrails, schema/stdlib lookup, idempotent execution, and explicit SPAN_JOIN non-overlap proof | Implemented |
+| `android/skills` `profilers/perfetto-trace-analysis` | Scene routing, evidence chain, dependency drill-down, and bounded secondary-bottleneck closure | Implemented |
+| `android/skills` IRQ/runnable-delay, RT policy, and catch-up-storm ideas | No new atomic Skill without a data-present fixture and semantic assertion | Deferred |
 
 ## Acceptance
 
