@@ -91,7 +91,9 @@ CLAUDE_LIGHT_MODEL=deepseek-v4-flash
 
 OpenAI / OpenAI-compatible provider 使用 OpenAI Agents SDK runtime；Ollama 或其他 OpenAI-compatible endpoint 使用 `OPENAI_AGENTS_PROTOCOL=chat_completions`。前端 Provider Manager 对 DeepSeek、Qwen、Kimi、MiMo、TokenHub 这类双端点 provider 会同时展示 Claude-compatible 和 OpenAI-compatible Base URL，当前 SDK runtime 决定实际使用哪一侧。Pi Agent Core 和 OpenCode 只通过 custom provider 或显式 env 配置暴露；它们不会读取本地 `.pi` / OpenCode project config 或 CLI 登录态。完整 provider 字段、已知地区 URL 变体、模型 ID 和排障说明见 [docs/getting-started/configuration.md](docs/getting-started/configuration.md) 和 env 模板。
 
-步骤 3（可选）：设置输出语言。SmartPerfetto 默认用简体中文输出 AI 回答、流式进度和生成的报告。如果主要使用者是英文用户，可以配置：
+步骤 3（可选）：设置输出语言。Web UI 用户可以进入 **AI Assistant 设置 → 连接 → 界面与分析语言**，选择**自动（跟随浏览器）**、**简体中文**或 **English**。保存后的偏好同时作用于界面、内置 Skill 呈现、流式分析和新报告；切换语言会退役当前后端 agent 会话，避免同一会话混用语言。
+
+`SMARTPERFETTO_OUTPUT_LANGUAGE` 仍是 CLI、服务端调用和未显式携带语言的客户端所使用的后端默认值。Web 中的显式偏好属于请求上下文，优先级更高。没有偏好或覆盖值时，SmartPerfetto 默认使用简体中文：
 
 ```env
 SMARTPERFETTO_OUTPUT_LANGUAGE=en
@@ -268,13 +270,20 @@ Claude Code 本地认证/配置只适用于本地源码运行，不适用于 Doc
 
 ### 输出语言
 
-面向用户的输出默认是简体中文。如果希望 AI 回答、流式进度文案和生成的 Agent-Driven 报告都使用英文，配置：
+Web UI 中进入 **AI Assistant 设置 → 连接 → 界面与分析语言**：
+
+- **自动**跟随浏览器语言。
+- **简体中文**和 **English** 是显式且会持久化的选择。
+- 所选语言覆盖前端自有文案、内置 Skill 呈现、AI 回答、流式进度、教学模式、关键路径结果和生成的报告。
+- 切换语言会在下一次分析前退役当前后端 agent 会话。
+
+浏览器只向后端发送规范值 `zh-CN` 或 `en`。CLI、服务端默认值和未显式携带语言的客户端可以配置：
 
 ```bash
 SMARTPERFETTO_OUTPUT_LANGUAGE=en
 ```
 
-可用值包括 `zh-CN` 和 `en`。修改 `.env` 后需要重启 backend。
+可用值为 `zh-CN` 和 `en`。显式请求或已保存的 Web 偏好优先于该环境默认值。修改 `.env` 后需要重启 backend。
 
 ### 轮次预算
 
@@ -431,6 +440,7 @@ npm run test:core
 ## 文档
 
 - [文档中心](docs/README.md)
+- [2026-07-20 多语言全量审查](docs/reviews/2026-07-20-multilingual-audit.md)
 - [快速开始](docs/getting-started/quick-start.md)
 - [Code-Aware Analysis](docs/getting-started/code-aware-analysis.md)
 - [架构总览](docs/architecture/overview.md)

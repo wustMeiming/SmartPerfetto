@@ -156,6 +156,7 @@ export interface ActiveProcess {
 
 export interface TeachingPipelineRequest {
   traceId: string;
+  outputLanguage?: 'zh-CN' | 'en';
   packageName?: string;
   processName?: string;
   selectionContext?: Record<string, unknown>;

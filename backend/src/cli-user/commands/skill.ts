@@ -10,6 +10,12 @@ import { getTraceProcessorService } from '../../services/traceProcessorService';
 import { createSkillExecutor } from '../../services/skillEngine/skillExecutor';
 import { ensureSkillRegistryInitialized, skillRegistry } from '../../services/skillEngine/skillLoader';
 import { withConsoleLogToStderr } from '../io/stdio';
+import {parseOutputLanguage} from '../../agentv3/outputLanguage';
+import {
+  localizeSkillDiagnostics,
+  localizeSkillDisplayResults,
+  localizeSkillDefinition,
+} from '../../services/skillLocalization';
 
 export interface SkillCommandArgs {
   trace: string;
@@ -38,6 +44,9 @@ export async function runSkillCommand(args: SkillCommandArgs): Promise<number> {
       }
 
       const loadedTraceId = await service.loadTrace(tracePath);
+      const outputLanguage = parseOutputLanguage(
+        process.env.SMARTPERFETTO_OUTPUT_LANGUAGE,
+      );
       const executor = createSkillExecutor(
         getTraceProcessorService(),
         undefined,
@@ -50,8 +59,37 @@ export async function runSkillCommand(args: SkillCommandArgs): Promise<number> {
       executor.setFragmentRegistry(skillRegistry.getFragmentCache());
       executor.registerSkills(skillRegistry.getAllSkills());
 
-      const skillResult = await executor.execute(args.skillId, loadedTraceId, params);
-      return { traceId: loadedTraceId, result: skillResult };
+      const skillResult = await executor.execute(
+        args.skillId,
+        loadedTraceId,
+        params,
+        {__outputLanguage: outputLanguage},
+      );
+      const externalAuthored =
+        skillRegistry.getSkillOrigin(args.skillId)?.origin === 'external_pack';
+      const localizedSkill = localizeSkillDefinition(
+        skill,
+        outputLanguage,
+        {externalAuthored},
+      );
+      return {
+        traceId: loadedTraceId,
+        result: {
+          ...skillResult,
+          skillName: localizedSkill.meta.display_name,
+          displayResults: localizeSkillDisplayResults(
+            args.skillId,
+            skillResult.displayResults,
+            outputLanguage,
+            {externalAuthored},
+          ),
+          diagnostics: localizeSkillDiagnostics(
+            skillResult.diagnostics,
+            outputLanguage,
+            {externalAuthored},
+          ),
+        },
+      };
     });
     writeSkillOutput(format, {
       tracePath,

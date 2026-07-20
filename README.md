@@ -91,7 +91,9 @@ CLAUDE_LIGHT_MODEL=deepseek-v4-flash
 
 OpenAI / OpenAI-compatible providers use the OpenAI Agents SDK runtime; Ollama and other OpenAI-compatible endpoints use `OPENAI_AGENTS_PROTOCOL=chat_completions`. In Provider Manager, dual-surface providers such as DeepSeek, Qwen, Kimi, MiMo, and TokenHub show both Claude-compatible and OpenAI-compatible Base URLs. The selected SDK runtime decides which side is used. Pi Agent Core and OpenCode are exposed only through custom providers or explicit env configuration; neither path reads local `.pi` / OpenCode project config or CLI login state. Full provider-specific fields, known regional URL variants, model IDs, and troubleshooting notes are in [docs/getting-started/configuration.en.md](docs/getting-started/configuration.en.md) and the env templates.
 
-Step 3 (optional): Set the output language. SmartPerfetto defaults to Simplified Chinese for AI answers, streamed progress, and generated reports. Set this if the primary users prefer English:
+Step 3 (optional): Set the output language. Web UI users can choose **AI Assistant Settings → Connection → Interface and analysis language** and select **Auto (browser language)**, **简体中文**, or **English**. The saved preference applies to the interface, built-in Skill presentation, streamed analysis, and new reports. Changing it retires the current backend agent session so one session does not mix languages.
+
+`SMARTPERFETTO_OUTPUT_LANGUAGE` remains the backend default for CLI use, server-side calls, and clients that do not send an explicit language. An explicit Web preference is request context and takes precedence. SmartPerfetto defaults to Simplified Chinese when no preference or override is provided:
 
 ```env
 SMARTPERFETTO_OUTPUT_LANGUAGE=en
@@ -273,13 +275,20 @@ Claude Code local auth/config is only available to local source runs, not Docker
 
 ### Output Language
 
-User-facing output defaults to Simplified Chinese. To make AI answers, streamed progress text, and generated Agent-Driven reports English, set:
+In the Web UI, choose **AI Assistant Settings → Connection → Interface and analysis language**:
+
+- **Auto** follows the browser language.
+- **简体中文** and **English** are explicit, persisted choices.
+- The selected language covers frontend-owned text, built-in Skill presentation, AI answers, streamed progress, teaching, critical-path results, and generated reports.
+- Changing the language retires the current backend agent session before the next analysis.
+
+The browser sends the canonical value `zh-CN` or `en`. For CLI, server defaults, and clients without an explicit language, set:
 
 ```bash
 SMARTPERFETTO_OUTPUT_LANGUAGE=en
 ```
 
-Accepted values include `zh-CN` and `en`. Restart the backend after changing `.env`.
+Accepted values are `zh-CN` and `en`. An explicit request or saved Web choice takes precedence over this environment default. Restart the backend after changing `.env`.
 
 ### Turn Budgets
 
@@ -438,6 +447,7 @@ Do not hardcode prompt content in TypeScript. Put scene logic in `backend/strate
 ## Documentation
 
 - [Documentation Center](docs/README.en.md)
+- [2026-07-20 Multilingual Audit](docs/reviews/2026-07-20-multilingual-audit.en.md)
 - [Quick Start](docs/getting-started/quick-start.en.md)
 - [Code-Aware Analysis](docs/getting-started/code-aware-analysis.en.md)
 - [Architecture Overview](docs/architecture/overview.en.md)

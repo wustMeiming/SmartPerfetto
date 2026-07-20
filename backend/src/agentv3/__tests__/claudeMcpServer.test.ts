@@ -56,7 +56,14 @@ jest.mock('../../agent/detectors/architectureDetector', () => ({
 
 jest.mock('../../services/skillEngine/skillLoader', () => ({
   skillRegistry: {
-    getSkill: jest.fn(() => ({ type: 'atomic', name: 'test_skill' })),
+    getSkill: jest.fn((name: string) => ({
+      type: 'atomic',
+      name,
+      meta: {display_name: name, description: ''},
+    })),
+    getSkillOrigin: jest.fn((name: string) => ({
+      origin: name.endsWith('_identity_skill') ? 'external_pack' : 'built_in',
+    })),
     getVendorOverride: jest.fn(() => undefined),
     getAllSkills: jest.fn(() => [
       { name: 'scrolling_analysis', type: 'composite', description: 'Scrolling analysis' },
@@ -1077,6 +1084,68 @@ describe('createClaudeMcpServer', () => {
       ]);
     });
 
+    it('keeps duplicate step ids aligned with their own artifacts and query reviews', async () => {
+      const {tools, emittedUpdates, mockSkillExecutor} = createTestServer({
+        lightweight: true,
+        outputLanguage: 'en',
+      });
+      mockSkillExecutor.execute.mockResolvedValueOnce({
+        skillId: 'scrolling_analysis',
+        skillName: 'Scrolling analysis',
+        success: true,
+        displayResults: [
+          {
+            stepId: 'frame_summary',
+            title: 'First frame summary',
+            layer: 'overview',
+            format: 'table',
+            data: {columns: ['value'], rows: [[1]]},
+          },
+          {
+            stepId: 'frame_summary',
+            title: 'Second frame summary',
+            layer: 'overview',
+            format: 'table',
+            data: {columns: ['value'], rows: [[2]]},
+          },
+        ],
+        diagnostics: [],
+        executionTimeMs: 5,
+      } as any);
+
+      const result = await callTool(tools, 'invoke_skill', {
+        skillId: 'scrolling_analysis',
+      });
+      const envelopes = emittedUpdates
+        .filter((update: any) => update.type === 'data')
+        .flatMap((update: any) => update.content ?? [])
+        .filter((envelope: any) => envelope.meta?.intent === 'skill_structured_result');
+
+      expect(result.error).toBeUndefined();
+      expect(result).toMatchObject({success: true});
+      expect(result.artifacts.map((artifact: any) => artifact.id)).toEqual([
+        'art-1',
+        'art-2',
+      ]);
+      expect(envelopes).toHaveLength(2);
+      expect(envelopes.map((envelope: any) => envelope.meta.artifactId)).toEqual([
+        'art-1',
+        'art-2',
+      ]);
+      expect(envelopes.map((envelope: any) => envelope.data.rows[0][0])).toEqual([
+        1,
+        2,
+      ]);
+      for (const envelope of envelopes) {
+        expect(envelope.meta.queryReview.source.artifactId).toBe(
+          envelope.meta.artifactId,
+        );
+        expect(envelope.meta.queryReview.source.evidenceRefId).toBe(
+          envelope.meta.evidenceRefId,
+        );
+      }
+    });
+
     it('creates fetchable diagnostics artifacts without display results', async () => {
       const { tools, mockSkillExecutor } = createTestServer({ lightweight: true });
       mockSkillExecutor.execute.mockResolvedValueOnce({
@@ -1596,6 +1665,7 @@ describe('createClaudeMcpServer', () => {
           data: { rows: [], columns: ['launch_id', 'dur_ms'] },
           executionStatus: 'empty',
           executionMessage: 'No startup rows were recorded.',
+          executionError: 'SQL failed raw',
         }],
         diagnostics: [],
         executionTimeMs: 5,
@@ -1605,16 +1675,17 @@ describe('createClaudeMcpServer', () => {
       const envelope = emittedUpdates
         .filter((u: any) => u.type === 'data')
         .flatMap((u: any) => u.content ?? [])
-        .find((env: any) => env.display?.title === 'No launch rows');
+        .find((env: any) => env.meta?.stepId === 'empty_launches');
 
       expect(result.success).toBe(true);
       expect(result.artifacts?.[0]).toMatchObject({
         executionStatus: 'empty',
         executionMessage: 'No startup rows were recorded.',
+        executionError: 'SQL failed raw',
       });
       expect(envelope).toMatchObject({
         data: { rows: [], columns: ['launch_id', 'dur_ms'] },
-        display: { format: 'table', title: 'No launch rows' },
+        display: { format: 'table', title: 'EmptyLaunches' },
         meta: {
           skillId: 'startup_analysis',
           stepId: 'empty_launches',
@@ -1622,6 +1693,7 @@ describe('createClaudeMcpServer', () => {
           planPhaseAttribution: 'active',
           executionStatus: 'empty',
           executionMessage: 'No startup rows were recorded.',
+          executionError: 'SQL failed raw',
         },
       });
       expect(envelope?.meta?.evidenceRefId).toContain('data:skill:startup_analysis:empty_launches');

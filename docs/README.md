@@ -43,6 +43,7 @@ docs/
 
 - 当前系统入口与运行方式以 [快速开始](getting-started/quick-start.md)、[CLI 参考](reference/cli.md)、[免安装包打包](reference/portable-packaging.md) 和 [发布手册](reference/release.md) 为准。
 - 当前文档声明使用 `npm run verify:docs` 检查本地链接、npm script、CLI 命令覆盖和发布命令防漂移。
+- 中英文功能面、全部内置 Skill 和 README 完整性见 [2026-07-20 多语言全量审查](reviews/2026-07-20-multilingual-audit.md)。
 - 当前版本的逐功能证据见 [2026-07-20 文档与功能兼容性全量审查](reviews/2026-07-20-documentation-feature-compatibility-audit.md)。
 - Feature/Bug 修改前需要按 [产品面规则](../.claude/rules/product-surface.md) 检查 Web UI、CLI、API、报告、Docker、免安装包、runtime/provider、Node 版本和预置内容影响面。
 - 发布/npm/portable/Docker 相关工作以 [发布手册](reference/release.md) 和 [发布规则](../.claude/rules/release.md) 为准。

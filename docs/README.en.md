@@ -44,6 +44,7 @@ docs/
 
 - Startup and runtime flow: [Quick Start](getting-started/quick-start.en.md), [CLI Reference](reference/cli.en.md), [Portable Packaging](reference/portable-packaging.en.md), and [Release Runbook](reference/release.en.md).
 - Current documentation claims are checked by `npm run verify:docs` for local links, npm scripts, live CLI coverage, and forbidden release-command drift.
+- The bilingual feature surfaces, every built-in Skill, and README completeness are covered by the [2026-07-20 multilingual audit](reviews/2026-07-20-multilingual-audit.en.md).
 - The current per-surface evidence log is [the 2026-07-20 documentation and feature compatibility audit](reviews/2026-07-20-documentation-feature-compatibility-audit.md) (Chinese).
 - Feature and bug work: use [Product Surface Rules](../.claude/rules/product-surface.md) to check Web UI, CLI, API, reports, Docker, portable packages, runtime/provider, Node version, and bundled-content impact.
 - Release, npm, portable, and Docker work: [Release Runbook](reference/release.en.md) and [Release Rules](../.claude/rules/release.md).

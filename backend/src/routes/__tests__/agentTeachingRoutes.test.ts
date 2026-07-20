@@ -175,7 +175,7 @@ describe('agent teaching pipeline route', () => {
   it('requires traceId', async () => {
     const res = await request(makeApp())
       .post('/api/agent/v1/teaching/pipeline')
-      .send({});
+      .send({outputLanguage: 'en'});
 
     expect(res.status).toBe(400);
     expect(res.body).toEqual({

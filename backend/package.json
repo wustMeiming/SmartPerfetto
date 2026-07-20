@@ -87,7 +87,7 @@
     "verify:pr": "npm run validate:skills && npm run validate:strategies && npm run validate:cases && npm run trace:validate && npm run typecheck && npm run build && node scripts/check-cli-pack.cjs && npm run test:core && npm run test:architecture && npm run trace-processor:ensure && npm run test:scene-trace-regression",
     "enterprise:migration": "tsx src/scripts/enterpriseMigrationSnapshot.ts",
     "skill:validate": "tsx src/cli/index.ts validate",
-    "validate:skills": "tsx src/cli/index.ts validate --contracts --all",
+    "validate:skills": "tsx src/cli/index.ts validate --contracts --all && npm run check:skill-localizations",
     "validate:strategies": "tsx src/cli/index.ts validate --strategies",
     "validate:cases": "tsx src/cli/index.ts validate --cases",
     "ingest:cases": "tsx src/cli/index.ts ingest --cases",
@@ -114,7 +114,9 @@
     "generate:frontend-types": "tsx scripts/generateFrontendTypes.ts",
     "check:types": "tsx scripts/checkTypesSync.ts",
     "types": "npm run generate:frontend-types",
-    "generate:pipeline-detection": "tsx src/scripts/materializeRenderingPipelineDetectionSkill.ts"
+    "generate:pipeline-detection": "tsx src/scripts/materializeRenderingPipelineDetectionSkill.ts",
+    "generate:skill-localizations": "tsx scripts/generateSkillLocalizationCatalog.ts",
+    "check:skill-localizations": "tsx scripts/generateSkillLocalizationCatalog.ts --check"
   },
   "keywords": [
     "perfetto",

@@ -74,6 +74,11 @@ import { isConclusionLikePlanPhase } from './planPhaseSemantics';
 import { formatToolCallNarration, type ToolNarrationOptions } from './toolNarration';
 import type { ArtifactStore, CompactArtifactSummary } from './artifactStore';
 import { DEFAULT_OUTPUT_LANGUAGE, localize, type OutputLanguage } from './outputLanguage';
+import {
+  localizeSkillDefinition,
+  localizeSkillDiagnostics,
+  localizeSkillDisplayResults,
+} from '../services/skillLocalization';
 import { buildSqlQueryReview } from '../services/queryReview/queryReviewBuilder';
 import { buildSkillQueryReview } from '../services/queryReview/skillQueryReviewBuilder';
 import { compactQueryReviewForToolResponse, type QueryReviewV1 } from '../types/queryReviewContract';
@@ -2933,6 +2938,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         const currentPaneSide = paneSideForTraceSide('current');
         const result = await skillExecutor.execute(skillId, traceId, effectiveParams, {
           ...(currentPaneSide ? { __paneSide: currentPaneSide } : {}),
+          __outputLanguage: outputLanguage,
           signal,
         });
         const skillDuration = Date.now() - skillStart;
@@ -2973,10 +2979,10 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         let artifacts: SkillArtifactSummaryForModel[] | undefined;
         let diagnosticsArtifactId: string | undefined;
         let synthesizeArtifacts: Array<{ artifactId: string; stepId: string; rowCount: number; columns: string[] }> | undefined;
-        const artifactIdsByStepId = new Map<string, string>();
-        const queryReviewsByStepId = new Map<string, QueryReviewV1>();
+        const artifactIdsByDisplayIndex: Array<string | undefined> = [];
+        const queryReviewsByDisplayIndex: Array<QueryReviewV1 | undefined> = [];
         if (artifactStore && result.displayResults?.length) {
-          artifacts = result.displayResults.map(dr => {
+          artifacts = result.displayResults.map((dr, displayIndex) => {
             const evidenceRefId = stableSkillEvidenceRefId(
               result.skillId || skillId,
               dr.stepId,
@@ -3012,9 +3018,9 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             });
             if (queryReview) {
               artifactStore.updateQueryReview(artId, queryReview);
-              if (dr.stepId) queryReviewsByStepId.set(dr.stepId, queryReview);
+              queryReviewsByDisplayIndex[displayIndex] = queryReview;
             }
-            if (dr.stepId) artifactIdsByStepId.set(dr.stepId, artId);
+            artifactIdsByDisplayIndex[displayIndex] = artId;
             const summary = artifactStore.generateCompactSummary(artId);
             const preview = summary?.preview ?? previewFromColumnarData(dr.data);
             return summary ? {
@@ -3074,21 +3080,62 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             });
         }
 
-        if (emitUpdate && result.displayResults?.length) {
+        const externalAuthored =
+          effectiveSkillRegistry.getSkillOrigin(skillId)?.origin ===
+          'external_pack';
+        const localizedDisplayResults = localizeSkillDisplayResults(
+          result.skillId || skillId,
+          result.displayResults,
+          outputLanguage,
+          {externalAuthored},
+        ) || [];
+        const localizedDiagnostics = localizeSkillDiagnostics(
+          result.diagnostics,
+          outputLanguage,
+          {externalAuthored},
+        ) || [];
+        const localizedSkillName = skillDef
+          ? localizeSkillDefinition(
+              skillDef,
+              outputLanguage,
+              {externalAuthored},
+            ).meta.display_name
+          : result.skillName;
+        if (artifacts?.length) {
+          const localizedTitleByArtifactId = new Map<string, string>();
+          artifactIdsByDisplayIndex.forEach((artifactId, displayIndex) => {
+            const localizedTitle = localizedDisplayResults[displayIndex]?.title;
+            if (artifactId && localizedTitle) {
+              localizedTitleByArtifactId.set(artifactId, localizedTitle);
+            }
+          });
+          artifacts = artifacts.map(artifact => ({
+            ...artifact,
+            ...(localizedTitleByArtifactId.has(artifact.id)
+              ? {title: localizedTitleByArtifactId.get(artifact.id)}
+              : {}),
+          }));
+        }
+
+        if (emitUpdate && localizedDisplayResults.length) {
           emitSkillDataEnvelopes(
-            result.displayResults as SkillDisplayResult[],
+            localizedDisplayResults as SkillDisplayResult[],
             result.skillId || skillId,
             emitUpdate,
             skillTraceProvenance,
             producer,
             result.identityResolution,
-            artifactIdsByStepId,
-            queryReviewsByStepId,
+            artifactIdsByDisplayIndex,
+            queryReviewsByDisplayIndex,
+            result.displayResults as SkillDisplayResult[],
           );
         }
 
-        if (onSkillResult && result.success && result.displayResults?.length) {
-          onSkillResult({ skillId: result.skillId || skillId, displayResults: result.displayResults });
+        if (onSkillResult && result.success && localizedDisplayResults.length) {
+          onSkillResult({
+            skillId: result.skillId || skillId,
+            displayResults: localizedDisplayResults,
+          });
         }
 
         // Prepend skill notes when the per-analysis budget allows. Notes
@@ -3136,7 +3183,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
               text: skillNotesPrefix + consumeWatchdogWarning(JSON.stringify({
                 success: result.success,
                 skillId: result.skillId,
-                skillName: result.skillName,
+                skillName: localizedSkillName,
                 ...(result.error ? { error: result.error } : {}),
                 ...(options.lightweight
                   ? {
@@ -3180,11 +3227,11 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             text: skillNotesPrefix + consumeWatchdogWarning(JSON.stringify({
               success: result.success,
               skillId: result.skillId,
-              skillName: result.skillName,
+              skillName: localizedSkillName,
               ...(result.error ? { error: result.error } : {}),
               ...(result.identityResolution ? { identityResolution: result.identityResolution } : {}),
               ...(vendorOverrideHint ? { vendorOverride: vendorOverrideHint } : {}),
-              displayResults: result.displayResults?.map(dr => ({
+              displayResults: localizedDisplayResults.map(dr => ({
                 stepId: dr.stepId,
                 title: dr.title,
                 layer: dr.layer,
@@ -3193,7 +3240,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
                 executionMessage: dr.executionMessage,
                 executionError: dr.executionError,
               })),
-              diagnostics: result.diagnostics,
+              diagnostics: localizedDiagnostics,
               synthesizeData: result.synthesizeData,
             })) + (result.success ? getReasoningNudge() : ''),
           }],
@@ -3231,7 +3278,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
     async ({ category }) => {
       try {
         await bindSkillRuntimeRegistry();
-        const allSkills = await skillAdapter.listSkills();
+        const allSkills = await skillAdapter.listSkills(outputLanguage);
         const filtered = category
           ? allSkills.filter(s =>
               s.keywords.some(k => k.toLowerCase().includes(category.toLowerCase())) ||
@@ -3250,6 +3297,7 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
                 type: s.type,
                 keywords: s.keywords.slice(0, 5),
                 origin: s.origin,
+                localizationStatus: s.localizationStatus,
               }))
             ),
           }],
@@ -6225,11 +6273,13 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         const [currentSettled, referenceSettled] = await Promise.allSettled([
           skillExecutor.execute(skillId, traceId, effectiveParams, {
             __traceSide: 'current',
+            __outputLanguage: outputLanguage,
             ...(currentTraceProvenance.paneSide ? { __paneSide: currentTraceProvenance.paneSide } : {}),
             signal,
           }),
           skillExecutor.execute(skillId, referenceTraceId, refParams, {
             __traceSide: 'reference',
+            __outputLanguage: outputLanguage,
             ...(referenceTraceProvenance.paneSide ? { __paneSide: referenceTraceProvenance.paneSide } : {}),
             signal,
           }),
@@ -6255,6 +6305,22 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         const refResult = referenceSettled.status === 'fulfilled'
           ? referenceSettled.value
           : rejectedResult(referenceSettled.reason);
+        const comparisonRegistry = await bindSkillRuntimeRegistry();
+        const comparisonExternalAuthored =
+          comparisonRegistry.getSkillOrigin(skillId)?.origin ===
+          'external_pack';
+        const localizedCurrentDisplayResults = localizeSkillDisplayResults(
+          skillId,
+          currentResult.displayResults,
+          outputLanguage,
+          {externalAuthored: comparisonExternalAuthored},
+        ) || [];
+        const localizedReferenceDisplayResults = localizeSkillDisplayResults(
+          skillId,
+          refResult.displayResults,
+          outputLanguage,
+          {externalAuthored: comparisonExternalAuthored},
+        ) || [];
         const compareDuration = Date.now() - compareStart;
         const currentSuccess = currentResult.success === true;
         const referenceSuccess = refResult.success === true;
@@ -6278,9 +6344,9 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
         ];
 
         // Emit data envelopes for both sides (labeled)
-        if (emitUpdate && currentResult.displayResults?.length) {
+        if (emitUpdate && localizedCurrentDisplayResults.length) {
           emitSkillDataEnvelopes(
-            currentResult.displayResults as SkillDisplayResult[],
+            localizedCurrentDisplayResults as SkillDisplayResult[],
             skillId,
             emitUpdate,
             currentTraceProvenance,
@@ -6294,11 +6360,14 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
               ),
             },
             currentResult.identityResolution,
+            undefined,
+            undefined,
+            currentResult.displayResults as SkillDisplayResult[],
           );
         }
-        if (emitUpdate && refResult.displayResults?.length) {
+        if (emitUpdate && localizedReferenceDisplayResults.length) {
           emitSkillDataEnvelopes(
-            refResult.displayResults as SkillDisplayResult[],
+            localizedReferenceDisplayResults as SkillDisplayResult[],
             skillId,
             emitUpdate,
             referenceTraceProvenance,
@@ -6312,6 +6381,9 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
               ),
             },
             refResult.identityResolution,
+            undefined,
+            undefined,
+            refResult.displayResults as SkillDisplayResult[],
           );
         }
 
@@ -6349,8 +6421,8 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             traceProvenance: currentTraceProvenance,
             effectiveParams,
             success: currentResult.success,
-            stepCount: currentResult.displayResults?.length || 0,
-            steps: buildStepSummary(currentResult.displayResults || []),
+            stepCount: localizedCurrentDisplayResults.length,
+            steps: buildStepSummary(localizedCurrentDisplayResults),
             diagnosticCount: currentResult.diagnostics?.length || 0,
             identityResolution: currentResult.identityResolution,
             error: currentResult.error,
@@ -6362,8 +6434,8 @@ export function createClaudeMcpServer(options: ClaudeMcpServerOptions) {
             traceProvenance: referenceTraceProvenance,
             effectiveParams: refParams,
             success: refResult.success,
-            stepCount: refResult.displayResults?.length || 0,
-            steps: buildStepSummary(refResult.displayResults || []),
+            stepCount: localizedReferenceDisplayResults.length,
+            steps: buildStepSummary(localizedReferenceDisplayResults),
             diagnosticCount: refResult.diagnostics?.length || 0,
             identityResolution: refResult.identityResolution,
             error: refResult.error,
@@ -6960,12 +7032,18 @@ function emitSkillDataEnvelopes(
   traceProvenance?: TraceProcessorQueryProvenance,
   producer?: EvidenceProducerContext,
   identityResolution?: IdentityResolutionV1,
-  artifactIdsByStepId?: Map<string, string>,
-  queryReviewsByStepId?: Map<string, QueryReviewV1>,
+  artifactIdsByDisplayIndex?: ReadonlyArray<string | undefined>,
+  queryReviewsByDisplayIndex?: ReadonlyArray<QueryReviewV1 | undefined>,
+  evidenceSourceDisplayResults?: SkillDisplayResult[],
 ): void {
   const envelopes = displayResults
-    .filter(dr => Boolean(dr.data))
-    .map(dr => {
+    .map((dr, index) => ({
+      displayIndex: index,
+      displayResult: dr,
+      evidenceSource: evidenceSourceDisplayResults?.[index] ?? dr,
+    }))
+    .filter(({displayResult}) => Boolean(displayResult.data))
+    .map(({displayIndex, displayResult: dr, evidenceSource}) => {
       const explicitColumns = (dr as any).columnDefinitions;
       const drForEnvelope = {
         ...(dr as any),
@@ -6977,18 +7055,16 @@ function emitSkillDataEnvelopes(
       const evidenceRefId = stableSkillEvidenceRefId(
         skillId,
         envelope.meta.stepId,
-        envelope.display.title,
-        envelope.data,
+        evidenceSource.title,
+        evidenceSource.data,
         traceProvenance,
         producer,
       );
-      const artifactId = envelope.meta.stepId
-        ? artifactIdsByStepId?.get(envelope.meta.stepId)
-        : undefined;
+      const artifactId = artifactIdsByDisplayIndex?.[displayIndex];
       const queryReview = envelope.meta.stepId
-        ? queryReviewsByStepId?.get(envelope.meta.stepId) ?? buildSkillQueryReview({
+        ? queryReviewsByDisplayIndex?.[displayIndex] ?? buildSkillQueryReview({
             skillId,
-            displayResult: dr,
+            displayResult: evidenceSource,
             traceProvenance,
             producer,
             artifactId,
