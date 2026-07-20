@@ -9,9 +9,11 @@ const fs = require('fs');
 const path = require('path');
 const {
   PATHS,
+  DUMMY_BACKEND_API_KEY,
   DUMMY_OPENAI_API_KEY,
   childEnvironments,
   configureServices,
+  fetchBackendDiagnostics,
   prepareRunWorkspace,
   resolveTooling,
   secureEvidenceTree,
@@ -113,14 +115,25 @@ async function run() {
       [tooling.tsxCli, 'src/index.ts'],
       {cwd: PATHS.backend, env: environments.backend},
     );
-    const health = await harness.waitForHttp(
+    const liveness = await harness.waitForHttp(
       `${services.backendUrl}/health`,
       'Backend',
       backend,
       async (response) => await response.json(),
     );
-    writeJson(path.join(workspace.artifactDir, 'backend-health.json'), health);
-    validateBackendHealth(health);
+    if (liveness?.status !== 'OK') {
+      throw new Error('Backend liveness status must be OK');
+    }
+    writeJson(path.join(workspace.artifactDir, 'backend-health.json'), liveness);
+    const diagnostics = await fetchBackendDiagnostics(
+      services.backendUrl,
+      DUMMY_BACKEND_API_KEY,
+    );
+    writeJson(
+      path.join(workspace.artifactDir, 'backend-runtime-health.json'),
+      diagnostics,
+    );
+    validateBackendHealth(diagnostics);
 
     frontend = harness.start(
       'frontend',

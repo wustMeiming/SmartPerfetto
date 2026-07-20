@@ -12,17 +12,21 @@ const {
   writeJson,
 } = require("./dual-trace-e2e-paths.cjs");
 const {
+  DUMMY_BACKEND_API_KEY,
   DUMMY_OPENAI_API_KEY,
   childEnvironments,
   configureServices,
+  fetchBackendDiagnostics,
   validateBackendHealth,
 } = require("./dual-trace-e2e-services.cjs");
 
 module.exports = {
   PATHS,
+  DUMMY_BACKEND_API_KEY,
   DUMMY_OPENAI_API_KEY,
   childEnvironments,
   configureServices,
+  fetchBackendDiagnostics,
   prepareRunWorkspace,
   resolveTooling,
   secureEvidenceTree,

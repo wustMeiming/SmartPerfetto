@@ -117,6 +117,26 @@ reported as `aiPolicy.env.valid=false` in doctor JSON.
 The first CLI productization pass does not include `provider add/edit`; key
 writing still goes through env files or a later secure interaction design.
 
+## Android Internals Knowledge Pack
+
+```bash
+smp knowledge-pack status
+smp knowledge-pack status --format json
+smp knowledge-pack update --check
+smp knowledge-pack update
+```
+
+`status` reports the active Pack, bundled snapshot, and signed-channel state.
+`update --check` refreshes and verifies TUF metadata without installing
+content; `update` atomically installs the stable Pack after signature, version,
+hash, and revocation checks pass. The bundled snapshot distributed with npm,
+Docker, source, and portable packages remains available offline. Analysis
+projects provenance, version, and snippet hashes into logs/SSE; background
+content is not represented as trace evidence.
+
+See [Android Internals Knowledge Pack And Private Knowledge](../getting-started/android-internals-knowledge.en.md)
+for licensing, updates, and private-source boundaries.
+
 ## Trace Query And Skills
 
 ```bash

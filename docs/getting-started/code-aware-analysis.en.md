@@ -16,21 +16,21 @@ CLI example:
 
 ```bash
 cd backend
-npm run cli -- codebase register /path/to/app \
+npm run cli:dev -- codebase register /path/to/app \
   --name MyApp \
   --kind app_source \
   --path-filter app/src/main/ \
   --dry-run
 
-npm run cli -- codebase register /path/to/app \
+npm run cli:dev -- codebase register /path/to/app \
   --name MyApp \
   --kind app_source \
   --path-filter app/src/main/
 
-npm run cli -- codebase reindex cb_xxx
-npm run cli -- codebase symbols MainActivity --codebase-id cb_xxx
+npm run cli:dev -- codebase reindex cb_xxx
+npm run cli:dev -- codebase symbols MainActivity --codebase-id cb_xxx
 
-npm run cli -- run --format json \
+npm run cli:dev -- run --format json \
   --code-aware metadata_only \
   --codebase-id cb_xxx \
   ../Trace/real/android-startup-heavy/trace.pftrace \

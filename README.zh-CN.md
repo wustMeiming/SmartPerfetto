@@ -112,13 +112,15 @@ SMARTPERFETTO_OUTPUT_LANGUAGE=en
 - 保留 Perfetto 的时间线和 SQL 能力，并在 Perfetto UI 里增加 AI Assistant 面板。
 - 智能模式会先还原混合 trace 的场景时间线，再让用户选择全部场景，或只深钻启动、滑动、点击、导航、设备状态、ANR 等范围。
 - 支持跨多个 Trace、多个窗口或同一 workspace 用户的已完成分析结果对比，不要求另一个 Perfetto UI 窗口持续打开。
+- 随产品分发签名 Android Internals Knowledge Pack，用于预算受控的背景检索；私有源码/知识仍需显式授权，并与 trace 证据分离。
+- 支持确定性多 Trace Skill batch，以及在显式连接设备抓取前生成无副作用 Android 采集建议。
 - 通过 TypeScript 后端编排 Agent 流程、查询 `trace_processor_shell`、调用 YAML Skill，并把结果实时流式传给浏览器。
 - 支持 Anthropic 直连、Claude/Anthropic-compatible provider、通过 OpenAI Agents SDK 接入 OpenAI/OpenAI-compatible provider，以及 Pi Agent Core / OpenCode custom model。
 - 内置通过 registry/file-tree 发现的 YAML Skill/配置文件和多场景分析策略，用于 Android 性能排查。
 
 ## 功能总览
 
-- [功能总览](docs/getting-started/features.md)：AI Assistant 工作流、智能场景盘点与选择性深钻、常见性能场景、选区分析、报告、Trace 实时对比、多 Trace 分析结果对比、Code-Aware 本机源码分析、Provider 管理、API/CLI 自动化和运行方式。
+- [功能总览](docs/getting-started/features.md)：AI Assistant 工作流、智能场景盘点与选择性深钻、常见性能场景、选区分析、报告、raw/result 对比、Android Internals 知识、Code-Aware 本机源码分析、Provider 管理、batch/capture 自动化和运行方式。
 
 ## 技术栈
 
@@ -137,10 +139,10 @@ SMARTPERFETTO_OUTPUT_LANGUAGE=en
 
 | 渠道 | 安装 / 运行 | Node 要求 | 包含内容 |
 |------|-------------|-----------|----------|
-| Docker Hub | `docker compose -f docker-compose.hub.yml up -d` | 不需要宿主机 Node.js | 后端、提交的预构建 UI、固定 `trace_processor_shell` |
-| GitHub 免安装包 | 下载 `smartperfetto-v<version>-*.zip` / `.tar.gz` | 包内自带 Node.js 24 | 启动器、后端、预构建 UI、原生依赖、固定 `trace_processor_shell` |
-| npm CLI | `npm install -g @gracker/smartperfetto` | 宿主机 Node.js `>=24 <25` | `smp` / `smartperfetto` CLI、Skill、Strategy、SQL、trace-processor 预编译产物 |
-| 源码 checkout | `./start.sh` | 宿主机 Node.js 24 LTS | 后端源码、提交的预构建 UI、可选 `perfetto/` submodule 用于 UI 开发 |
+| Docker Hub | `docker compose -f docker-compose.hub.yml up -d` | 不需要宿主机 Node.js | 后端、提交的预构建 UI、固定 `trace_processor_shell`、签名 Knowledge Pack |
+| GitHub 免安装包 | 下载 `smartperfetto-v<version>-*.zip` / `.tar.gz` | 包内自带 Node.js 24 | 启动器、后端、预构建 UI、原生依赖、固定 `trace_processor_shell`、签名 Knowledge Pack |
+| npm CLI | `npm install -g @gracker/smartperfetto` | 宿主机 Node.js `>=24 <25` | `smp` / `smartperfetto` CLI、Skill、Strategy、SQL、trace-processor 预编译产物、签名 Knowledge Pack |
+| 源码 checkout | `./start.sh` | 宿主机 Node.js 24 LTS | 后端源码、提交的预构建 UI、签名 Knowledge Pack、可选 `perfetto/` submodule 用于 UI 开发 |
 
 维护者发布规则见 [发布手册](docs/reference/release.md) 和
 [`.claude/rules/release.md`](.claude/rules/release.md)。Feature/Bug 修改还要先查
@@ -185,7 +187,7 @@ Windows 用户使用 Docker Desktop，并启用 WSL2 backend。发布的是 Linu
 
 ### 免安装包
 
-如果用户不想安装 Docker，可以使用维护者打出的 Windows、macOS、Linux 免安装包。包内包含 Node.js 24 runtime、目标平台原生 `node_modules`、预构建 Perfetto UI、后端运行时代码和固定版本的 `trace_processor_shell`。
+如果用户不想安装 Docker，可以使用维护者打出的 Windows、macOS、Linux 免安装包。包内包含 Node.js 24 runtime、目标平台原生 `node_modules`、预构建 Perfetto UI、后端运行时代码、固定版本的 `trace_processor_shell` 和签名 Android Internals Knowledge Pack。
 
 产物：
 
@@ -210,7 +212,9 @@ git add package.json package-lock.json backend/package.json backend/package-lock
 git commit -m "chore: release v<version>"
 git push origin main
 npm --prefix backend run cli:pack-check
-npm --prefix backend publish --access public
+cd backend
+npm publish --access public
+cd ..
 npm run package:portable
 npm run release:portable -- <version> --skip-build --no-draft
 ```
@@ -418,8 +422,8 @@ npm run test:core
   - Contract / 纯类型（`backend/src/types/sparkContracts.ts` 等）：`cd backend && npx tsc --noEmit` + 相关 `__tests__/sparkContracts.test.ts`
   - CRUD-only service（仅文件 IO，未触 agent 路径）：该 service 的单测
   - 触 mcp / memory / report / agent runtime：`cd backend && npm run test:scene-trace-regression`
-- Skill YAML 改动：`npm run validate:skills` 加场景回归
-- Strategy/template Markdown 改动：`npm run validate:strategies` 加场景回归
+- Skill YAML 改动：`cd backend && npm run validate:skills` 加场景回归
+- Strategy/template Markdown 改动：`cd backend && npm run validate:strategies` 加场景回归
 - 构建或类型问题：`cd backend && npm run typecheck`
 
 不要在 TypeScript 里硬编码 Prompt 内容。场景逻辑应放在 `backend/strategies/*.strategy.md`，可复用内容放在 `*.template.md`。

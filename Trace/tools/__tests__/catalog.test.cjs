@@ -218,6 +218,18 @@ test('rejects duplicate ids, unsafe paths, hash drift, and tracked private cases
     path.join(fixture.repoRoot, '.claude/settings.local.json'),
     '{"allow":["Read(test-traces/**)"]}\n',
   );
+  const nestedWorktreeDocs = path.join(
+    fixture.repoRoot,
+    '.claude',
+    'worktrees',
+    'old-branch',
+    'docs',
+  );
+  fs.mkdirSync(nestedWorktreeDocs, {recursive: true});
+  fs.writeFileSync(
+    path.join(nestedWorktreeDocs, 'historical.md'),
+    'old branch only: test-traces/legacy.pftrace\n',
+  );
 
   const validation = validateCatalog(fixture.repoRoot);
   const codes = validation.issues.map((issue) => issue.code);

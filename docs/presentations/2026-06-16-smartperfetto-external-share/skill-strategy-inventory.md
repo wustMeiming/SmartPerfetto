@@ -1,6 +1,8 @@
-# SmartPerfetto 当前 Strategy / Skill 清单
+# SmartPerfetto Strategy / Skill 清单（2026-06-16 快照）
 
-这份清单由当前仓库扫描得到，用于外部交流时补充 PPT 中的“秀肌肉”页。PPT 负责展示版图，这里保留完整名单。
+这份清单由 2026-06-16 制作 PPT 时的仓库扫描得到，用于解释当时的“秀肌肉”
+页。它是历史快照，不代表当前数量；当前能力以 registry/frontmatter 和校验
+脚本输出为准。
 
 ## Strategy
 

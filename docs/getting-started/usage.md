@@ -39,6 +39,23 @@ SmartPerfetto 最适合 Android 12+ trace，尤其是包含 FrameTimeline 数据
 对比 AR-1234abcd
 ```
 
+## Raw Trace 实时对比
+
+如果要在同一个对话里直接查询两条 raw trace，点击 AI Assistant 顶部的
+`compare_arrows`，打开 current + reference 双窗并选择一条 workspace 历史 Trace。
+之后可以说“对比当前 trace 和参考 trace”或按当前布局说“左边/右边、上面/下面”。
+
+双窗只支持当前页面 current trace 加一条历史 reference，不支持任意两个历史 Trace。
+退出视觉双窗后可以保留 current/reference AI 上下文；“退出对比”才会清空 reference。
+CLI 的等价入口是：
+
+```bash
+smp compare current.pftrace reference.pftrace \
+  --query "对比启动和滑动差异" --mode full
+```
+
+完整交互状态见 [双 Trace 工作区](../architecture/dual-trace-workspace.md)。
+
 ## 多 Trace 分析结果对比
 
 如果你已经在两个或更多 Trace 上完成 AI 分析，可以直接在 AI 输入框里说 `对比一下另外一份`。当当前窗口有最新分析结果，并且同一 workspace 里只有一个明确的其他候选结果时，SmartPerfetto 会自动用当前结果作为基线并发起对比。
@@ -57,7 +74,8 @@ SmartPerfetto 最适合 Android 12+ trace，尤其是包含 FrameTimeline 数据
 | 完整 | 启动、滑动、ANR、复杂渲染根因 | 只问一个简单事实时成本偏高 |
 | 智能 | 混合脚本 trace、需要先看场景再决定深钻范围 | 明确只想直接分析单一场景时不如选择完整模式加具体问题 |
 
-fast 模式默认 50 turns。重型 Skill 可能返回较大的 JSON，仍可能耗尽 turns；复杂性能分析建议直接使用 full。
+fast 模式默认 50 turns，可由 runtime-specific quick-turn 配置覆盖。重型 Skill
+仍可能耗尽 turns；复杂性能分析建议直接使用 full。
 
 ## 选区与追问
 
@@ -69,6 +87,41 @@ fast 模式默认 50 turns。重型 Skill 可能返回较大的 JSON，仍可能
 ```
 
 多轮追问会复用 session。切换 fast/full/auto 模式会开启新的 SDK session，避免轻量上下文和完整上下文混用。
+
+## 源码与 Android Internals 背景
+
+- 要把 trace 结论映射到本机源码，先在 UI `Codebases` 或 CLI
+  `smp codebase preview/register/reindex` 注册，再在本次分析显式选择 codebase。
+- 内置 Android Internals Knowledge Pack 随产品分发；用
+  `smp knowledge-pack status` 查看版本，用 `update --check` 只检查更新。
+- 私有 Android Internals checkout 与内置 Pack 不同，必须配置路径 allowlist、
+  权利确认、provider 同意，并在请求中选择 source id。
+
+源码和知识背景都不能替代当前 trace 的 SQL/Skill 证据。Code-Aware 默认只给模型
+`CodeRef`；完整边界见 [Code-Aware](code-aware-analysis.md) 和
+[Android Internals 知识](android-internals-knowledge.md)。
+
+## CLI Batch 与 Android Capture
+
+确定性批处理不需要 LLM：
+
+```bash
+smp batch skill startup_analysis launch-a.pftrace launch-b.pftrace \
+  --json-out batch.json --out batch.html
+```
+
+Android 采集先生成无副作用建议/配置，再连接设备抓取：
+
+```bash
+smp capture suggest "分析 Camera 打开到首帧预览延迟" \
+  --app com.example.camera
+smp capture config --preset camera --app com.example.camera \
+  --duration 20 --out camera.pbtxt
+smp capture android --config camera.pbtxt --out camera.perfetto-trace
+```
+
+`suggest` / `config` 不会访问设备；只有 `capture android` 会通过 adb/tracebox
+实际采集。命令、平台和 `--analyze` 边界见 [CLI 参考](../reference/cli.md)。
 
 ## 输出怎么看
 

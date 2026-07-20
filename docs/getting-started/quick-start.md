@@ -44,6 +44,9 @@
 
 打开 [http://localhost:10000](http://localhost:10000)，加载 `.pftrace` 或 `.perfetto-trace` 文件，然后打开 AI Assistant 面板。
 
+Docker image 已包含固定 trace processor、提交版 UI 和签名 Android Internals
+Knowledge Pack；不需要宿主机下载这些运行时资产。
+
 ## 4. 本地开发运行
 
 适合本地使用、调试后端、改策略/Skill 或提交 PR。
@@ -59,6 +62,8 @@
 | Backend health | `http://localhost:3000/health` |
 
 后端会自动启动，前端使用仓库内的预构建 UI。只有修改 AI Assistant 前端插件时，才需要 `git submodule update --init --recursive` 后运行 `./scripts/start-dev.sh`。
+仓库也已包含离线 Knowledge Pack snapshot；后台只会按配置异步检查签名更新，不会让
+运行中的 session 静默切换知识版本。
 
 ## 5. 第一次分析
 
@@ -86,7 +91,7 @@
 - Contract / 纯类型：`cd backend && npx tsc --noEmit` + 相关 sparkContracts 单测
 - CRUD-only service：该 service 的单测
 - 触 mcp / memory / report / agent runtime：运行 `cd backend && npm run test:scene-trace-regression`
-
+- 文档入口、命令或链接：运行 `npm run verify:docs`
 - PR landing：`npm run verify:pr`（强制全量）
 
 发布、npm、Docker 或免安装包相关改动还需要读

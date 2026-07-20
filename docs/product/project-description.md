@@ -2,7 +2,7 @@
 
 ## Overview
 
-**SmartPerfetto** is an AI-powered Android performance analysis platform built on Google's Perfetto trace viewer. It supports a Web UI, standalone npm CLI, Docker, source checkout, and GitHub portable packages. The backend can use Claude Agent SDK, OpenAI Agents SDK, Pi Agent Core, or OpenCode to analyze traces, identify root causes of jank/ANR/startup issues, and provide actionable optimization suggestions with evidence-backed reasoning.
+**SmartPerfetto** is an AI-powered Android performance analysis platform built on Google's Perfetto trace viewer. It supports a Web UI, standalone npm CLI, Docker, source checkout, and GitHub portable packages. The backend can use Claude Agent SDK, OpenAI Agents SDK, Pi Agent Core, or OpenCode to analyze traces, run deterministic multi-trace Skill batches, propose Android capture configs, and provide evidence-backed root-cause analysis. Every distribution also carries a signed Android Internals Knowledge Pack for bounded background retrieval.
 
 ## Target Users
 
@@ -45,10 +45,12 @@ CLI (smp / smartperfetto) ───────────► same backend runt
 |-----------|---------|
 | **Runtime Selector** | Chooses Claude Agent SDK, OpenAI Agents SDK, Pi Agent Core, or OpenCode per session/provider |
 | **Runtime Adapters** | Claude/OpenAI/Pi/OpenCode orchestrators: scene classification → dynamic system prompt → tool loop → verification/report contract |
+| **Resolved Analysis Context** | Pins trace/reference, provider/runtime, codebase, knowledge generation, workspace/user, consent, and resume boundaries |
 | **MCP / Tool Registry** | Registry-driven tools bridging the runtime to trace data (SQL, Skills, schema lookup, planning, hypothesis, memory, code-aware lookup, comparison) |
 | **Skill Engine** | YAML-defined analysis pipelines producing layered results (L1 overview → L4 deep root cause); inventory is discovered from `backend/skills/` |
 | **Scene Classifier** | Strategy-frontmatter-driven routing to scene-specific strategies |
 | **Result Quality Pipeline** | Final-report contract, evidence contract, claim verification, identity resolution, report generation, CLI artifacts, and analysis-result snapshots |
+| **Knowledge Layer** | Signed built-in Android Internals Pack plus explicitly authorized private code/knowledge sources; background provenance stays distinct from trace evidence |
 | **Artifact Store** | Caches skill results as compact references (~3000 tokens saved per invocation) |
 | **SQL Summarizer** | Compresses SQL results to stats + samples (~85% token savings) |
 
@@ -105,6 +107,8 @@ The tool surface is registry-driven and request-shaped. Quick analysis exposes a
 5. **DataEnvelope v2.0** — Schema-driven rendering; frontend auto-renders Skill output without per-skill UI code
 6. **Token engineering** — Artifact store + SQL summarizer + progressive prompt dropping keeps context efficient
 7. **Surface separation** — Live chat stays readable while HTML reports, CLI artifacts, and snapshots keep provenance
+8. **Private-context isolation** — Raw source and private knowledge do not enter logs, SSE, reports, snapshots, or cross-session learning
+9. **Distribution parity** — npm, source, Docker, and portable products carry the runtime assets they claim, including the trace processor and Knowledge Pack
 
 ## Getting Started
 
@@ -120,7 +124,9 @@ cp backend/.env.example backend/.env
 # Or install the standalone CLI
 npm install -g @gracker/smartperfetto
 smp doctor
+smp knowledge-pack status
 smp capture presets
+smp batch --help
 ```
 
 For current architecture and release boundaries, see [Architecture Overview](../architecture/overview.en.md), [Agent Runtime](../architecture/agent-runtime.en.md), and [Release Runbook](../reference/release.en.md).

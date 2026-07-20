@@ -160,7 +160,34 @@ Output:
 
 See [Multi-Trace Analysis Result Comparison](multi-trace-result-comparison.en.md) for the full workflow.
 
-## 8. Code-Aware Local Source Analysis
+## 8. Android Internals Knowledge
+
+SmartPerfetto separates Android Internals background knowledge into two sources:
+
+- a signed Knowledge Pack bundled with npm, Docker, source, and portable
+  products, available offline and updatable through a TUF stable channel;
+- a user-allowed private checkout guarded by path, rights, provider-consent,
+  and request-level source-id checks.
+
+Entry points:
+
+- CLI: `smp knowledge-pack status` and `smp knowledge-pack update --check`.
+- AI analysis: the runtime retrieves the built-in Pack when relevant; a private
+  source must be selected explicitly for the request.
+- Admin API: `/api/rag/android-internals/*` manages private checkouts only.
+
+Output:
+
+- Pack/private content is background knowledge, never current-trace SQL/Skill
+  evidence.
+- Reports retain source, version, fingerprint, and snippet hashes; logs/SSE do
+  not project excerpt bodies.
+- Updates do not silently switch active sessions; revocation requires a new
+  analysis context.
+
+See [Android Internals Knowledge Pack And Private Knowledge](android-internals-knowledge.en.md).
+
+## 9. Code-Aware Local Source Analysis
 
 Code-Aware Analysis lets users register local App, AOSP, kernel, or OEM SDK source trees with SmartPerfetto. By default, the model sees only `CodeRef` metadata, not raw source text.
 
@@ -178,7 +205,7 @@ Output:
 
 See [Code-Aware Analysis](code-aware-analysis.en.md) for the full workflow.
 
-## 9. Provider Management And Runtime Switching
+## 10. Provider Management And Runtime Switching
 
 SmartPerfetto supports UI-managed model providers and `.env` configuration.
 
@@ -196,7 +223,7 @@ Output:
 
 See [Configuration Guide](configuration.en.md) for setup details.
 
-## 10. Automation, API, And CLI
+## 11. Automation, API, And CLI
 
 SmartPerfetto also provides backend API, CLI, and MCP tool documentation for automation.
 
@@ -209,9 +236,15 @@ Entry points:
 Output:
 
 - Integrate trace analysis into scripts, CI, batch jobs, or internal platforms.
+- `smp batch skill` runs one deterministic Skill across a bounded local trace
+  set and exports JSON/HTML. The workspace batch API also supports explicit
+  snapshot promotion and a comparison bridge.
+- `smp capture suggest/config` creates side-effect-free Android capture
+  proposals. With a connected device, `smp capture android` records the trace;
+  presets such as Camera declare the required evidence categories.
 - Reuse the same Skills, strategies, reports, and evidence-backed output flow.
 
-## 11. Runtime And Distribution Options
+## 12. Runtime And Distribution Options
 
 SmartPerfetto supports multiple runtime paths:
 
@@ -234,5 +267,8 @@ Runtime setup is in [Quick Start](quick-start.en.md). Packaging and release deta
 | Produce a shareable conclusion | HTML report |
 | Temporarily compare a reference trace in this conversation | `compare_arrows` live trace comparison |
 | Compare completed results across windows or users | `fact_check` multi-trace result comparison |
+| Retrieve Android Internals background | Built-in Knowledge Pack; explicit knowledge source for private material |
 | Map findings to local source files and line ranges | Code-Aware Analysis |
+| Run one deterministic analysis across local traces | `smp batch skill` |
+| Propose a config, then record from an Android device | `smp capture suggest/config/android` |
 | Integrate with scripts or platforms | API / CLI / MCP tools |

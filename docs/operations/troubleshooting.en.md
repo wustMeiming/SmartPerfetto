@@ -64,6 +64,9 @@ For Docker runs, check:
 - Authenticated `/api/runtime-health` reports the expected `aiEngine.credentialSource`. If it is `provider-manager`, the active Provider Manager profile overrides `.env`. Public `/health` does not expose credential diagnostics.
 - Docker has enough memory and disk.
 
+Docker Hub and normal source-image builds consume committed `frontend/` and do
+not require the `perfetto/` submodule. Only UI plugin development needs it.
+
 ## macOS Blocks trace_processor_shell
 
 If macOS says `trace_processor_shell` is from an unidentified developer, the terminal only prints `killed`, or the script reports `--version smoke test failed`, open System Settings -> Privacy & Security -> Security, click Allow Anyway, rerun `./start.sh`, and choose Open if macOS asks again.
@@ -130,9 +133,39 @@ If `SMARTPERFETTO_API_KEY` is set, requests need:
 Authorization: Bearer <token>
 ```
 
+Local development does not require a bearer token when the variable is unset.
+
+## Knowledge Pack Status Or Update Fails
+
+Use JSON status to distinguish bundled, active, and signed-channel state:
+
+```bash
+smp knowledge-pack status --format json
+smp knowledge-pack update --check --format json
+```
+
+- If the metadata channel is temporarily unreachable, a verified,
+  non-revoked bundled/active Pack remains an offline fallback.
+- Do not bypass signature, version, hash, license, or revocation failures by
+  editing the active pointer. Fix mirror URLs, network access, or system time,
+  then retry.
+- `SMARTPERFETTO_AIW_PACK_PIN` can pin only an installed, non-revoked version.
+- The Pack is background knowledge. A Pack citation without current-trace
+  evidence does not prove trace analysis succeeded.
+
 ## SSE Disconnects
 
 SSE disconnects usually come from browser refresh, network interruption, or request timeout. The backend supports `Last-Event-ID` / `lastEventId` replay ring buffer, and the frontend tries to recover missing events.
+
+If the session already completed, reconnecting
+`/api/agent/v1/:sessionId/stream` attempts to replay the result and terminal
+events.
+
+## Scene Reconstruction Is Disabled
+
+`/api/agent/v1/scene-reconstruct/*` is feature-flagged. A response containing
+`code: "FEATURE_DISABLED"` means `FEATURE_AGENT_SCENE_RECONSTRUCT` is disabled
+in this environment.
 
 ## Skill Validation Fails
 

@@ -178,8 +178,8 @@ For the Web UI dual trace workspace state machine, see
 |---|---|---|
 | Strategy / prompt template | `backend/strategies/*.strategy.md`, `*.template.md` | Enters the system prompt and constrains agent behavior |
 | YAML Skill | `backend/skills/**/*.skill.yaml` | Invoked through MCP `invoke_skill` for deterministic SQL analysis |
-| Rendering pipeline catalog | `backend/skills/pipelines/index.yaml` | Pins the upstream commit and 14 document hashes, and classifies 31 detector entries as primary variants or supporting features |
-| Rendering pipeline docs | `docs/rendering_pipelines/S01-S14*.md` | Authoritative Android 17 teaching material synchronized from `Gracker/rendering_pipelines`; copied to `backend/dist/rendering_pipelines/` during builds |
+| Rendering pipeline catalog | `backend/skills/pipelines/index.yaml` | Pins the upstream commit and document hashes, and classifies detector entries as primary variants or supporting features |
+| Rendering pipeline docs | `docs/rendering_pipelines/*.md` | Authoritative Android 17 teaching material synchronized from `Gracker/rendering_pipelines`; copied to `backend/dist/rendering_pipelines/` during builds |
 | Normal docs | Other files under `docs/` | User and contributor documentation |
 
 Do not hardcode prompt content in TypeScript. TypeScript should load, substitute, and structurally orchestrate prompts and Skills.
@@ -187,9 +187,9 @@ Do not hardcode MCP tool counts, Skill counts, or scene counts in code or
 durable docs; those come from the tool registry, `backend/skills/` tree, and
 strategy frontmatter.
 
-Rendering-pipeline results preserve two identities: S02-S14 are the teaching
-`rendering type`, while the 31 pipeline entries are trace-detection subpaths or
-features. Only entries marked `classification_role: variant` and
+Rendering-pipeline results preserve two identities: the synchronized teaching
+documents define `rendering type`, while catalog entries are trace-detection
+subpaths or features. Only entries marked `classification_role: variant` and
 `primary_eligible: true` in the catalog may become the primary classification.
 Run `npm run check:rendering-pipelines` to verify the upstream pin, hashes, and
 all active references.

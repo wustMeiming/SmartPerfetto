@@ -126,7 +126,10 @@ Agent Runtime 不直接操作 trace，它通过 SmartPerfetto 自己的 MCP / to
 
 ### 完整讲法
 
-当前仓库里有 21 个 Strategy 文件，其中 19 个 normal scene，2 个 contract-only。它们放在 `backend/strategies/*.strategy.md`。这页不只是列数字，重点是说明 SmartPerfetto 已经把很多场景分析方法从“经验口述”转成了场景契约。
+2026-06-16 制作快照里有 21 个 Strategy 文件，其中 19 个 normal scene、
+2 个 contract-only。它们放在 `backend/strategies/*.strategy.md`。这页不只是
+列数字，重点是说明 SmartPerfetto 已经把很多场景分析方法从“经验口述”转成
+了场景契约；讲当前版本时应以 registry/frontmatter 和校验脚本输出为准。
 
 Strategy 回答的是几个问题：这个用户问题属于哪个场景；分析计划里必须覆盖哪些证据；分析过程中哪些误判要避开；最终报告必须包含哪些结构。比如 startup、scrolling、scroll_response、touch_tracking、interaction、ANR、teaching 这些更接近用户感知；memory、power、io、media、network、linux、runtime_correctness 更接近系统资源；pipeline、game、overview、general、multi_trace_result_comparison 更接近渲染架构、游戏和通用分析；smart、verifier_misdiagnosis 更偏契约和防误诊。
 
@@ -140,15 +143,21 @@ Strategy 文件里通常会有 `keywords`、`compound_patterns`、`required_capa
 
 Strategy 管分析是否充分。它把不同性能场景的分析路线、必检证据、报告结构和误判边界写成文件，让 agent 不会只看一个概览结果就下结论。
 
-## 7. 当前 Skill 能力库：可执行取证单元
+## 7. 制作快照中的 Skill 能力库：可执行取证单元
 
 ### 这一页要讲清楚什么
 
-这一页展示当前可执行能力库。重点不是 231 这个数字本身，而是说明 Skill 是确定性取证管线：它能执行 SQL、组合子 Skill、保存 artifact、产出 DataEnvelope，并进入 UI / report / snapshot。
+这一页展示 2026-06-16 制作快照中的可执行能力库。重点不是 231 这个数字
+本身，而是说明 Skill 是确定性取证管线：它能执行 SQL、组合子 Skill、保存
+artifact、产出 DataEnvelope，并进入 UI / report / snapshot。
 
 ### 完整讲法
 
-当前仓库扫描到 231 个 `.skill.yaml`。目录上分成 `_template`、`atomic`、`composite`、`pipelines`、`modules`、`deep`、`comparison`。其中 atomic 有 136 个，composite 有 38 个，pipelines 有 32 个，modules 有 18 个，deep 有 2 个，comparison 有 1 个。
+2026-06-16 制作时仓库扫描到 231 个 `.skill.yaml`。目录上分成
+`_template`、`atomic`、`composite`、`pipelines`、`modules`、`deep`、
+`comparison`。其中 atomic 有 136 个，composite 有 38 个，pipelines 有
+32 个，modules 有 18 个，deep 有 2 个，comparison 有 1 个。讲当前版本时
+应现场运行校验脚本，不沿用这组快照数字。
 
 这些 Skill 不是给模型看的说明书，而是系统可以执行的 trace 分析契约。一个 Skill 会声明 typed inputs，比如 `package`、`start_ts`、`end_ts`、`frame_id`；声明 Perfetto stdlib 模块和必需表；执行 SQL 或子 Skill；用 condition、iterator、parallel 控制分支；用 display 描述前端和报告怎么展示；用 synthesize 和 artifact 控制大结果。
 

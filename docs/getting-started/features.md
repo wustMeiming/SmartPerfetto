@@ -159,7 +159,30 @@ Trace 实时对比用于在同一个 AI 对话中，把当前页面的 current T
 
 完整说明见 [多 Trace 分析结果对比](multi-trace-result-comparison.md)。
 
-## 8. Code-Aware 本机源码分析
+## 8. Android Internals 知识
+
+SmartPerfetto 把 Android Internals 背景知识分成两个明确来源：
+
+- 随 npm、Docker、源码和 portable 分发的签名 Knowledge Pack，离线可用，并可通过
+  TUF stable channel 检查或安装更新；
+- 用户显式允许的私有 checkout，受路径、权利、provider 同意和请求级 source id
+  约束。
+
+入口：
+
+- CLI：`smp knowledge-pack status`、`smp knowledge-pack update --check`。
+- AI 分析：内置 Pack 由 runtime 在需要时检索；私有 source 必须在本次请求显式选择。
+- 管理 API：`/api/rag/android-internals/*` 只管理私有 checkout。
+
+效果：
+
+- Pack/私有知识只作为 background knowledge，不能伪装成当前 trace 的 SQL/Skill 证据。
+- 报告保留来源、版本、fingerprint 和 snippet hash；日志/SSE 不投影正文片段。
+- 更新不会让运行中的 session 静默换版本；撤回会要求创建新分析上下文。
+
+完整说明见 [Android Internals 知识包与私有知识库](android-internals-knowledge.md)。
+
+## 9. Code-Aware 本机源码分析
 
 Code-Aware Analysis 允许用户把本机 App、AOSP、kernel 或 OEM SDK 源码注册给 SmartPerfetto。分析时模型默认只看到 `CodeRef` 元数据，不直接接触源码正文。
 
@@ -177,7 +200,7 @@ Code-Aware Analysis 允许用户把本机 App、AOSP、kernel 或 OEM SDK 源码
 
 完整说明见 [Code-Aware Analysis](code-aware-analysis.md)。
 
-## 9. Provider 管理和运行时切换
+## 10. Provider 管理和运行时切换
 
 SmartPerfetto 支持在 UI 中管理模型 provider，也支持通过 `.env` 配置。
 
@@ -195,7 +218,7 @@ SmartPerfetto 支持在 UI 中管理模型 provider，也支持通过 `.env` 配
 
 完整配置见 [配置指南](configuration.md)。
 
-## 10. 自动化、API 和 CLI
+## 11. 自动化、API 和 CLI
 
 除了 UI，SmartPerfetto 也提供后端 API、CLI 和 MCP 工具文档，适合自动化场景。
 
@@ -208,9 +231,13 @@ SmartPerfetto 支持在 UI 中管理模型 provider，也支持通过 `.env` 配
 效果：
 
 - 可以把 Trace 分析接入脚本、CI、批处理或内部平台。
+- `smp batch skill` 可以对有界本机 trace 集运行确定性 Skill 并导出 JSON/HTML；
+  workspace batch API 还支持显式 snapshot promotion 和 comparison bridge。
+- `smp capture suggest/config` 可无副作用地产生 Android 采集方案，连接设备后再用
+  `smp capture android` 抓取；Camera 等 preset 会声明所需证据类别。
 - 可以复用相同的 Skill、策略、报告和 evidence-backed 输出机制。
 
-## 11. 运行和分发方式
+## 12. 运行和分发方式
 
 SmartPerfetto 支持多种运行方式：
 
@@ -233,5 +260,8 @@ SmartPerfetto 支持多种运行方式：
 | 生成可分享的分析结论 | HTML report |
 | 当前对话中临时对比 reference Trace | `compare_arrows` Trace 实时对比 |
 | 跨窗口/跨用户对比已完成结果 | `fact_check` 多 Trace 分析结果对比 |
+| 查询 Android Internals 背景 | 内置 Knowledge Pack；私有资料用显式 knowledge source |
 | 把结论映射到本机源码文件和行号 | Code-Aware Analysis |
+| 对多条本机 trace 跑同一个确定性分析 | `smp batch skill` |
+| 先生成采集配置、再从 Android 设备抓 trace | `smp capture suggest/config/android` |
 | 接入脚本或平台 | API / CLI / MCP 工具 |

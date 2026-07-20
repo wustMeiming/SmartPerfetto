@@ -4,7 +4,11 @@
 
 短答：Strategy 是场景级分析契约，负责告诉 agent 该按什么路径分析、哪些证据不能漏、报告必须包含什么；Skill 是数据执行单元，负责稳定查询 trace、组织结构化结果、生成 DataEnvelope 和 artifact。
 
-当前仓库里有 21 个 Strategy 文件，其中 19 个 normal scene，2 个 contract-only；同时有 231 个 `.skill.yaml`。PPT 第 6 页展示 Strategy 场景版图，第 7 页展示 Skill 能力库，完整文件清单见 `skill-strategy-inventory.md`。
+2026-06-16 制作快照里有 21 个 Strategy 文件，其中 19 个 normal scene，2 个
+contract-only；同时有 231 个 `.skill.yaml`。这些数字用于解释当时的 PPT，
+不作为当前仓库清单；当前能力以 registry/frontmatter 和校验脚本输出为准。
+PPT 第 6 页展示 Strategy 场景版图，第 7 页展示 Skill 能力库，快照文件清单见
+`skill-strategy-inventory.md`。
 
 ## 1. 两者处在不同层
 

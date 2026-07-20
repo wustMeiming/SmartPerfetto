@@ -242,6 +242,7 @@ function validateNoLegacyTraceReferences(repoRoot, issues) {
     path.join(repoRoot, '.claude', 'settings.local.json'),
   ]);
   const ignoredPrefixes = [
+    path.join(repoRoot, '.claude', 'worktrees'),
     path.join(repoRoot, 'docs', 'archive'),
     path.join(repoRoot, 'docs', 'superpowers'),
     path.join(repoRoot, 'backend', 'logs'),

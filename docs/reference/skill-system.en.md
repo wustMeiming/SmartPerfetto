@@ -79,15 +79,18 @@ steps:
 | `parallel` | Run independent child steps concurrently |
 | `conditional` | Branch by expression |
 | `diagnostic` | Emit rule-based findings |
+| `ai_decision` | Ask the configured AI runtime for a structured decision; disabled runtimes produce an explicit skipped result |
+| `ai_summary` | Ask the configured AI runtime to summarize selected step inputs; disabled runtimes produce an explicit skipped result |
 | `pipeline` | Detect or describe rendering pipeline behavior |
 
 ## Rendering Pipeline Catalog
 
-`docs/rendering_pipelines/S01-S14*.md` is synchronized from a pinned
+`docs/rendering_pipelines/*.md` is synchronized from a pinned
 `Gracker/rendering_pipelines` commit and is the Android 17 teaching source of
-truth. `backend/skills/pipelines/index.yaml` maps 13 concrete rendering types to
-31 detector entries. A `variant` may become the primary type; a `feature` only
-adds evidence such as ANGLE, PIP, HWC overlay, or SurfaceControl usage.
+truth. `backend/skills/pipelines/index.yaml` is the live inventory that maps
+concrete rendering types to detector entries. A `variant` may become the
+primary type; a `feature` only adds evidence such as ANGLE, PIP, HWC overlay,
+or SurfaceControl usage.
 
 Pipeline definitions retain trace signals, auto-pin guidance, and analysis
 recommendations, but their `teaching` block contains only a `source` reference
@@ -175,7 +178,7 @@ review expectations:
 | `A` | Focused single-domain analysis that can produce diagnostic findings or key lists | Declares relevant `prerequisites.modules` and reusable display layers |
 | `B` | Single-fact or helper data provider | Clear query boundary, fields, and missing-data semantics |
 
-`npm run validate:skills` enforces these stable rules:
+`cd backend && npm run validate:skills` enforces these stable rules:
 
 | Rule | Behavior |
 |---|---|

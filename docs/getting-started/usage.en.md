@@ -39,6 +39,25 @@ Compare with the other result
 Compare AR-1234abcd
 ```
 
+## Live Raw Trace Comparison
+
+To query two raw traces in one conversation, click `compare_arrows` in the AI
+Assistant header, open the current + reference dual view, and select one
+workspace-history trace. You can then refer to current/reference or use the
+actual left/right/top/bottom layout.
+
+Dual view supports the current page trace plus one history reference, not two
+arbitrary history traces. Closing the visual dual view may retain AI comparison
+context; `Exit Comparison` clears the reference. The CLI equivalent is:
+
+```bash
+smp compare current.pftrace reference.pftrace \
+  --query "Compare startup and scrolling" --mode full
+```
+
+See [Dual Trace Workspace](../architecture/dual-trace-workspace.en.md) for the
+full state model.
+
 ## Multi-Trace Analysis Result Comparison
 
 After AI analysis has completed on two or more traces, you can type `Compare with the other result` in the AI input. When the current window has a latest analysis result and there is exactly one clear other candidate in the same workspace, SmartPerfetto uses the current result as the baseline and starts the comparison automatically.
@@ -57,7 +76,9 @@ This compares completed analysis results and does not require the other Perfetto
 | Full | Startup, scrolling, ANR, complex rendering root cause | A single simple fact query |
 | Auto | Mixed-script traces where you want to inspect scenes before choosing a deep-dive scope | Cases where you already know the single scene and want to run full analysis directly |
 
-Fast mode defaults to 10 turns. Heavy Skills can still return large JSON and exhaust turns, so complex performance investigations should use full mode.
+Fast mode defaults to 50 turns and can be overridden by runtime-specific
+quick-turn configuration. Heavy Skills can still exhaust the budget, so
+complex investigations should use full mode.
 
 ## Selection and Follow-Up
 
@@ -69,6 +90,46 @@ Is there a Binder or scheduling problem around this slice?
 ```
 
 Follow-up questions reuse the current session. Switching between fast, full, and auto starts a new SDK session so lightweight and full contexts do not mix.
+
+## Source And Android Internals Background
+
+- To map trace findings to local source, register through UI `Codebases` or
+  `smp codebase preview/register/reindex`, then select the codebase explicitly
+  for the analysis.
+- The built-in Android Internals Knowledge Pack ships with the product. Use
+  `smp knowledge-pack status`, or `update --check` to check without installing.
+- A private Android Internals checkout is separate from the built-in Pack and
+  requires a path allowlist, rights acknowledgement, provider consent, and a
+  request-selected source id.
+
+Source and background knowledge do not replace current-trace SQL/Skill
+evidence. Code-Aware defaults to `CodeRef` metadata. See
+[Code-Aware](code-aware-analysis.en.md) and
+[Android Internals Knowledge](android-internals-knowledge.en.md).
+
+## CLI Batch And Android Capture
+
+Deterministic batch analysis does not require an LLM:
+
+```bash
+smp batch skill startup_analysis launch-a.pftrace launch-b.pftrace \
+  --json-out batch.json --out batch.html
+```
+
+For Android capture, generate a side-effect-free proposal/config before using a
+connected device:
+
+```bash
+smp capture suggest "Analyze Camera open-to-first-preview latency" \
+  --app com.example.camera
+smp capture config --preset camera --app com.example.camera \
+  --duration 20 --out camera.pbtxt
+smp capture android --config camera.pbtxt --out camera.perfetto-trace
+```
+
+`suggest` and `config` do not access a device; only `capture android` records
+through adb/tracebox. See the [CLI Reference](../reference/cli.en.md) for
+platform and `--analyze` boundaries.
 
 ## Reading Output
 

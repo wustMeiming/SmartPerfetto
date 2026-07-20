@@ -10,7 +10,7 @@ This file is part of SmartPerfetto. See LICENSE for details.
 
 SmartPerfetto portable packages are not single-file binaries. The launcher starts
 the bundled Node.js 24 runtime, backend, pre-built Perfetto UI, and pinned
-`trace_processor_shell`.
+`trace_processor_shell`, plus the signed Android Internals Knowledge Pack.
 
 Current release assets:
 
@@ -54,15 +54,17 @@ Portable publishing normally happens after the npm CLI is published and smoked.
 Portable steps in a normal public release:
 
 ```bash
-npm run version:set -- 1.0.3
+npm run version:set -- <version>
 npm run version:sync -- --check
 git add package.json package-lock.json backend/package.json backend/package-lock.json
-git commit -m "chore: release v1.0.3"
+git commit -m "chore: release v<version>"
 git push origin main
 npm --prefix backend run cli:pack-check
-npm --prefix backend publish --access public
+cd backend
+npm publish --access public
+cd ..
 npm run package:portable
-npm run release:portable -- 1.0.3 --skip-build --no-draft
+npm run release:portable -- <version> --skip-build --no-draft
 ```
 
 `package:portable` builds all three target packages and verifies manifests.
@@ -75,8 +77,8 @@ same-version, same-commit packages were just built.
 Single-target release:
 
 ```bash
-npm run release:portable -- 1.0.3 --targets macos-arm64
-npm run release:windows-exe -- 1.0.3
+npm run release:portable -- <version> --targets macos-arm64
+npm run release:windows-exe -- <version>
 ```
 
 Do not use `--allow-dirty` for public releases. If a major bug is found after
@@ -94,7 +96,7 @@ configure:
 ```bash
 export SMARTPERFETTO_MACOS_SIGN_IDENTITY="Developer ID Application: ..."
 export SMARTPERFETTO_MACOS_NOTARY_PROFILE="notarytool-keychain-profile"
-npm run release:portable -- 1.0.3 --targets macos-arm64
+npm run release:portable -- <version> --targets macos-arm64
 ```
 
 When a signing identity is set, the script runs `codesign --options runtime` and
@@ -121,11 +123,14 @@ configured ports fail fast when unavailable.
 ## Verification
 
 The scripts verify package structure, version, manifest, Node runtime, target
-native dependencies, and the `trace_processor_shell` pin. Before a public
-release, still run a target-platform smoke test:
+native dependencies, the `trace_processor_shell` pin, and Knowledge Pack
+lock/manifest/database/license versions and hashes. Before a public release,
+still run a target-platform smoke test:
 
 1. Start the bundled launcher.
 2. Open the printed frontend URL, usually [http://localhost:10000](http://localhost:10000).
 3. Check the printed backend health URL, usually [http://localhost:3000/health](http://localhost:3000/health).
 4. Upload a small trace and confirm the platform `trace_processor_shell` starts
    in backend logs.
+5. Run `smp knowledge-pack status --format json` through the bundled CLI/backend
+   and confirm the bundled/active Pack is readable and not revoked.

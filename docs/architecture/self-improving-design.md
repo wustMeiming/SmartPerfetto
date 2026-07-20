@@ -1,10 +1,15 @@
 # SmartPerfetto Self-Improving 设计 (v3.3)
 
-**状态**：2026-04-26 经 4 轮 Codex review 全部 LGTM，已完整实施落地（12 个 commit）。
+**状态**：设计与核心组件已实现；后台 review worker 和 auto-patch 尚未接入生产启动链，
+不能仅靠设置环境变量启用。
 **负责人**：Chris
-**最后更新**：2026-04-26
+**最后核对**：2026-07-20
 
-本文档是 Self-Improving 功能的权威设计参考。设计灵感来自 Hermes Agent 的三子系统架构（Memory / Skill / Nudge Engine），但适配了 SmartPerfetto 的"数据管道"特性——SmartPerfetto 的 skill 是 SQL 查询（正确性敏感），而不是 Hermes 那种过程性 Markdown 指南。
+本文档记录 Self-Improving 功能的设计与分阶段实现。设计灵感来自 Hermes Agent
+的三子系统架构（Memory / Skill / Nudge Engine），但适配了 SmartPerfetto 的
+"数据管道"特性——SmartPerfetto 的 skill 是 SQL 查询（正确性敏感），而不是
+Hermes 那种过程性 Markdown 指南。当前可操作能力必须同时以本页的“运行状态”、
+生产启动代码和测试为准，不能把组件级实现等同于已经启用的产品能力。
 
 当前产品边界：Self-Improving 设计描述的是运行时学习子系统；主分析入口已经扩展到
 Web UI、CLI、API、Docker、免安装包，以及 Claude/OpenAI/Pi/OpenCode runtime。改动此系统时仍需按
@@ -824,30 +829,25 @@ curl -H "Authorization: Bearer $SMARTPERFETTO_API_KEY" \
 
 ---
 
-## 22. 渐进启用流程（推荐）
+## 22. 当前运行状态与渐进启用边界
 
-设计明确 default-off。生产启用按以下三阶段推进：
+设计仍以 default-off 为原则，但当前实现不是三个阶段都已接入：
 
-### 阶段 1：Shadow Mode（建议跑 1-2 周）
+| 能力 | 当前状态 | 可操作边界 |
+|---|---|---|
+| Feedback、pattern memory、metrics | 已接入 | 使用 API 与现有存储；仍需按 workspace/auth 边界访问 |
+| Curated/runtime Skill Notes 注入 | 已接入、默认关闭 | `SELF_IMPROVE_NOTES_INJECT_ENABLED=1`；quick path 可另设有界预算 |
+| Review worker / shadow 写入 | 组件与单测已存在，生产启动链未接入 | `SELF_IMPROVE_REVIEW_ENABLED` 只会被已构造的 `ReviewWorker` 检查；当前应用不会仅因该变量启动 worker |
+| Auto-patch | 未接入 | 当前代码不读取 `SELF_IMPROVE_AUTOPATCH_ENABLED`，不能作为可用能力宣传 |
 
-```bash
-# .env
-SELF_IMPROVE_REVIEW_ENABLED=1
-SELF_IMPROVE_NOTES_WRITE_ENABLED=1
-# 注入暂时关闭
-# SELF_IMPROVE_NOTES_INJECT_ENABLED=0
-```
-
-**作用**：Review worker 启动 + 写盘到 `logs/skill_notes/`，但 agent 看不到。
-**目的**：人工抽查 note 质量、failure category 命中是否合理、有没有误报安全扫描。
-
-### 阶段 2：Curated 注入
+### 已可用：Curated 注入
 
 每周走一次 review：
 
 ```bash
 # 1. 看监控
-curl /api/admin/self-improve/metrics | jq .skillNotes
+curl -H "Authorization: Bearer $SMARTPERFETTO_API_KEY" \
+  http://localhost:3000/api/admin/self-improve/metrics | jq .skillNotes
 
 # 2. 抽 5-10 个 note 人工 review，把高价值的晋升进 git baseline
 cd backend && npm run skill-notes:promote -- <skillId> <noteId>
@@ -866,16 +866,11 @@ SELF_IMPROVE_NOTES_INJECT_ENABLED=1
 **作用**：`invoke_skill` 在 prompt 里看到 curated baseline + runtime notes（按 token budget）
 **目的**：让 agent 实际从历史踩坑中获益
 
-### 阶段 3：Auto-Patch（最高风险，最后启用）
+### 尚不可用：Shadow review 与 Auto-Patch
 
-需要先把 GitHub PR webhook + squash-aware merge fingerprint 这两个推迟项实施。然后：
-
-```bash
-SELF_IMPROVE_AUTOPATCH_ENABLED=1
-```
-
-**作用**：Review agent 提议 phase_hints 改动 → worktree 隔离 → regression + e2e 全过 → 生成 PR（人工 review + merge）
-**关键**：永远**不**自动 merge。
+在把 review worker 接入受控启动/停止、资源配置、凭据、队列观测和发布形态之前，
+不要提供启用步骤。Auto-Patch 还依赖 GitHub PR webhook、squash-aware merge
+fingerprint 等推迟项；即使将来接入，也必须保持人工 review/merge 边界。
 
 ---
 
@@ -903,20 +898,14 @@ cd backend && npm run skill-notes:promote -- <skillId> <noteId> --dry-run
 
 ### 环境变量
 
-| Env | 默认 | 作用 |
+| Env | 当前状态 | 作用 |
 |---|---|---|
-| `SELF_IMPROVE_REVIEW_ENABLED` | `0` | 是否启动后台 review worker |
-| `SELF_IMPROVE_NOTES_WRITE_ENABLED` | `0` | 是否允许 backend 写 skill notes 到 logs/ |
-| `SELF_IMPROVE_NOTES_INJECT_ENABLED` | `0` | 是否在 invoke_skill 时注入 notes |
-| `SELF_IMPROVE_AUTOPATCH_ENABLED` | `0` | 是否启用 PR9c 自动 patch 流水线 |
-| `SELF_IMPROVE_QUICK_NOTES_BUDGET` | `0` | quick path 注入 token 上限（最大 100） |
-| `SELF_IMPROVE_WORKER_CONCURRENCY` | `1` | review worker 并发上限（最大 2） |
-| `SELF_IMPROVE_QUEUE_MAX` | `100` | outbox 队列长度 |
-| `SELF_IMPROVE_DAILY_BUDGET` | `100` | 每日 review jobs 上限 |
-| `SELF_IMPROVE_SKILL_COOLDOWN_MS` | `300000` | per-skill+hash 冷却 |
-| `SELF_IMPROVE_LEASE_MS` | `300000` | outbox lease 时长 |
-| `SELF_IMPROVE_MAX_ATTEMPTS` | `3` | 失败重试上限 |
-| `SELF_IMPROVE_POLL_INTERVAL_MS` | `30000` | worker 轮询间隔 |
+| `SELF_IMPROVE_NOTES_INJECT_ENABLED` | 生产代码读取，默认关闭 | 是否在 `invoke_skill` 时创建 notes 注入预算 |
+| `SELF_IMPROVE_QUICK_NOTES_BUDGET` | 生产代码读取，默认 `0` | quick path 注入 token 上限（实现会做上限裁剪） |
+| `SELF_IMPROVE_REVIEW_ENABLED` | 组件级读取，未接入应用启动 | 已构造的 `ReviewWorker` 是否启动轮询 |
+| `SELF_IMPROVE_NOTES_WRITE_ENABLED` | 设计保留，当前生产代码未读取 | 不能用于启用写入 |
+| `SELF_IMPROVE_AUTOPATCH_ENABLED` | 设计保留，当前生产代码未读取 | 不能用于启用 auto-patch |
+| 其余 `SELF_IMPROVE_*` worker 参数 | 设计保留，当前生产代码未读取 | 当前 worker 限制来自构造参数与代码默认值 |
 
 ### 文件 / DB 路径
 
@@ -934,9 +923,12 @@ cd backend && npm run skill-notes:promote -- <skillId> <noteId> --dry-run
 
 ---
 
-## 24. 测试覆盖
+## 24. 2026-04 实施时测试快照
 
-### 总规模
+以下数量是当时的验收记录，不是当前测试 inventory；当前验证应重新运行仓库脚本，
+不能把本节数字当作最新结果。
+
+### 当时规模
 
 - **340 个 unit test 全过**（19 个 test suites）
   - selfImprove 模块自身测试 261 个

@@ -1,6 +1,14 @@
 # SmartPerfetto State Machine Diagrams
 
-This document describes the state machines for the DataEnvelope architecture introduced in the data contract refactoring.
+> **Status:** historical implementation companion. It preserves the state
+> diagrams created during the original DataEnvelope refactor, but it is not the
+> current API, runtime, or storage contract. Use
+> [Data Contract](DATA_CONTRACT_DESIGN.en.md),
+> [Architecture Overview](../../docs/architecture/overview.en.md), and current
+> source/tests for operational decisions.
+
+This document describes the state machines originally introduced during the
+DataEnvelope refactor.
 
 ---
 

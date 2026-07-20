@@ -112,13 +112,15 @@ Step 4: Start or restart services. For Docker, run `docker compose -f docker-com
 - Keeps Perfetto's timeline and SQL power, then adds an AI assistant panel inside the Perfetto UI.
 - Reconstructs mixed-action traces in Smart mode before deep analysis, so users can inspect the scene timeline and choose all scenes or only startup, scrolling, click, navigation, device-state, or ANR ranges.
 - Compares completed analysis results across multiple traces, windows, or workspace users without requiring both Perfetto UI windows to stay open.
+- Ships a signed Android Internals Knowledge Pack for bounded background retrieval, while keeping private source/knowledge access explicitly authorized and separate from trace evidence.
+- Supports deterministic multi-trace Skill batches and side-effect-free Android capture proposals before explicit device recording.
 - Uses a TypeScript backend to run agent workflows, query `trace_processor_shell`, invoke YAML analysis skills, and stream results to the browser.
 - Supports Anthropic directly, Claude/Anthropic-compatible providers, OpenAI/OpenAI-compatible providers, Pi Agent Core custom models, and OpenCode custom models through the matching backend runtime.
 - Ships with registry-discovered YAML skill/config files and scene strategies for Android performance investigation.
 
 ## Feature Overview
 
-- [Feature Overview](docs/getting-started/features.en.md): AI Assistant workflows, Smart scene inventory and selected deep dives, performance scenarios, selection-aware analysis, reports, live trace comparison, multi-trace result comparison, code-aware local-source analysis, provider management, API/CLI automation, and runtime options.
+- [Feature Overview](docs/getting-started/features.en.md): AI Assistant workflows, Smart scene inventory and selected deep dives, performance scenarios, selection-aware analysis, reports, raw/result comparison, Android Internals knowledge, code-aware local-source analysis, provider management, batch/capture automation, and runtime options.
 
 ## Tech Stack
 
@@ -137,10 +139,10 @@ Step 4: Start or restart services. For Docker, run `docker compose -f docker-com
 
 | Channel | Install / run | Node requirement | Includes |
 |---------|---------------|------------------|----------|
-| Docker Hub | `docker compose -f docker-compose.hub.yml up -d` | No host Node.js required | Backend, committed pre-built UI, pinned `trace_processor_shell` |
-| GitHub portable | Download `smartperfetto-v<version>-*.zip` / `.tar.gz` | Bundled Node.js 24 | Launcher, backend, pre-built UI, native dependencies, pinned `trace_processor_shell` |
-| npm CLI | `npm install -g @gracker/smartperfetto` | Host Node.js `>=24 <25` | `smp` / `smartperfetto` CLI, Skills, Strategies, SQL, trace-processor prebuilts |
-| Source checkout | `./start.sh` | Host Node.js 24 LTS | Backend source, committed pre-built UI, optional `perfetto/` submodule for UI work |
+| Docker Hub | `docker compose -f docker-compose.hub.yml up -d` | No host Node.js required | Backend, committed pre-built UI, pinned `trace_processor_shell`, signed Knowledge Pack |
+| GitHub portable | Download `smartperfetto-v<version>-*.zip` / `.tar.gz` | Bundled Node.js 24 | Launcher, backend, pre-built UI, native dependencies, pinned `trace_processor_shell`, signed Knowledge Pack |
+| npm CLI | `npm install -g @gracker/smartperfetto` | Host Node.js `>=24 <25` | `smp` / `smartperfetto` CLI, Skills, Strategies, SQL, trace-processor prebuilts, signed Knowledge Pack |
+| Source checkout | `./start.sh` | Host Node.js 24 LTS | Backend source, committed pre-built UI, signed Knowledge Pack, optional `perfetto/` submodule for UI work |
 
 Maintainer release rules are in [Release Runbook](docs/reference/release.en.md)
 and [`.claude/rules/release.md`](.claude/rules/release.md). Feature and bug
@@ -190,7 +192,7 @@ If analysis fails with `Claude Code native binary not found at .../claude-agent-
 
 ### Portable Packages
 
-Users who do not want Docker can use maintainer-built portable packages for Windows, macOS, and Linux. Each package includes the Node.js 24 runtime, target-native `node_modules`, the pre-built Perfetto UI, backend runtime files, and the pinned `trace_processor_shell`.
+Users who do not want Docker can use maintainer-built portable packages for Windows, macOS, and Linux. Each package includes the Node.js 24 runtime, target-native `node_modules`, the pre-built Perfetto UI, backend runtime files, the pinned `trace_processor_shell`, and the signed Android Internals Knowledge Pack.
 
 Assets:
 
@@ -215,7 +217,9 @@ git add package.json package-lock.json backend/package.json backend/package-lock
 git commit -m "chore: release v<version>"
 git push origin main
 npm --prefix backend run cli:pack-check
-npm --prefix backend publish --access public
+cd backend
+npm publish --access public
+cd ..
 npm run package:portable
 npm run release:portable -- <version> --skip-build --no-draft
 ```
@@ -425,8 +429,8 @@ Required checks:
   - Contract / type-only (`backend/src/types/sparkContracts.ts` etc.): `cd backend && npx tsc --noEmit` + relevant `__tests__/sparkContracts.test.ts`
   - CRUD-only service (file IO, no agent path touched): that service's unit tests
   - Touches mcp / memory / report / agent runtime: `cd backend && npm run test:scene-trace-regression`
-- Skill YAML change: `npm run validate:skills` plus scene regression
-- Strategy/template Markdown change: `npm run validate:strategies` plus scene regression
+  - Skill YAML change: `cd backend && npm run validate:skills` plus scene regression
+  - Strategy/template Markdown change: `cd backend && npm run validate:strategies` plus scene regression
 - Type/build fix: `cd backend && npm run typecheck`
 
 Do not hardcode prompt content in TypeScript. Put scene logic in `backend/strategies/*.strategy.md` or reusable `*.template.md` files.

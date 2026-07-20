@@ -132,6 +132,7 @@ display:
 
 After adding or modifying skills:
 ```bash
+cd backend
 npm run validate:skills
 npm run test:scene-trace-regression
 ```
@@ -145,6 +146,7 @@ Strategies are scene-specific analysis playbooks in Markdown with YAML frontmatt
 
 After modifying strategies:
 ```bash
+cd backend
 npm run validate:strategies
 npm run test:scene-trace-regression
 ```

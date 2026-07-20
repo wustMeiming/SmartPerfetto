@@ -187,6 +187,7 @@ function childEnvironments(workspace, services, providerBaseUrl) {
       SMARTPERFETTO_E2E_FRONTEND_URL: services.frontendUrl,
       SMARTPERFETTO_E2E_BACKEND_URL: services.backendUrl,
       SMARTPERFETTO_E2E_BACKEND_API_KEY: DUMMY_BACKEND_API_KEY,
+      SMARTPERFETTO_E2E_LOCALE: "zh-CN",
       SMARTPERFETTO_E2E_PROVIDER_URL: providerBaseUrl,
       SMARTPERFETTO_E2E_STUB_STATE_URL: `${providerBaseUrl}/__state`,
       SMARTPERFETTO_E2E_ARTIFACT_DIR: workspace.artifactDir,
@@ -199,6 +200,29 @@ function childEnvironments(workspace, services, providerBaseUrl) {
         process.env.SMARTPERFETTO_E2E_HEADLESS || "1",
     },
   };
+}
+
+async function fetchBackendDiagnostics(
+  backendUrl,
+  apiKey,
+  fetchImpl = globalThis.fetch,
+) {
+  const response = await fetchImpl(
+    `${backendUrl.replace(/\/+$/, "")}/api/runtime-health`,
+    {
+      headers: {
+        "x-api-key": apiKey,
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal: AbortSignal.timeout(1_500),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Authenticated runtime health returned HTTP ${response.status}`,
+    );
+  }
+  return await response.json();
 }
 
 function validateBackendHealth(health) {
@@ -228,5 +252,6 @@ module.exports = {
   DUMMY_OPENAI_API_KEY,
   childEnvironments,
   configureServices,
+  fetchBackendDiagnostics,
   validateBackendHealth,
 };

@@ -612,8 +612,8 @@ keywords:
 | Compose | UI Thread (Composition) → RenderThread | 和 Standard 类似但有 Composition 阶段 |
 
 架构检测委托给生成的 YAML skill `rendering_pipeline_detection`——它从
-catalog 与 31 个 YAML 检测项生成线程/Slice 信号采集、子路径评分和
-S02-S14 出图类型聚合。TypeScript 侧（`architectureDetector.ts`）从同一
+catalog 生成线程/Slice 信号采集、子路径评分和出图类型聚合。TypeScript 侧
+（`architectureDetector.ts`）从同一
 catalog 读取 architecture metadata，不维护 pipeline ID 分支表：
 
 ```
@@ -730,7 +730,11 @@ invoke lookup_knowledge("binder-ipc")
 - 每种原因的排查路径和关键指标
 - 常见误判场景（如 oneway 事务不会阻塞调用方）
 
-**关键设计：知识是 Agent 主动拉取的，不是系统强制注入的。** 目前共有 8 个知识模板（rendering-pipeline、binder-ipc、gc-dynamics、cpu-scheduler、thermal-throttling、lock-contention、startup-root-causes、data-sources），如果在 system prompt 中预先注入全部模板，会消耗大量 token 且大部分不相关。通过 MCP 工具按需加载，Agent 只在需要时才获取对应领域的背景知识。
+**关键设计：知识是 Agent 主动拉取的，不是系统强制注入的。** 可用模板由
+`backend/strategies/knowledge-*.template.md` 动态发现，覆盖渲染、Binder、
+调度、GC、热管理、取证来源和诊断等领域；如果在 system prompt 中预先注入
+全部模板，会消耗大量 token 且大部分不相关。通过 MCP 工具按需加载，Agent
+只在需要时才获取对应领域的背景知识。
 
 SmartPerfetto 还在 Strategy 文件中提供了**条件化的深钻建议表**，这也是一种引导：
 
@@ -1269,7 +1273,7 @@ rg --files backend/skills | rg '\.skill\.yaml$' | wc -l
 | app_lifecycle_in_range | 追踪 Activity/Fragment 生命周期事件 |
 | compose_recomposition_hotspot | 检测 Jetpack Compose 重组热点 |
 | webview_v8_analysis | 分析 WebView V8 引擎：GC、脚本编译、执行时间 |
-| rendering_pipeline_detection | 识别 13 个具体出图类型、31 个检测子路径/feature，并保留细粒度证据 |
+| rendering_pipeline_detection | 按 rendering catalog 识别具体出图类型与检测子路径，并保留细粒度证据 |
 | pipeline_key_slices_overlay | 查询管线关键 Slice 的 ts/dur 用于时间线 overlay |
 
 ---

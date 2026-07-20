@@ -302,8 +302,8 @@ OPENAI_CLASSIFIER_TIMEOUT_MS=30000
 
 | Mode | Behavior | Use case |
 |---|---|---|
-| `fast` | Default 10 turns, lightweight tools | Package, process, simple facts |
-| `full` | Default 60 turns, full toolset | Startup, scrolling, ANR, complex root-cause analysis |
+| `fast` | Default 50 turns (`AGENT_QUICK_MAX_TURNS` or a runtime-specific quick override), request-shaped lightweight tools | Package, process, simple facts |
+| `full` | Default 100 turns (`AGENT_MAX_TURNS` or a runtime-specific override), capability-shaped full tools | Startup, scrolling, ANR, complex root-cause analysis |
 | `auto` | Keyword rules, hard rules, and lightweight classifier choose the mode | Default mode |
 
 The frontend persists the selected mode in `localStorage['ai-analysis-mode']`.
