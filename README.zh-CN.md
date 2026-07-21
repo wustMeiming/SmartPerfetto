@@ -440,7 +440,6 @@ npm run test:core
 ## 文档
 
 - [文档中心](docs/README.md)
-- [2026-07-20 多语言全量审查](docs/reviews/2026-07-20-multilingual-audit.md)
 - [快速开始](docs/getting-started/quick-start.md)
 - [Code-Aware Analysis](docs/getting-started/code-aware-analysis.md)
 - [架构总览](docs/architecture/overview.md)

@@ -96,6 +96,29 @@ SkillExecutor 仍会先产出 `DisplayResult` / `LayeredSkillResult`。当前桥
 Skill 时，`display.layer`、`display.level`、列 schema、执行状态和 synthesize
 输出都应能在转换后保真。
 
+## Query Review
+
+`QueryReviewV1` 是 SQL/Skill 执行的可审查元数据，不是新的 trace 证据。它由
+`execute_sql`、`execute_sql_on` 或 `invoke_skill` 生成，记录 producer、证据/Artifact
+来源、实际读取表、过滤条件、输出字段、防护规则、限制和执行统计。解析器不能可靠
+判断复杂 SQL 时必须标为 `partial`，不能把推测伪装成已观察事实。
+
+固定边界是 `allowedUse: review_metadata_only`：Query Review 可以帮助用户和 reviewer
+理解“查询做了什么”，但不能单独支持诊断 claim，也不能替代 `evidenceRefId`。完整对象
+随 DataEnvelope/Artifact 进入报告；给模型的 compact projection 不包含可执行 SQL；私有
+分析上下文对外投影时还必须经过统一脱敏。
+
+## Analysis Receipt
+
+`AnalysisReceiptV1` 在分析完成边界生成，绑定 `runId`、`sessionId`、`traceId`、请求/解析后
+模式、runtime 和 provider。它分别统计 trace evidence、非证据上下文、claim audit 和
+final-report/claim/identity 三类质量门禁，并指向实际生成的 report、snapshot 或 CLI turn。
+
+Receipt 只描述本次运行实际发生的事情。`partial` 和 `not_applicable` 不能显示成 `passed`；
+报告生成失败必须保留在 `outputs.reportError`，不能因为聊天已经完成而丢失。Web SSE、HTML
+report、CLI 持久化和 analysis-result snapshot 都保留同一版本化合约，但可以使用各自的
+可读投影；私有知识路径必须先做安全投影。
+
 ## UI Action
 
 DataEnvelope 可以派生受限的 UI action proposal：

@@ -17,7 +17,7 @@
  * the sessions DB so a corrupt outbox never takes the analysis path down
  * with it.
  *
- * See docs/architecture/self-improving-design.md §7 (SQLite Outbox).
+ * See docs/architecture/self-improving-design.md "存储与安全".
  */
 
 import Database from 'better-sqlite3';

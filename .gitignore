@@ -129,11 +129,15 @@ test-output/
 # ===================
 Feature-Dev/
 
-# Spark construction plan scratch docs
+# Transient planning, review, research, and agent evidence
 todo.md
-docs/superpowers/spark/
 docs/spark.md
-docs/archive/local-scratch/
+.omo/evidence/
+docs/archive/
+docs/presentations/
+docs/reviews/
+docs/superpowers/
+research/
 
 # ===================
 # Presentations (internal, not for public)

@@ -14,8 +14,32 @@ const DEFAULT_ROOT = path.resolve(path.dirname(SCRIPT_PATH), '..');
 const ROOT_DOCS = [
   'README.md',
   'README.zh-CN.md',
+  'CHANGELOG.md',
+  'CODE_OF_CONDUCT.md',
   'CONTRIBUTING.md',
   'SECURITY.md',
+];
+
+const RETIRED_DOCUMENTATION_PREFIXES = [
+  '.omo/evidence/',
+  'docs/archive/',
+  'docs/presentations/',
+  'docs/reviews/',
+  'docs/superpowers/',
+  'research/',
+];
+
+const RETIRED_DOCUMENTATION_FILES = new Set([
+  'backend/docs/state-machines.md',
+  'docs/architecture/deep-dive.md',
+  'docs/architecture/deep-dive-qa.md',
+  'docs/product/project-description.md',
+]);
+
+const RETIRED_REFERENCE_PATTERNS = [
+  ...RETIRED_DOCUMENTATION_PREFIXES,
+  ...RETIRED_DOCUMENTATION_FILES,
+  'docs/architecture/perfetto-ai-rfc-0025/',
 ];
 
 const OPERATIONAL_DOC_PREFIXES = [
@@ -36,7 +60,6 @@ const OPERATIONAL_DOCS = new Set([
   'docs/architecture/agent-runtime.en.md',
   'docs/architecture/technical-architecture.md',
   'docs/architecture/technical-architecture.en.md',
-  'docs/product/project-description.md',
   'backend/docs/DATA_CONTRACT_DESIGN.md',
   'backend/docs/DATA_CONTRACT_DESIGN.en.md',
 ]);
@@ -51,9 +74,11 @@ function walkMarkdown(rootDir, relativeDir, files) {
   for (const entry of fs.readdirSync(absoluteDir, {withFileTypes: true})) {
     const relativePath = toPosix(path.join(relativeDir, entry.name));
     if (entry.isDirectory()) {
-      if (relativePath === 'docs/archive') continue;
+      if (RETIRED_DOCUMENTATION_PREFIXES.some(
+        prefix => `${relativePath}/`.startsWith(prefix),
+      )) continue;
       walkMarkdown(rootDir, relativePath, files);
-    } else if (entry.name.endsWith('.md')) {
+    } else if (entry.name.endsWith('.md') || entry.name.endsWith('.mdx')) {
       files.push(relativePath);
     }
   }
@@ -89,6 +114,74 @@ export function extractMarkdownLinks(markdown) {
     });
   }
   return links;
+}
+
+export function extractHtmlLinks(markdown) {
+  const links = [];
+  const pattern = /<(?:img|a)\b[^>]*?\b(?:src|href)=["']([^"']+)["'][^>]*>/gi;
+  let match;
+  while ((match = pattern.exec(markdown)) !== null) {
+    const target = match[1].trim().split('#')[0];
+    if (
+      target.length === 0 ||
+      target.startsWith('#') ||
+      /^[a-z][a-z0-9+.-]*:/i.test(target)
+    ) {
+      continue;
+    }
+    links.push({
+      target: decodeURIComponent(target),
+      line: markdown.slice(0, match.index).split('\n').length,
+    });
+  }
+  return links;
+}
+
+function isRetiredDocumentationPath(relativePath) {
+  return (
+    RETIRED_DOCUMENTATION_FILES.has(relativePath) ||
+    relativePath.startsWith('docs/architecture/perfetto-ai-rfc-0025/') ||
+    RETIRED_DOCUMENTATION_PREFIXES.some(prefix => relativePath.startsWith(prefix))
+  );
+}
+
+export function findRetiredDocumentationPaths(paths) {
+  return paths.filter(isRetiredDocumentationPath);
+}
+
+function listTrackedFiles(rootDir) {
+  const result = spawnSync('git', ['ls-files', '-z'], {
+    cwd: rootDir,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  if (result.status !== 0) {
+    throw new Error(`git ls-files failed: ${result.stderr || result.stdout}`);
+  }
+  return result.stdout
+    .split('\0')
+    .filter(Boolean)
+    .filter(relativePath => fs.existsSync(path.join(rootDir, relativePath)));
+}
+
+function sourceFilesForRetiredReferenceCheck(paths) {
+  const extensions = /\.(?:cjs|go|js|json|md|mdx|mjs|sh|ts|tsx|yaml|yml)$/;
+  return paths.filter(relativePath =>
+    extensions.test(relativePath) &&
+    !relativePath.startsWith('frontend/') &&
+    !relativePath.startsWith('perfetto/') &&
+    !isRetiredDocumentationPath(relativePath),
+  );
+}
+
+function walkFiles(rootDir, relativeDir, files) {
+  const absoluteDir = path.join(rootDir, relativeDir);
+  if (!fs.existsSync(absoluteDir)) return;
+  for (const entry of fs.readdirSync(absoluteDir, {withFileTypes: true})) {
+    const relativePath = toPosix(path.join(relativeDir, entry.name));
+    if (entry.isDirectory()) walkFiles(rootDir, relativePath, files);
+    else files.push(relativePath);
+  }
 }
 
 function operationalDocs(files) {
@@ -176,20 +269,63 @@ function runCliHelp(rootDir) {
 export function verifyDocumentation({
   rootDir = DEFAULT_ROOT,
   cliHelp = null,
+  trackedFiles = null,
 } = {}) {
   const files = collectMaintainedMarkdown(rootDir);
   const errors = [];
+  const currentTrackedFiles = trackedFiles ?? listTrackedFiles(rootDir);
+  const referencedAssets = new Set();
+
+  for (const relativePath of findRetiredDocumentationPaths(currentTrackedFiles)) {
+    errors.push(
+      `${relativePath} is a retired documentation artifact; ` +
+      'merge durable content into a core document',
+    );
+  }
 
   for (const relativePath of files) {
     const absolutePath = path.join(rootDir, relativePath);
     const markdown = fs.readFileSync(absolutePath, 'utf8');
-    for (const link of extractMarkdownLinks(markdown)) {
+    for (const link of [
+      ...extractMarkdownLinks(markdown),
+      ...extractHtmlLinks(markdown),
+    ]) {
       const target = path.resolve(path.dirname(absolutePath), link.target);
       if (!fs.existsSync(target)) {
         errors.push(
           `${relativePath}:${link.line} broken local link ${link.target}`,
         );
+      } else if (
+        target.startsWith(path.join(rootDir, 'docs', 'images') + path.sep)
+      ) {
+        referencedAssets.add(target);
       }
+    }
+  }
+
+  const imageFiles = [];
+  walkFiles(rootDir, 'docs/images', imageFiles);
+  for (const relativePath of imageFiles) {
+    const absolutePath = path.resolve(rootDir, relativePath);
+    if (!referencedAssets.has(absolutePath)) {
+      errors.push(`${relativePath} is an orphan documentation asset`);
+    }
+  }
+
+  for (const relativePath of sourceFilesForRetiredReferenceCheck(currentTrackedFiles)) {
+    if (
+      relativePath === 'scripts/verify-docs.mjs' ||
+      relativePath === 'scripts/__tests__/verify-docs.test.mjs'
+    ) continue;
+    const content = fs.readFileSync(path.join(rootDir, relativePath), 'utf8');
+    for (const retiredPath of RETIRED_REFERENCE_PATTERNS) {
+      const index = content.indexOf(retiredPath);
+      if (index < 0) continue;
+      const line = content.slice(0, index).split('\n').length;
+      errors.push(
+        `${relativePath}:${line} references retired documentation path ` +
+        retiredPath,
+      );
     }
   }
 

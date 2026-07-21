@@ -447,7 +447,6 @@ Do not hardcode prompt content in TypeScript. Put scene logic in `backend/strate
 ## Documentation
 
 - [Documentation Center](docs/README.en.md)
-- [2026-07-20 Multilingual Audit](docs/reviews/2026-07-20-multilingual-audit.en.md)
 - [Quick Start](docs/getting-started/quick-start.en.md)
 - [Code-Aware Analysis](docs/getting-started/code-aware-analysis.en.md)
 - [Architecture Overview](docs/architecture/overview.en.md)

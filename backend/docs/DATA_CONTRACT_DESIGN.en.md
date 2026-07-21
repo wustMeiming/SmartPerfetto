@@ -106,6 +106,36 @@ bypass DataEnvelope validation. New or changed Skills must retain
 `display.layer`, `display.level`, column schema, execution status, and
 synthesize output through conversion.
 
+## Query Review
+
+`QueryReviewV1` is review metadata for an executed SQL query or Skill, not a
+new form of trace evidence. `execute_sql`, `execute_sql_on`, and `invoke_skill`
+may produce it with the producer, evidence/artifact source, tables read,
+filters, output fields, guardrails, limitations, and observed execution
+statistics. Complex SQL that cannot be inspected deterministically remains
+`partial`; inferred structure must not be presented as observed fact.
+
+Its fixed boundary is `allowedUse: review_metadata_only`. A Query Review can
+explain what a query did, but cannot support a diagnostic claim by itself or
+replace an `evidenceRefId`. The complete object follows its DataEnvelope or
+artifact into reports; the compact model projection omits executable SQL; and
+private-analysis projections apply the shared redaction boundary.
+
+## Analysis Receipt
+
+`AnalysisReceiptV1` is built at the analysis-completion boundary. It binds the
+run, session, trace, requested/resolved mode, runtime, and provider; separately
+counts trace evidence and non-evidence context; summarizes claim audit and the
+final-report, claim-verification, and identity-resolution gates; and links the
+report, snapshot, or CLI turn that was actually produced.
+
+The receipt describes what happened in this run. `partial` and
+`not_applicable` must not be projected as `passed`, and report failures remain
+visible in `outputs.reportError`. Web SSE, HTML reports, CLI persistence, and
+analysis-result snapshots keep the same versioned contract while using
+surface-appropriate readable projections. Private-knowledge flows apply the
+security projection first.
+
 ## UI Actions
 
 A DataEnvelope may derive a bounded UI action proposal:

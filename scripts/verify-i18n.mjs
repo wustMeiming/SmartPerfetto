@@ -123,21 +123,6 @@ if (catalogSource) {
 
 expectPairedHeadings('README.md', 'README.zh-CN.md');
 expectPairedHeadings('docs/README.md', 'docs/README.en.md');
-expectPairedHeadings(
-  'docs/reviews/2026-07-20-multilingual-audit.md',
-  'docs/reviews/2026-07-20-multilingual-audit.en.md',
-);
-
-for (const readmePath of [
-  'README.md',
-  'README.zh-CN.md',
-  'docs/README.md',
-  'docs/README.en.md',
-]) {
-  expectIncludes(readmePath, read(readmePath), [
-    '2026-07-20-multilingual-audit',
-  ]);
-}
 
 const uiLanguagePath =
   'perfetto/ui/src/plugins/com.smartperfetto.AIAssistant/ui_language.ts';

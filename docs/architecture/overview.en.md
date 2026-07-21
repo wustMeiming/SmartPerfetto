@@ -106,6 +106,7 @@ and frontend readiness.
    raw runtime result -> agentResultNormalizer
       -> final_report_contract gate
       -> evidence contract / claim verification / identity resolutions
+      -> QueryReviewV1 (review metadata, not standalone evidence)
 
 5. Backend streams output
    SDK events -> runtime bridge -> StreamProjector -> SSE
@@ -113,6 +114,7 @@ and frontend readiness.
 
 6. Finish and report
    conclusion -> analysis_completed -> sanitized CodeRef/patch metadata
+      -> AnalysisReceiptV1
       -> HTML report + CLI artifacts + analysis-result snapshot
       -> /api/reports/:id
 ```
@@ -156,6 +158,13 @@ artifacts with different consumers:
 | HTML report | Browser, export, sharing | Keeps evidence, claim verification, identity resolution, and appendix detail |
 | CLI artifacts | `smp run`, `smp ask`, `smp capture --analyze`, `smp report` | Persists turns, reports, claim verification, and identity files |
 | Analysis-result snapshot | Multi-result comparison and later review | Stores conclusion contract, claim support, verification, and identity metadata |
+| Query Review | AI panel, HTML report, artifact | Explains actual reads, filters, outputs, and limitations; it remains review metadata and cannot independently support a diagnosis |
+| Analysis Receipt | AI panel, HTML report, CLI, snapshot | Binds run/session/trace/runtime and summarizes evidence counts, claim audit, quality gates, and actual outputs |
+
+See the [Data Contract](../../backend/docs/DATA_CONTRACT_DESIGN.en.md) for the
+field and projection rules. A surface may compact the display, but it must not
+promote Query Review to evidence or project receipt `partial`/`not_applicable`
+states as passed.
 
 When fixing conclusion quality, identify the failing layer first: runtime
 output, contract/gate, evidence/verification, report generation, snapshot, or

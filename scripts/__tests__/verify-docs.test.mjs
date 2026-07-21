@@ -5,8 +5,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  extractHtmlLinks,
   extractMarkdownLinks,
   extractNpmRunReferences,
+  findRetiredDocumentationPaths,
   parseCliCommandNames,
   verifyDocumentation,
 } from '../verify-docs.mjs';
@@ -22,6 +24,37 @@ test('extracts local Markdown links without treating URLs and anchors as files',
     [
       {target: '../README.md', line: 1},
       {target: '../docs/images/example.png', line: 4},
+    ],
+  );
+});
+
+test('extracts local HTML image and anchor links', () => {
+  assert.deepEqual(
+    extractHtmlLinks([
+      '<img src="images/sponsor/alipay.jpg" alt="QR">',
+      '<a href="../README.md#usage">Read me</a>',
+      '<img src="https://example.com/remote.png">',
+    ].join('\n')),
+    [
+      {target: 'images/sponsor/alipay.jpg', line: 1},
+      {target: '../README.md', line: 2},
+    ],
+  );
+});
+
+test('identifies retired documentation topology without classifying runtime Markdown', () => {
+  assert.deepEqual(
+    findRetiredDocumentationPaths([
+      'docs/reviews/dated-audit.md',
+      'research/dump.md',
+      'backend/docs/state-machines.md',
+      'backend/strategies/startup.strategy.md',
+      'docs/rendering_pipelines/S01_rendering_types_overview.md',
+    ]),
+    [
+      'docs/reviews/dated-audit.md',
+      'research/dump.md',
+      'backend/docs/state-machines.md',
     ],
   );
 });

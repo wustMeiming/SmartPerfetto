@@ -1407,8 +1407,7 @@ export class ClaudeRuntime extends EventEmitter implements IOrchestrator {
       // Phase 3-3 of v2.1 (monitor-only): track when the running conversation
       // crosses the pre-rot threshold so prod can quantify how often we *would*
       // have benefited from an interrupt+resume cycle. The actual interrupt+
-      // resume orchestration is intentionally not wired yet — see
-      // `docs/archive/context-engineering/v2.1-phase-3-active-compact-design.md`. Disable by setting
+      // resume orchestration is intentionally not wired yet. Disable by setting
       // `CLAUDE_PRECOMPACT_WARN_ENABLED=false`.
       let preCompactWarned = false;
       const preCompactWarnEnabled = process.env.CLAUDE_PRECOMPACT_WARN_ENABLED !== 'false';

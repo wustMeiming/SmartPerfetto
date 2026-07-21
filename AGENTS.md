@@ -40,6 +40,11 @@ cd backend && npm run build
   and the reference docs as the source of truth.
 - Do not manually edit generated files; fix the generator/template and
   regenerate.
+- Keep tracked documentation limited to current user, architecture, runtime,
+  and maintainer contracts. Do not commit dated plans, review reports,
+  research dumps, presentation sources, or agent evidence; fold durable
+  conclusions into a core document and use issues, PRs, or git history for
+  implementation history.
 - Preserve the AI output contract: final conclusions, evidence/claim
   verification, identity resolution, reports, snapshots, CLI output, and
   frontend chat projection are separate surfaces. Keep chat readable without

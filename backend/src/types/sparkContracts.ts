@@ -5,10 +5,9 @@
 /**
  * SmartPerfetto Spark Contracts
  *
- * Single source of truth for the contract shapes introduced by the Spark
- * construction plan package (`docs/archive/superpowers/spark/plans/*`). Each plan defines a minimal,
- * forward-compatible contract that downstream services, Skills, MCP tools,
- * UI panels, or reporters can produce or consume.
+ * Single source of truth for contract shapes introduced during the legacy
+ * Spark buildout. The original planning history remains in git; downstream
+ * services, Skills, MCP tools, UI panels, and reporters depend on this module.
  *
  * Design rules (apply to every contract below):
  *  - Every result object carries `schemaVersion`, `source`, `createdAt` (or
@@ -20,8 +19,6 @@
  *    `skillId`, or an explicit `unsupportedReason`. Missing-data paths must be
  *    visible — never wrapped as a confident conclusion.
  *  - All new fields are optional by default to keep older sessions consumable.
- *
- * Spark mapping: see `docs/archive/superpowers/spark/README.md` "Spark #1-#205 覆盖矩阵".
  *
  * @module sparkContracts
  */
@@ -85,7 +82,7 @@ export interface SparkCoverageEntry {
   sparkId: number;
   /** Plan id (`01`-`57`) consuming the idea. */
   planId: string;
-  /** Status word matching `docs/archive/superpowers/spark/TODO.md`. */
+  /** Delivery status retained for compatibility with persisted Spark coverage. */
   status: 'scaffolded' | 'implemented' | 'unsupported' | 'future';
   /** Brief note explaining what landed for this Spark id. */
   note?: string;

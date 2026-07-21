@@ -11,7 +11,7 @@
  * a no-op there — it still provides an explicit signal that future runs
  * should re-parse from disk.
  *
- * See docs/architecture/self-improving-design.md §11–12.
+ * See docs/architecture/self-improving-design.md "组件级 Review 与 Patch 边界".
  */
 
 import express from 'express';
