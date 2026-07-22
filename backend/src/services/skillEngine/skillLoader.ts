@@ -47,7 +47,7 @@ function firstNonEmptyLine(text: string): string {
  *
  * The executor assumes `meta.display_name` / `meta.description` exist.
  */
-function normalizeSkillDefinition(raw: any, filePath: string): SkillDefinition | null {
+export function normalizeSkillDefinition(raw: any, filePath: string): SkillDefinition | null {
   if (!raw || typeof raw !== 'object') return null;
 
   const skill: any = raw;

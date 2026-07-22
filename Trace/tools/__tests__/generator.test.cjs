@@ -148,6 +148,52 @@ test('materializes a parseable trace with slice, counter, and sched evidence', (
   assert.match(output, /1,1,[1-9][0-9]*/);
 });
 
+test('materializes ANR and perf callstack evidence for conditional SQL branches', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-generator-conditional-'));
+  const outputPath = path.join(tempDir, 'combined.pftrace');
+  const scenario = fixtureScenario();
+  scenario.actors.processes.push({id: 'system', name: 'system_server', uid: 1000});
+  scenario.actors.threads.push({id: 'system-main', process: 'system', name: 'android.fg'});
+  scenario.signals.push(
+    {
+      type: 'anr-event',
+      at_ns: '100000000',
+      process: 'system',
+      thread: 'system-main',
+      target_process: 'app',
+      error_id: 'synthetic-anr',
+      subject: 'Input dispatching timed out waiting for com.smartperfetto.fixture',
+      cpu: 0,
+    },
+    {
+      type: 'perf-sample',
+      at_ns: '150000000',
+      process: 'app',
+      thread: 'main',
+      function_name: 'SyntheticHotFunction',
+      module_name: 'libsynthetic.so',
+      sample_count: 12,
+      sample_interval_ns: '1000000',
+      cpu: 0,
+    },
+  );
+  const overlay = encodeScenarioOverlay(repoRoot, scenario, {
+    anchorNs: '1000000000',
+    usedPids: new Set(),
+    sequenceId: 444444,
+  });
+  materializeTrace(Buffer.alloc(0), overlay.buffer, outputPath);
+
+  const output = queryTrace(outputPath, `
+    INCLUDE PERFETTO MODULE android.anrs;
+    SELECT
+      (SELECT COUNT(*) FROM android_anrs WHERE process_name = 'com.smartperfetto.fixture') AS anrs,
+      (SELECT COUNT(*) FROM perf_sample) AS samples,
+      (SELECT COUNT(*) FROM stack_profile_frame WHERE name = 'SyntheticHotFunction') AS frames`);
+  assert.match(output, /\n1,12,1\s*$/);
+  fs.rmSync(tempDir, {recursive: true, force: true});
+});
+
 test('materializes memory, battery, power, GPU, CPU frequency, IRQ, and async evidence', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-generator-signals-'));
   const outputPath = path.join(tempDir, 'combined.pftrace');

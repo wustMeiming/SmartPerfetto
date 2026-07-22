@@ -41,7 +41,15 @@ function createFixture() {
   fs.mkdirSync(path.join(repoRoot, 'backend/strategies'), {recursive: true});
   fs.writeFileSync(
     path.join(repoRoot, 'backend/skills/atomic/cpu_probe.skill.yaml'),
-    'name: cpu_probe\ntype: atomic\n',
+    [
+      'name: cpu_probe',
+      'type: composite',
+      'steps:',
+      '  - id: summary',
+      '    type: atomic',
+      '    sql: SELECT 1 AS status',
+      '',
+    ].join('\n'),
   );
   fs.writeFileSync(
     path.join(repoRoot, 'backend/skills/_template/ignored.skill.yaml'),
@@ -161,7 +169,11 @@ function createFixture() {
           type: 'skill',
           target: 'cpu_probe',
           mode: 'semantic',
+          source_file: 'backend/skills/atomic/cpu_probe.skill.yaml',
           required_steps: ['summary'],
+          required_sql_steps: ['summary'],
+          forced_sql_steps: [],
+          expected_condition_skips: [],
           semantic_step: 'summary',
           assertions: [{column: 'status', operator: 'eq', value: 'ok'}],
         },
@@ -190,6 +202,33 @@ test('loads and validates a complete two-kind catalog', () => {
   assert.deepEqual(validation.coverage.missing, {skills: [], strategies: []});
   assert.equal(resolveCaseTrace(fixture.repoRoot, 'real-startup'), path.join(fixture.realDir, 'trace.pftrace'));
   assert.equal(resolveCaseTrace(fixture.repoRoot, 'legacy-startup.pftrace'), path.join(fixture.realDir, 'trace.pftrace'));
+});
+
+test('rejects SQL inventory drift and definition-only SQL coverage', () => {
+  const fixture = createFixture();
+  const manifestPath = path.join(fixture.constructedDir, 'case.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const expectation = manifest.coverage.expectations[0];
+  expectation.mode = 'definition';
+  delete expectation.required_sql_steps;
+  writeJson(manifestPath, manifest);
+
+  let validation = validateCatalog(fixture.repoRoot);
+  assert.ok(validation.issues.some((item) => item.code === 'sql-skill-definition-only'));
+
+  expectation.mode = 'execution';
+  expectation.required_sql_steps = ['not_the_source_step'];
+  writeJson(manifestPath, manifest);
+  validation = validateCatalog(fixture.repoRoot);
+  assert.ok(validation.issues.some((item) => item.code === 'sql-inventory-mismatch'));
+});
+
+test('rejects ambiguous Skills that declare both root and step SQL', () => {
+  const fixture = createFixture();
+  const skillPath = path.join(fixture.repoRoot, 'backend/skills/atomic/cpu_probe.skill.yaml');
+  fs.appendFileSync(skillPath, 'sql: SELECT 2 AS root_status\n');
+  const validation = validateCatalog(fixture.repoRoot);
+  assert.ok(validation.issues.some((item) => item.code === 'ambiguous-root-and-step-sql'));
 });
 
 test('rejects duplicate ids, unsafe paths, hash drift, and tracked private cases', () => {

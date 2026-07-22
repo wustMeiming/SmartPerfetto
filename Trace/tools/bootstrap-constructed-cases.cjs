@@ -7,6 +7,7 @@ const path = require('node:path');
 
 const {discoverCoverageTargets, resolveCaseTrace} = require('./lib/catalog.cjs');
 const {buildConstructedTrace} = require('./lib/generator.cjs');
+const {skillSqlContract} = require('./lib/skill-sql-contract.cjs');
 
 const repoRoot = path.resolve(__dirname, '../..');
 const yaml = require(require.resolve('js-yaml', {paths: [path.join(repoRoot, 'backend')]}));
@@ -182,14 +183,18 @@ const EXPECTED_LIMITATIONS = new Map([
   ['android_kernel_wakelock_summary', {mode: 'graceful_empty', reason: 'The current generator does not emit android_kernel_wakelock counter tracks.'}],
   ['binder_root_cause', {mode: 'graceful_empty', reason: 'The fixture has blocking slices but no kernel Binder transaction packet chain.'}],
   ['block_io_analysis', {mode: 'graceful_empty', reason: 'The fixture does not yet emit block_rq ftrace events.'}],
-  ['io_pressure', {mode: 'graceful_empty', reason: 'The fixture does not yet emit PSI I/O pressure counters.'}],
-  ['callstack_analysis', {mode: 'graceful_empty', reason: 'The fixture does not contain perf samples or interned callstacks.'}],
   ['linux_perf_counter_hotspots', {mode: 'graceful_empty', reason: 'The fixture does not contain PMU perf sample/counter packets.'}],
   ['native_heap_breakdown', {mode: 'graceful_empty', reason: 'The fixture does not contain heapprofd allocation packets.'}],
   ['wattson_app_startup_power', {mode: 'graceful_empty', reason: 'Wattson startup attribution is device-model gated and unsupported by this base device.'}],
-  ['dmabuf_analysis', {mode: 'unavailable', reason: 'The fixture does not contain DMA-BUF allocation/residency events.', expected_error: 'Condition not met'}],
-  ['gc_analysis', {mode: 'unavailable', reason: 'The fixture has GC marker slices but not ART garbage-collection packets.', expected_error: 'Condition not met'}],
-  ['scroll_session_analysis', {mode: 'unavailable', reason: 'The generator does not yet emit Winscope android_input_event packets.', expected_error: 'Trace is missing required tables: android_input_event'}],
+  ['dmabuf_analysis', {mode: 'graceful_empty', reason: 'The SQL contract executes, but this fixture does not contain DMA-BUF allocation or residency events.'}],
+  ['gc_analysis', {mode: 'graceful_empty', reason: 'The SQL contract executes, but this fixture does not contain ART garbage-collection packets.'}],
+]);
+
+const ISOLATED_SQL_PROBES = new Map([
+  ['cpu_topology_view', [{
+    step: 'drop_existing_topology_view',
+    setup_sql: ['CREATE PERFETTO VIEW _cpu_topology AS SELECT 0 AS cpu_id'],
+  }]],
 ]);
 
 function listSkillFiles(root) {
@@ -271,7 +276,8 @@ function parameterValue(input, identities) {
 
 function skillExpectation(skill, family, identities) {
   const definition = skill.definition;
-  const steps = Array.isArray(definition.steps) ? definition.steps : [];
+  const contract = skillSqlContract(definition);
+  const {steps, hasRootSql} = contract;
   const parameters = {};
   for (const input of Array.isArray(definition.inputs) ? definition.inputs : []) {
     if (input.required || input.default !== undefined) {
@@ -284,13 +290,50 @@ function skillExpectation(skill, family, identities) {
     parameters.start_ts = '${trace_start}';
     parameters.end_ts = '${trace_end}';
   }
-  if (steps.length === 0) {
+  if (definition.name === 'scroll_session_analysis') {
+    parameters.touch_start_ts = '${trace_start}';
+    parameters.touch_end_ts = '${trace_end}';
+    parameters.fling_start_ts = '${trace_start}';
+    parameters.fling_end_ts = '${trace_end}';
+    parameters.has_fling = 1;
+  }
+  if (!hasRootSql && steps.length === 0) {
     return {
       id: `definition-${definition.name}`,
       type: 'skill',
       target: definition.name,
       mode: 'definition',
       source_file: path.relative(repoRoot, skill.filePath).split(path.sep).join('/'),
+      required_marker: `SmartPerfetto::CASE::${family.id}`,
+    };
+  }
+  if (hasRootSql) {
+    const limitation = EXPECTED_LIMITATIONS.get(definition.name);
+    const semanticAssertions = SEMANTIC_ASSERTION_OVERRIDES.get(definition.name);
+    return {
+      id: `execute-${definition.name}`,
+      type: 'skill',
+      target: definition.name,
+      mode: limitation?.mode ?? (semanticAssertions ? 'semantic' : 'execution'),
+      source_file: path.relative(repoRoot, skill.filePath).split(path.sep).join('/'),
+      parameters,
+      required_steps: ['root'],
+      required_sql_steps: ['root'],
+      forced_sql_steps: [],
+      isolated_sql_probes: [],
+      expected_condition_skips: [],
+      semantic_step: 'root',
+      ...(limitation || semanticAssertions ? {} : {min_rows: 0}),
+      ...(semanticAssertions ?? {}),
+      ...(limitation ? {limitation_reason: limitation.reason} : {}),
+      ...(limitation?.expected_error ? {expected_error: limitation.expected_error} : {}),
+      ...(limitation?.mode === 'unavailable' ? {
+        expected_unavailable_sql_steps: [{
+          step: 'root',
+          reason: limitation.reason,
+          error: limitation.expected_error,
+        }],
+      } : {}),
       required_marker: `SmartPerfetto::CASE::${family.id}`,
     };
   }
@@ -310,15 +353,25 @@ function skillExpectation(skill, family, identities) {
     ? semanticStepIndex
     : steps.findIndex((step) => typeof step?.id === 'string');
   const requiredStep = REQUIRED_STEP_OVERRIDES.get(definition.name);
-  const requiredStepIndex = requiredStep
-    ? steps.findIndex((step) => step.id === requiredStep)
-    : selectedStepIndex;
-  if (requiredStep && requiredStepIndex < 0) {
-    throw new Error(`Unknown required step override for ${definition.name}: ${requiredStep}`);
-  }
-  const requiredSteps = requiredStepIndex >= 0
-    ? steps.slice(0, Math.max(selectedStepIndex, requiredStepIndex) + 1).map((step) => step.id).filter(Boolean)
-    : [];
+  const requiredStepIndex = requiredStep ? steps.findIndex((step) => step.id === requiredStep) : -1;
+  if (requiredStep && requiredStepIndex < 0) throw new Error(`Unknown required step override for ${definition.name}: ${requiredStep}`);
+  const executionEndIndex = contract.sqlIds.length === 0
+    ? steps.length - 1
+    : Math.max(selectedStepIndex, requiredStepIndex, contract.lastSqlTopLevelIndex);
+  const requiredSteps = steps
+    .slice(0, executionEndIndex >= 0 ? executionEndIndex + 1 : steps.length)
+    .map((step) => step.id)
+    .filter(Boolean);
+  const requiredSqlSteps = contract.sqlIds;
+  const forcedSqlSteps = contract.forcedSqlStepIds;
+  const isolatedSqlProbes = ISOLATED_SQL_PROBES.get(definition.name) ?? [];
+  const isolatedSqlStepIds = new Set(isolatedSqlProbes.map((probe) => probe.step));
+  const expectedConditionSkips = contract.conditionOnlySqlStepIds
+    .filter((stepId) => !isolatedSqlStepIds.has(stepId))
+    .map((stepId) => ({
+      step: stepId,
+      reason: 'This conditional SQL is exercised only on its production branch because forcing it would mutate state or require condition-populated context.',
+    }));
   const limitation = EXPECTED_LIMITATIONS.get(definition.name);
   const semanticAssertions = SEMANTIC_ASSERTION_OVERRIDES.get(definition.name);
   return {
@@ -333,10 +386,21 @@ function skillExpectation(skill, family, identities) {
     source_file: path.relative(repoRoot, skill.filePath).split(path.sep).join('/'),
     parameters,
     required_steps: requiredSteps,
+    required_sql_steps: requiredSqlSteps,
+    forced_sql_steps: forcedSqlSteps,
+    isolated_sql_probes: isolatedSqlProbes,
+    expected_condition_skips: expectedConditionSkips,
     semantic_step: selectedStepIndex >= 0 ? steps[selectedStepIndex].id : null,
     ...(semanticAssertions ?? {}),
     ...(limitation ? {limitation_reason: limitation.reason} : {}),
     ...(limitation?.expected_error ? {expected_error: limitation.expected_error} : {}),
+    ...(limitation?.mode === 'unavailable' ? {
+      expected_unavailable_sql_steps: requiredSqlSteps.map((stepId) => ({
+        step: stepId,
+        reason: limitation.reason,
+        error: limitation.expected_error,
+      })),
+    } : {}),
     required_marker: `SmartPerfetto::CASE::${family.id}`,
   };
 }
@@ -518,6 +582,31 @@ function scenarioForFamily(family) {
         args: {registers_per_thread: 16, shared_mem_static: 512, shared_mem_dynamic: 0, barriers_per_block: 1, waves_per_multiprocessor: 2},
       },
     );
+  }
+  if (family.id === 'binder-io-blocking') {
+    familySignals.push({
+      type: 'anr-event',
+      at_ns: '800000000',
+      process: 'system',
+      thread: 'system-main',
+      target_process: 'app',
+      error_id: 'smartperfetto-synthetic-anr',
+      subject: 'Input dispatching timed out waiting for com.smartperfetto.fixture',
+      cpu: 0,
+    });
+  }
+  if (family.id === 'general-runtime-contracts') {
+    familySignals.push({
+      type: 'perf-sample',
+      at_ns: '700000000',
+      process: 'app',
+      thread: 'main',
+      function_name: 'SmartPerfettoSyntheticHotFunction',
+      module_name: 'libsmartperfetto_fixture.so',
+      sample_count: 12,
+      sample_interval_ns: '1000000',
+      cpu: 0,
+    });
   }
   return {
     schema_version: 1,

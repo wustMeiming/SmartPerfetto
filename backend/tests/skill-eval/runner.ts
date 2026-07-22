@@ -13,6 +13,7 @@ import { TraceProcessorService } from '../../src/services/traceProcessorService'
 import { SkillExecutor, createSkillExecutor, LayeredResult } from '../../src/services/skillEngine/skillExecutor';
 import { SkillDefinition, StepResult, SkillExecutionResult, SkillExecutionContext } from '../../src/services/skillEngine/types';
 import { validateSkillInputs } from '../../src/services/skillEngine/skillValidator';
+import { normalizeSkillDefinition } from '../../src/services/skillEngine/skillLoader';
 import yaml from 'js-yaml';
 import fs from 'fs';
 
@@ -29,6 +30,7 @@ export interface EvalStepResult {
   stepId: string;
   data: any[];
   error?: string;
+  code?: string;
   executionTimeMs: number;
 }
 
@@ -43,6 +45,15 @@ export interface EvalSkillResult {
 
 export interface EvalSkillOptions {
   allowFailedSteps?: readonly string[];
+}
+
+export interface EvalStepSequenceOptions {
+  /**
+   * SQL contract probes may explicitly execute selected read-only SQL steps
+   * even when their production condition is false. Callers must keep this
+   * list manifest-backed; the default path always preserves conditions.
+   */
+  forceSqlStepIds?: readonly string[];
 }
 
 export interface NormalizedResult {
@@ -149,7 +160,10 @@ export class SkillEvaluator {
           || (!entry.name.endsWith('.skill.yaml') && !entry.name.endsWith('.skill.yml'))
         ) continue;
         try {
-          const skill = yaml.load(fs.readFileSync(absolute, 'utf8')) as SkillDefinition;
+          const skill = normalizeSkillDefinition(
+            yaml.load(fs.readFileSync(absolute, 'utf8')),
+            absolute,
+          );
           if (skill?.name && !registry.has(skill.name)) registry.set(skill.name, skill);
         } catch {
           // The normal Skill validators report malformed YAML with file context.
@@ -316,6 +330,7 @@ export class SkillEvaluator {
       stepId,
       data: this.extractStepData(stepResult),
       error: stepResult.error,
+      code: stepResult.code,
       executionTimeMs: stepResult.executionTimeMs || 0,
     };
   }
@@ -326,7 +341,11 @@ export class SkillEvaluator {
    * input validation, prerequisite checks, conditions, SQL substitution, and
    * save_as context wiring between the requested steps.
    */
-  async executeStepSequence(stepIds: string[], params: Record<string, any> = {}): Promise<EvalStepResult[]> {
+  async executeStepSequence(
+    stepIds: string[],
+    params: Record<string, any> = {},
+    options: EvalStepSequenceOptions = {},
+  ): Promise<EvalStepResult[]> {
     if (!this.executor || !this.traceId || !this.skill) {
       throw new Error('SkillEvaluator not initialized. Call loadTrace() first.');
     }
@@ -358,13 +377,20 @@ export class SkillEvaluator {
     };
 
     const results: EvalStepResult[] = [];
+    const forcedSqlSteps = new Set(options.forceSqlStepIds || []);
     for (const stepId of stepIds) {
       const step = this.skill.steps?.find(s => s.id === stepId);
       if (!step) {
         throw new Error(`Step not found: ${stepId}`);
       }
 
-      const stepResult = await executor.executeStep(step, context, this.skill.name) as StepResult;
+      const shouldForceSql = forcedSqlSteps.has(stepId)
+        && 'sql' in step
+        && typeof step.sql === 'string';
+      const executionStep = shouldForceSql
+        ? { ...step, condition: undefined }
+        : step;
+      const stepResult = await executor.executeStep(executionStep, context, this.skill.name) as StepResult;
       if (stepResult.success) {
         context.results[step.id] = stepResult;
         if ('save_as' in step && step.save_as) {
@@ -377,11 +403,46 @@ export class SkillEvaluator {
         stepId,
         data: this.extractStepData(stepResult),
         error: stepResult.error,
+        code: stepResult.code,
         executionTimeMs: stepResult.executionTimeMs || 0,
       });
     }
 
     return results;
+  }
+
+  /** Execute a root-level atomic Skill through the production runtime path. */
+  async executeRootAtomic(params: Record<string, any> = {}): Promise<EvalStepResult> {
+    const result = await this.executeRuntimeSkill(params);
+    if (!result.success) {
+      return {
+        success: false,
+        stepId: 'root',
+        data: [],
+        error: result.error || 'Root atomic Skill execution failed',
+        executionTimeMs: result.executionTimeMs || 0,
+      };
+    }
+
+    const root = result.rawResults?.root;
+    if (!root) {
+      return {
+        success: false,
+        stepId: 'root',
+        data: [],
+        error: 'Root atomic Skill completed without rawResults.root',
+        executionTimeMs: result.executionTimeMs || 0,
+      };
+    }
+
+    return {
+      success: root.success,
+      stepId: 'root',
+      data: this.extractStepData(root),
+      error: root.error,
+      code: root.code,
+      executionTimeMs: root.executionTimeMs || result.executionTimeMs || 0,
+    };
   }
 
   private extractStepData(stepResult: StepResult): any[] {

@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {spawnSync} = require('node:child_process');
+const {randomUUID} = require('node:crypto');
 
 const {collectPacketSequenceIds, encodeTrace} = require('./perfetto-proto.cjs');
 const {sha256Buffer} = require('./hash.cjs');
@@ -19,7 +20,7 @@ const SUPPORTED_SIGNAL_TYPES = new Set([
   'sched-running', 'process-stats', 'battery-counters', 'power-rail',
   'gpu-work-period', 'gpu-compute-kernel', 'gpu-frequency', 'gpu-power-state',
   'cpu-frequency', 'cpu-idle', 'irq-span', 'frame-timeline', 'lmk-kill',
-  'managed-heap-graph',
+  'managed-heap-graph', 'anr-event', 'perf-sample',
 ]);
 const HEAP_ROOT_TYPES = new Set([
   'ROOT_UNKNOWN',
@@ -152,6 +153,22 @@ function validateScenario(scenario) {
       ));
       if (at + duration > clockDuration) {
         throw new Error(`scenario.signals[${index}] ends after scenario.clock.duration_ns`);
+      }
+    }
+    if (signal.type === 'perf-sample') {
+      const sampleCount = positiveSafeInteger(
+        signal.sample_count,
+        `scenario.signals[${index}].sample_count`,
+      );
+      if (sampleCount > 1000) {
+        throw new Error(`scenario.signals[${index}].sample_count must not exceed 1000`);
+      }
+      const interval = BigInt(positiveUint64String(
+        signal.sample_interval_ns,
+        `scenario.signals[${index}].sample_interval_ns`,
+      ));
+      if (at + interval * BigInt(sampleCount - 1) > clockDuration) {
+        throw new Error(`scenario.signals[${index}] perf samples end after scenario.clock.duration_ns`);
       }
     }
   }
@@ -496,6 +513,63 @@ function encodeScenarioOverlay(repoRoot, scenario, options) {
         timestamp,
         [HEAP_GRAPH_EXTENSION]: validateManagedHeapGraph(signal, process),
       });
+    } else if (signal.type === 'anr-event') {
+      const {process: sourceProcess, thread} = actorForSignal(signal, identities);
+      const targetProcess = identities.processDefinitions.get(signal.target_process);
+      if (!targetProcess) throw new Error(`anr-event references unknown target process ${signal.target_process}`);
+      const errorId = nonEmptyString(signal.error_id, 'anr-event error_id');
+      const subject = nonEmptyString(signal.subject, 'anr-event subject');
+      const events = eventsForCpu(signal.cpu ?? 0);
+      events.push(printEvent(
+        timestamp,
+        thread.tid,
+        `C|${sourceProcess.pid}|ErrorId:${targetProcess.name} ${targetProcess.pid}#${errorId}|1`,
+      ));
+      events.push(printEvent(
+        timestamp,
+        thread.tid,
+        `C|${sourceProcess.pid}|Subject(for ErrorId ${errorId}):${subject}|1`,
+      ));
+    } else if (signal.type === 'perf-sample') {
+      const {process, thread} = actorForSignal(signal, identities);
+      const iidBase = (index + 1) * 1000;
+      const pathIid = iidBase + 1;
+      const functionIid = iidBase + 2;
+      const mappingIid = iidBase + 3;
+      const frameIid = iidBase + 4;
+      const callstackIid = iidBase + 5;
+      dataPackets.push({
+        timestamp,
+        internedData: {
+          mappingPaths: [{iid: pathIid, str: Buffer.from(nonEmptyString(signal.module_name, 'perf-sample module_name'))}],
+          functionNames: [{iid: functionIid, str: Buffer.from(nonEmptyString(signal.function_name, 'perf-sample function_name'))}],
+          mappings: [{
+            iid: mappingIid,
+            startOffset: 0,
+            start: 4096,
+            end: 8192,
+            loadBias: 0,
+            pathStringIds: [pathIid],
+          }],
+          frames: [{iid: frameIid, functionNameId: functionIid, mappingId: mappingIid, relPc: 16}],
+          callstacks: [{iid: callstackIid, frameIds: [frameIid]}],
+        },
+      });
+      const sampleCount = positiveSafeInteger(signal.sample_count, 'perf-sample sample_count');
+      const interval = BigInt(positiveUint64String(signal.sample_interval_ns, 'perf-sample sample_interval_ns'));
+      for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
+        dataPackets.push({
+          timestamp: (BigInt(timestamp) + interval * BigInt(sampleIndex)).toString(),
+          perfSample: {
+            cpu: nonNegativeInteger(signal.cpu ?? 0, 'perf-sample cpu'),
+            pid: process.pid,
+            tid: thread.tid,
+            cpuMode: 'MODE_USER',
+            timebaseCount: sampleIndex + 1,
+            callstackIid,
+          },
+        });
+      }
     } else if (signal.type === 'battery-counters') {
       const battery = {};
       if (signal.capacity_percent !== undefined) battery.capacityPercent = finiteNumber(signal.capacity_percent, 'battery capacity_percent');
@@ -710,7 +784,16 @@ function materializeTrace(base, overlay, outputPath) {
   }
   const output = Buffer.concat([base, overlay]);
   fs.mkdirSync(path.dirname(outputPath), {recursive: true});
-  fs.writeFileSync(outputPath, output);
+  const tempPath = path.join(
+    path.dirname(outputPath),
+    `.${path.basename(outputPath)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  try {
+    fs.writeFileSync(tempPath, output);
+    fs.renameSync(tempPath, outputPath);
+  } finally {
+    fs.rmSync(tempPath, {force: true});
+  }
   return {
     base_bytes: base.length,
     overlay_bytes: overlay.length,

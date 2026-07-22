@@ -7,6 +7,8 @@ const Ajv2020 = require('ajv/dist/2020');
 
 const {sha256File} = require('./hash.cjs');
 const {SUPPORTED_SIGNAL_TYPES} = require('./generator.cjs');
+const {skillSqlContract} = require('./skill-sql-contract.cjs');
+const yaml = require('js-yaml');
 
 const CASE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
@@ -64,6 +66,32 @@ function discoverCoverageTargets(repoRoot) {
     skills: [...new Set(skills)].sort(),
     strategies: [...new Set(strategies)].sort(),
   };
+}
+
+function discoverSkillContracts(repoRoot) {
+  const skillsRoot = path.join(repoRoot, 'backend', 'skills');
+  const contracts = new Map();
+  for (const filePath of listFilesRecursive(
+    skillsRoot,
+    (candidate) =>
+      candidate.endsWith('.skill.yaml') &&
+      !candidate.split(path.sep).includes('_template') &&
+      !path.basename(candidate).startsWith('_'),
+  )) {
+    const definition = yaml.load(fs.readFileSync(filePath, 'utf8'));
+    if (!definition?.name) continue;
+    contracts.set(definition.name, {
+      ...skillSqlContract(definition),
+      definition,
+      source_file: path.relative(repoRoot, filePath).split(path.sep).join('/'),
+    });
+  }
+  return contracts;
+}
+
+function sameStringSet(actual, expected) {
+  if (!Array.isArray(actual)) return false;
+  return JSON.stringify([...new Set(actual)].sort()) === JSON.stringify([...new Set(expected)].sort());
 }
 
 function caseManifestPaths(repoRoot) {
@@ -286,6 +314,7 @@ function validateNoLegacyTraceReferences(repoRoot, issues) {
 function validateCatalog(repoRoot) {
   const catalog = loadCatalog(repoRoot);
   const targets = discoverCoverageTargets(repoRoot);
+  const skillContracts = discoverSkillContracts(repoRoot);
   const issues = [];
   const ids = new Map();
   const baseIds = new Set(catalog.cases.filter((entry) => entry.kind === 'real').map((entry) => entry.id));
@@ -378,6 +407,105 @@ function validateCatalog(repoRoot) {
       if (mode !== 'definition') {
         if (!Array.isArray(expectation.required_steps) || expectation.required_steps.length === 0 || !expectation.semantic_step) {
           issues.push(issue('incomplete-execution-expectation', entry.manifest_path, `Skill ${expectation.target} requires steps and semantic_step`));
+        }
+      }
+      const contract = skillContracts.get(expectation.target);
+      if (!contract) {
+        issues.push(issue('missing-skill-contract', entry.manifest_path, `Skill ${expectation.target} has no source contract`));
+      } else {
+        if (expectation.source_file !== contract.source_file) {
+          issues.push(issue(
+            'skill-source-mismatch',
+            entry.manifest_path,
+            `Skill ${expectation.target} source_file must be ${contract.source_file}`,
+          ));
+        }
+        const executable = contract.hasRootSql || contract.steps.length > 0;
+        if (contract.hasRootSql && contract.hasStepSql) {
+          issues.push(issue(
+            'ambiguous-root-and-step-sql',
+            entry.manifest_path,
+            `Skill ${expectation.target} declares both root SQL and step SQL; the runtime contract must choose one execution model`,
+          ));
+        }
+        if (mode === 'definition' && executable) {
+          issues.push(issue(
+            'sql-skill-definition-only',
+            entry.manifest_path,
+            `Skill ${expectation.target} has executable SQL/steps but is marked definition-only`,
+          ));
+        }
+        if (mode !== 'definition') {
+          if (!sameStringSet(expectation.required_sql_steps, contract.sqlIds)) {
+            issues.push(issue(
+              'sql-inventory-mismatch',
+              entry.manifest_path,
+              `Skill ${expectation.target} required_sql_steps must exactly match source SQL: ${contract.sqlIds.join(', ') || '(none)'}`,
+            ));
+          }
+          if (!sameStringSet(expectation.forced_sql_steps ?? [], contract.forcedSqlStepIds)) {
+            issues.push(issue(
+              'forced-sql-inventory-mismatch',
+              entry.manifest_path,
+              `Skill ${expectation.target} forced_sql_steps must exactly match conditional read-only SQL: ${contract.forcedSqlStepIds.join(', ') || '(none)'}`,
+            ));
+          }
+          const isolatedProbeIds = (expectation.isolated_sql_probes ?? []).map((item) => item.step);
+          const unknownIsolatedProbes = isolatedProbeIds.filter((id) =>
+            !contract.conditionOnlySqlStepIds.includes(id));
+          if (unknownIsolatedProbes.length > 0) {
+            issues.push(issue(
+              'unknown-isolated-sql-probe',
+              entry.manifest_path,
+              `Skill ${expectation.target} has isolated probes outside conditional non-read-only SQL: ${unknownIsolatedProbes.join(', ')}`,
+            ));
+          }
+          const duplicateIsolatedProbes = isolatedProbeIds.filter((id, index) =>
+            isolatedProbeIds.indexOf(id) !== index);
+          if (duplicateIsolatedProbes.length > 0) {
+            issues.push(issue(
+              'duplicate-isolated-sql-probe',
+              entry.manifest_path,
+              `Skill ${expectation.target} repeats isolated probes: ${[...new Set(duplicateIsolatedProbes)].join(', ')}`,
+            ));
+          }
+          const conditionSkipIds = (expectation.expected_condition_skips ?? []).map((item) => item.step);
+          const expectedConditionOnlyIds = contract.conditionOnlySqlStepIds
+            .filter((id) => !isolatedProbeIds.includes(id));
+          if (!sameStringSet(conditionSkipIds, expectedConditionOnlyIds)) {
+            issues.push(issue(
+              'condition-skip-inventory-mismatch',
+              entry.manifest_path,
+              `Skill ${expectation.target} expected_condition_skips must exactly match conditional SQL without an isolated probe: ${expectedConditionOnlyIds.join(', ') || '(none)'}`,
+            ));
+          }
+          const requiredStepIds = new Set(expectation.required_steps ?? []);
+          if (contract.hasRootSql && !requiredStepIds.has('root')) {
+            issues.push(issue('missing-root-sql-step', entry.manifest_path, `Skill ${expectation.target} must execute root SQL`));
+          }
+          for (const topLevelIndex of new Set(
+            contract.sqlIds.length === 0
+              ? contract.steps.map((_, index) => index)
+              : contract.sqlSteps.map((step) => step.topLevelIndex),
+          )) {
+            const stepId = contract.steps[topLevelIndex]?.id;
+            if (stepId && !requiredStepIds.has(stepId)) {
+              issues.push(issue(
+                'missing-sql-execution-step',
+                entry.manifest_path,
+                `Skill ${expectation.target} required_steps omits SQL workflow step ${stepId}`,
+              ));
+            }
+          }
+          const unavailableIds = (expectation.expected_unavailable_sql_steps ?? []).map((item) => item.step);
+          const unknownUnavailable = unavailableIds.filter((id) => !contract.sqlIds.includes(id));
+          if (unknownUnavailable.length > 0) {
+            issues.push(issue(
+              'unknown-unavailable-sql-step',
+              entry.manifest_path,
+              `Skill ${expectation.target} declares unknown unavailable SQL: ${unknownUnavailable.join(', ')}`,
+            ));
+          }
         }
       }
       if (mode === 'semantic' && (!Array.isArray(expectation.assertions) || expectation.assertions.length === 0)) {

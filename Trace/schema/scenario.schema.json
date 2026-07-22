@@ -62,14 +62,21 @@
               "sched-running", "process-stats", "battery-counters", "power-rail",
               "gpu-work-period", "gpu-frequency", "gpu-power-state", "cpu-frequency", "cpu-idle",
               "irq-span", "frame-timeline", "lmk-kill", "managed-heap-graph",
-              "gpu-compute-kernel"
+              "gpu-compute-kernel", "anr-event", "perf-sample"
             ]
           },
           "at_ns": {"type": "string", "pattern": "^[0-9]+$"},
           "duration_ns": {"type": "string", "pattern": "^[0-9]+$"},
           "process": {"type": "string"},
           "thread": {"type": "string"},
+          "target_process": {"type": "string"},
           "name": {"type": "string"},
+          "error_id": {"type": "string", "minLength": 1},
+          "subject": {"type": "string", "minLength": 1},
+          "function_name": {"type": "string", "minLength": 1},
+          "module_name": {"type": "string", "minLength": 1},
+          "sample_count": {"type": "integer", "minimum": 1, "maximum": 1000},
+          "sample_interval_ns": {"type": "string", "pattern": "^[1-9][0-9]*$"},
           "track_name": {"type": "string"},
           "subsystem": {"type": "string"},
           "layer_name": {"type": "string"},
@@ -187,6 +194,19 @@
               "required": [
                 "process", "duration_ns", "gpu_id", "context", "kernel",
                 "demangled_kernel", "arch", "grid", "workgroup", "args"
+              ]
+            }
+          },
+          {
+            "if": {"properties": {"type": {"const": "anr-event"}}},
+            "then": {"required": ["process", "thread", "target_process", "error_id", "subject"]}
+          },
+          {
+            "if": {"properties": {"type": {"const": "perf-sample"}}},
+            "then": {
+              "required": [
+                "process", "thread", "function_name", "module_name",
+                "sample_count", "sample_interval_ns"
               ]
             }
           }

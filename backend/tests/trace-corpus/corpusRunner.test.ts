@@ -8,6 +8,7 @@ import {
   loadCorpus,
   resolveParameterTokens,
   runCorpusRegression,
+  sqlResultState,
 } from './corpusRunner';
 
 const repoRoot = path.resolve(__dirname, '../../..');
@@ -68,6 +69,16 @@ describe('Trace corpus regression runner', () => {
       utid: 40,
       package: 'com.smartperfetto.fixture',
     });
+  });
+
+  it('does not treat skipped or optional-error SQL as executed', () => {
+    expect(sqlResultState({success: true, code: 'condition_not_met'})).toBe('condition_skipped');
+    expect(sqlResultState({
+      success: true,
+      code: 'optional_query_error',
+      error: 'no such table: optional_table',
+    })).toBe('failed');
+    expect(sqlResultState({success: true})).toBe('executed');
   });
 
   it('executes startup_analysis and startup Strategy against the constructed startup case', async () => {

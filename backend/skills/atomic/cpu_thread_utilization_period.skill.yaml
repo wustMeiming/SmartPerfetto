@@ -37,6 +37,12 @@ inputs:
     type: number
     required: false
     default: 30
+  - name: start_ts
+    type: timestamp
+    required: false
+  - name: end_ts
+    type: timestamp
+    required: false
 
 steps:
   - id: thread_util
@@ -72,6 +78,8 @@ steps:
           u.utilization
         FROM target_threads t
         CROSS JOIN cpu_thread_utilization_per_period(time_from_ms(100), t.utid) u
+        WHERE (${start_ts} IS NULL OR u.ts >= ${start_ts})
+          AND (${end_ts} IS NULL OR u.ts < ${end_ts})
       )
       SELECT process_name, thread_name, ts, ROUND(utilization, 4) AS utilization
       FROM samples

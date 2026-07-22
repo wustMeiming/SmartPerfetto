@@ -76,8 +76,22 @@
         "required_steps": [
           "evidence_coverage",
           "camera_process_candidates",
-          "camera_slice_candidates"
+          "camera_slice_candidates",
+          "camera_binder_summary",
+          "camera_dmabuf_summary",
+          "pixel_camera_stage_summary"
         ],
+        "required_sql_steps": [
+          "evidence_coverage",
+          "camera_process_candidates",
+          "camera_slice_candidates",
+          "camera_binder_summary",
+          "camera_dmabuf_summary",
+          "pixel_camera_stage_summary"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "camera_slice_candidates",
         "min_rows": 2,
         "assertions": [
@@ -97,8 +111,16 @@
         "source_file": "backend/skills/atomic/media_codec_activity.skill.yaml",
         "parameters": {},
         "required_steps": [
-          "codec_activity_summary"
+          "codec_activity_summary",
+          "slow_codec_events"
         ],
+        "required_sql_steps": [
+          "codec_activity_summary",
+          "slow_codec_events"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "codec_activity_summary",
         "required_marker": "SmartPerfetto::CASE::media-network-camera"
       },
@@ -114,6 +136,12 @@
         "required_steps": [
           "modem_network_correlation"
         ],
+        "required_sql_steps": [
+          "modem_network_correlation"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "modem_network_correlation",
         "required_marker": "SmartPerfetto::CASE::media-network-camera"
       },
@@ -142,6 +170,35 @@
           "network_power_cost",
           "network_slice_overview"
         ],
+        "required_sql_steps": [
+          "check_network_data",
+          "check_network_slices",
+          "evidence_scope",
+          "network_overview",
+          "traffic_by_interface",
+          "app_traffic_ranking",
+          "transport_distribution",
+          "port_analysis",
+          "traffic_timeline",
+          "large_transfers",
+          "network_power_cost",
+          "network_slice_overview"
+        ],
+        "forced_sql_steps": [
+          "check_network_slices",
+          "evidence_scope",
+          "network_overview",
+          "traffic_by_interface",
+          "app_traffic_ranking",
+          "transport_distribution",
+          "port_analysis",
+          "traffic_timeline",
+          "large_transfers",
+          "network_power_cost",
+          "network_slice_overview"
+        ],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "network_slice_overview",
         "required_marker": "SmartPerfetto::CASE::media-network-camera"
       },
@@ -161,8 +218,20 @@
         "source_file": "backend/skills/atomic/webview_v8_analysis.skill.yaml",
         "parameters": {},
         "required_steps": [
-          "v8_gc_events"
+          "v8_gc_events",
+          "v8_script_execution",
+          "v8_compilation",
+          "v8_frame_impact"
         ],
+        "required_sql_steps": [
+          "v8_gc_events",
+          "v8_script_execution",
+          "v8_compilation",
+          "v8_frame_impact"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "v8_gc_events",
         "required_marker": "SmartPerfetto::CASE::media-network-camera"
       },

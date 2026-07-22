@@ -85,6 +85,12 @@
         "required_steps": [
           "dvfs_stats"
         ],
+        "required_sql_steps": [
+          "dvfs_stats"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "dvfs_stats",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -98,6 +104,12 @@
         "required_steps": [
           "battery_samples"
         ],
+        "required_sql_steps": [
+          "battery_samples"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "battery_samples",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -109,8 +121,21 @@
         "source_file": "backend/skills/composite/battery_drain_attribution.skill.yaml",
         "parameters": {},
         "required_steps": [
-          "battery_drain_rate"
+          "battery_drain_rate",
+          "battery_charge",
+          "doze_state",
+          "wakelock_summary",
+          "wakeup_frequency",
+          "screen_off_cpu",
+          "suspend_wakeup",
+          "job_scheduler",
+          "network_activity",
+          "modem_network"
         ],
+        "required_sql_steps": [],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "battery_drain_rate",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -124,15 +149,35 @@
         "required_steps": [
           "drain_rate"
         ],
+        "required_sql_steps": [
+          "drain_rate"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "drain_rate",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
       {
-        "id": "definition-gpu_power_state_analysis",
+        "id": "execute-gpu_power_state_analysis",
         "type": "skill",
         "target": "gpu_power_state_analysis",
-        "mode": "definition",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/gpu_power_state_analysis.skill.yaml",
+        "parameters": {
+          "transition_threshold_pct": 15
+        },
+        "required_steps": [
+          "root"
+        ],
+        "required_sql_steps": [
+          "root"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
+        "semantic_step": "root",
+        "min_rows": 0,
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
       {
@@ -145,6 +190,12 @@
         "required_steps": [
           "mali_state"
         ],
+        "required_sql_steps": [
+          "mali_state"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "mali_state",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -156,8 +207,24 @@
         "source_file": "backend/skills/composite/power_consumption_overview.skill.yaml",
         "parameters": {},
         "required_steps": [
-          "hardware_rails"
+          "hardware_rails",
+          "wattson_rails",
+          "battery_drain_rate",
+          "suspend_wakeup",
+          "wakeup_frequency",
+          "wakelocks",
+          "screen_off_cpu",
+          "modem_network",
+          "cpu_freq_residency",
+          "wattson_threads",
+          "battery_charge",
+          "dvfs",
+          "gpu_work_period"
         ],
+        "required_sql_steps": [],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "hardware_rails",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -169,8 +236,26 @@
         "source_file": "backend/skills/modules/hardware/power_module.skill.yaml",
         "parameters": {},
         "required_steps": [
-          "wakelock_overview"
+          "wakelock_overview",
+          "long_wakelocks",
+          "cpu_idle_states",
+          "suspend_resume",
+          "power_counters",
+          "power_mode_events",
+          "wakeup_sources"
         ],
+        "required_sql_steps": [
+          "wakelock_overview",
+          "long_wakelocks",
+          "cpu_idle_states",
+          "suspend_resume",
+          "power_counters",
+          "power_mode_events",
+          "wakeup_sources"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "wakelock_overview",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -186,6 +271,12 @@
         "required_steps": [
           "rail_energy"
         ],
+        "required_sql_steps": [
+          "rail_energy"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "rail_energy",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -206,8 +297,42 @@
           "check_suspend_data",
           "check_wakeup_data",
           "check_suspend_slices",
-          "suspend_overview"
+          "suspend_overview",
+          "suspend_quality_assessment",
+          "wakeup_type_overview",
+          "wakeup_source_ranking",
+          "suspend_backoff",
+          "wakeup_timeline",
+          "long_suspend_events",
+          "suspend_slice_overview"
         ],
+        "required_sql_steps": [
+          "check_suspend_data",
+          "check_wakeup_data",
+          "check_suspend_slices",
+          "suspend_overview",
+          "suspend_quality_assessment",
+          "wakeup_type_overview",
+          "wakeup_source_ranking",
+          "suspend_backoff",
+          "wakeup_timeline",
+          "long_suspend_events",
+          "suspend_slice_overview"
+        ],
+        "forced_sql_steps": [
+          "check_wakeup_data",
+          "check_suspend_slices",
+          "suspend_overview",
+          "suspend_quality_assessment",
+          "wakeup_type_overview",
+          "wakeup_source_ranking",
+          "suspend_backoff",
+          "wakeup_timeline",
+          "long_suspend_events",
+          "suspend_slice_overview"
+        ],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "suspend_overview",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -219,17 +344,53 @@
         "source_file": "backend/skills/modules/hardware/thermal_module.skill.yaml",
         "parameters": {},
         "required_steps": [
-          "temperature_overview"
+          "temperature_overview",
+          "temperature_timeline",
+          "high_temp_periods",
+          "throttling_events",
+          "cooling_activity",
+          "thermal_cpu_correlation"
         ],
+        "required_sql_steps": [
+          "temperature_overview",
+          "temperature_timeline",
+          "high_temp_periods",
+          "throttling_events",
+          "cooling_activity",
+          "thermal_cpu_correlation"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "temperature_overview",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
       {
-        "id": "definition-thermal_predictor",
+        "id": "execute-thermal_predictor",
         "type": "skill",
         "target": "thermal_predictor",
-        "mode": "definition",
+        "mode": "execution",
         "source_file": "backend/skills/atomic/thermal_predictor.skill.yaml",
+        "parameters": {
+          "start_ts": "${trace_start}",
+          "end_ts": "${trace_end}",
+          "high_drop_threshold_pct": 30,
+          "medium_drop_threshold_pct": 15,
+          "high_core_ratio_threshold_pct": 50,
+          "medium_core_ratio_threshold_pct": 25,
+          "core_drop_threshold_pct": 30
+        },
+        "required_steps": [
+          "root"
+        ],
+        "required_sql_steps": [
+          "root"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
+        "semantic_step": "root",
+        "min_rows": 0,
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
       {
@@ -252,8 +413,42 @@
           "data_check",
           "expert_analysis_window",
           "thermal_predictor_probe",
-          "thermal_overview"
+          "thermal_overview",
+          "cpu_freq_overview",
+          "gpu_power_probe",
+          "thermal_timeline",
+          "frequency_drop_events",
+          "thermal_freq_correlation",
+          "high_temp_periods",
+          "root_cause_classification",
+          "thermal_diagnosis",
+          "no_data_fallback"
         ],
+        "required_sql_steps": [
+          "data_check",
+          "expert_analysis_window",
+          "thermal_overview",
+          "cpu_freq_overview",
+          "thermal_timeline",
+          "frequency_drop_events",
+          "thermal_freq_correlation",
+          "high_temp_periods",
+          "root_cause_classification",
+          "no_data_fallback"
+        ],
+        "forced_sql_steps": [
+          "expert_analysis_window",
+          "thermal_overview",
+          "cpu_freq_overview",
+          "thermal_timeline",
+          "frequency_drop_events",
+          "thermal_freq_correlation",
+          "high_temp_periods",
+          "root_cause_classification",
+          "no_data_fallback"
+        ],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "thermal_overview",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -265,8 +460,18 @@
         "source_file": "backend/skills/composite/thermal_throttling_chain.skill.yaml",
         "parameters": {},
         "required_steps": [
-          "thermal"
+          "thermal",
+          "dvfs",
+          "cpu_idle",
+          "process_util",
+          "thread_util",
+          "gpu_work_period",
+          "mali_state"
         ],
+        "required_sql_steps": [],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "thermal",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -280,6 +485,12 @@
         "required_steps": [
           "wakeup_frequency"
         ],
+        "required_sql_steps": [
+          "wakeup_frequency"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "wakeup_frequency",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -293,6 +504,12 @@
         "required_steps": [
           "startup_power"
         ],
+        "required_sql_steps": [
+          "startup_power"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "startup_power",
         "limitation_reason": "Wattson startup attribution is device-model gated and unsupported by this base device.",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
@@ -309,6 +526,12 @@
         "required_steps": [
           "rails_aggregation"
         ],
+        "required_sql_steps": [
+          "rails_aggregation"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "rails_aggregation",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },
@@ -324,6 +547,12 @@
         "required_steps": [
           "thread_attribution"
         ],
+        "required_sql_steps": [
+          "thread_attribution"
+        ],
+        "forced_sql_steps": [],
+        "isolated_sql_probes": [],
+        "expected_condition_skips": [],
         "semantic_step": "thread_attribution",
         "required_marker": "SmartPerfetto::CASE::power-thermal"
       },

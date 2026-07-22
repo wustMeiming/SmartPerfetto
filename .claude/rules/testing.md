@@ -9,8 +9,9 @@ npm run verify:pr
 ```
 
 This runs root quality checks, Rust checks, backend Skill/Strategy validation,
-typecheck, build, CLI package checks, core tests, trace-processor availability,
-and the 6-trace scene regression gate.
+typecheck, build, CLI package checks, core and architecture tests,
+trace-processor availability, the constructed Trace SQL regression, and the
+6-trace scene regression gate.
 
 ## Verification by Change Type
 
@@ -25,6 +26,7 @@ and the 6-trace scene regression gate.
 | Skill YAML | `cd backend && npm run validate:skills` plus scene trace regression |
 | Strategy/template Markdown | `cd backend && npm run validate:strategies` plus scene trace regression |
 | Trace corpus, Skill/Strategy coverage, or generator | `npm run trace:regression`; also run the focused Node corpus tests for tooling changes |
+| SQL-bearing Skill or default backend gate wiring | `cd backend && npm run trace:sql-regression`; `npm run verify:pr` includes this gate |
 | Frontend generated types | `cd backend && npm run generate:frontend-types` plus relevant tests |
 | AI plugin UI | Browser verification in `start-dev.sh`, relevant `perfetto/ui` tests/typecheck, then `./scripts/update-frontend.sh` |
 | Perfetto upstream sync, trace processor pin, SQL/stdlib index, or committed UI prebuild | Follow `.claude/rules/perfetto-sync.md`; normally `git diff --check`, `npm run check:frontend-prebuild`, `npm --prefix backend run cli:e2e`, scene trace regression, submodule remote reachability, and Skill/Strategy validation when those files changed |
@@ -98,7 +100,7 @@ The regression uses 6 canonical traces:
 | Flutter TextureView | `Scroll-Flutter-327-TextureView.pftrace` |
 | Flutter SurfaceView | `Scroll-Flutter-SurfaceView-Wechat-Wenyiwen.pftrace` |
 
-The aliases above resolve through `Trace/catalog.json`; maintained source must not add paths to the retired flat fixture directory. Full release/corpus verification is `npm run trace:regression`. Its report distinguishes positive semantic execution from explicit graceful-empty, unavailable-prerequisite, and definition-only contracts; inventory assignment alone is not a semantic pass.
+The aliases above resolve through `Trace/catalog.json`; maintained source must not add paths to the retired flat fixture directory. The default backend gate runs `trace:sql-regression`, which materializes committed overlays without the Perfetto source submodule and executes every discovered Skill SQL contract through the production path, explicit read-only/context probes, or isolated state-changing branch probes. Skipped or unavailable SQL fails the gate. Full generator/release verification is `npm run trace:regression`. Its report keeps SQL execution coverage separate from assertion-backed semantic coverage and definition-only contracts; inventory assignment alone is not an execution or semantic pass.
 
 ## Focused Unit Tests
 

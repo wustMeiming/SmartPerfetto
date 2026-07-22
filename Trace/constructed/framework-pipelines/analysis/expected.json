@@ -11,8 +11,18 @@
       "source_file": "backend/skills/modules/framework/ams_module.skill.yaml",
       "parameters": {},
       "required_steps": [
-        "startup_timing"
+        "startup_timing",
+        "startup_phases",
+        "broadcast_analysis"
       ],
+      "required_sql_steps": [
+        "startup_timing",
+        "startup_phases",
+        "broadcast_analysis"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "startup_timing",
       "required_marker": "SmartPerfetto::CASE::framework-pipelines"
     },
@@ -26,8 +36,20 @@
         "package": "com.smartperfetto.fixture"
       },
       "required_steps": [
-        "gc_overview"
+        "gc_overview",
+        "gc_events",
+        "gc_during_main_thread",
+        "jit_events"
       ],
+      "required_sql_steps": [
+        "gc_overview",
+        "gc_events",
+        "gc_during_main_thread",
+        "jit_events"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "gc_overview",
       "required_marker": "SmartPerfetto::CASE::framework-pipelines"
     },
@@ -39,8 +61,16 @@
       "source_file": "backend/skills/composite/code_pinpoint.skill.yaml",
       "parameters": {},
       "required_steps": [
-        "hot_slices"
+        "hot_slices",
+        "native_modules"
       ],
+      "required_sql_steps": [
+        "hot_slices",
+        "native_modules"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "hot_slices",
       "required_marker": "SmartPerfetto::CASE::framework-pipelines"
     },
@@ -53,8 +83,23 @@
       "parameters": {},
       "required_steps": [
         "frame_timeline_check",
-        "recomposition_overview"
+        "recomposition_overview",
+        "slow_recompositions",
+        "composition_frequency",
+        "recomposition_frame_overlap"
       ],
+      "required_sql_steps": [
+        "frame_timeline_check",
+        "recomposition_overview",
+        "slow_recompositions",
+        "composition_frequency",
+        "recomposition_frame_overlap"
+      ],
+      "forced_sql_steps": [
+        "recomposition_frame_overlap"
+      ],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "recomposition_overview",
       "required_marker": "SmartPerfetto::CASE::framework-pipelines"
     },
@@ -66,8 +111,20 @@
       "source_file": "backend/skills/atomic/pipeline_4feature_scoring.skill.yaml",
       "parameters": {},
       "required_steps": [
-        "producer_thread_signature"
+        "producer_thread_signature",
+        "layer_signature",
+        "bufferqueue_path",
+        "extra_rhythm"
       ],
+      "required_sql_steps": [
+        "producer_thread_signature",
+        "layer_signature",
+        "bufferqueue_path",
+        "extra_rhythm"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "producer_thread_signature",
       "required_marker": "SmartPerfetto::CASE::framework-pipelines"
     },
@@ -179,6 +236,12 @@
       "required_steps": [
         "pipeline_key_slices_overlay"
       ],
+      "required_sql_steps": [
+        "pipeline_key_slices_overlay"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "pipeline_key_slices_overlay",
       "required_marker": "SmartPerfetto::CASE::framework-pipelines"
     },
@@ -278,8 +341,32 @@
       "source_file": "backend/skills/modules/app/systemui_module.skill.yaml",
       "parameters": {},
       "required_steps": [
-        "systemui_process"
+        "systemui_process",
+        "systemui_main_thread",
+        "systemui_frames",
+        "statusbar_activities",
+        "notification_shade",
+        "quick_settings",
+        "navigation_activities",
+        "lockscreen_activities",
+        "systemui_binder",
+        "volume_dialog"
       ],
+      "required_sql_steps": [
+        "systemui_process",
+        "systemui_main_thread",
+        "systemui_frames",
+        "statusbar_activities",
+        "notification_shade",
+        "quick_settings",
+        "navigation_activities",
+        "lockscreen_activities",
+        "systemui_binder",
+        "volume_dialog"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "systemui_process",
       "required_marker": "SmartPerfetto::CASE::framework-pipelines"
     },
@@ -293,8 +380,20 @@
         "package": "com.smartperfetto.fixture"
       },
       "required_steps": [
-        "thread_overview"
+        "thread_overview",
+        "main_thread_state",
+        "long_main_thread_slices",
+        "render_thread_analysis"
       ],
+      "required_sql_steps": [
+        "thread_overview",
+        "main_thread_state",
+        "long_main_thread_slices",
+        "render_thread_analysis"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "thread_overview",
       "required_marker": "SmartPerfetto::CASE::framework-pipelines"
     },
@@ -306,8 +405,22 @@
       "source_file": "backend/skills/modules/framework/wms_module.skill.yaml",
       "parameters": {},
       "required_steps": [
-        "window_animation_overview"
+        "window_animation_overview",
+        "activity_transitions",
+        "window_state_changes",
+        "slow_animations",
+        "window_draw_latency"
       ],
+      "required_sql_steps": [
+        "window_animation_overview",
+        "activity_transitions",
+        "window_state_changes",
+        "slow_animations",
+        "window_draw_latency"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "window_animation_overview",
       "required_marker": "SmartPerfetto::CASE::framework-pipelines"
     },

@@ -8,13 +8,15 @@ This directory is the source-controlled trace test and reference corpus.
 - [Machine-readable catalog](./catalog.json)
 - [Skill and Strategy coverage](./coverage.json)
 
-Skill execution quality: 3 assertion-backed semantic, 133 execution-only, 8 explicit graceful-empty, 3 explicit unavailable prerequisite, 87 definition-only.
+Skill execution quality: 3 assertion-backed semantic, 191 execution-only, 8 explicit graceful-empty, 0 explicit unavailable prerequisite, 32 definition-only.
 
 ## Commands
 
 `npm run trace:validate` checks manifests, hashes, generated indexes, publication gates, legacy path coupling, and exact current Skill/Strategy inventory coverage.
 
 `npm run trace:build` deterministically materializes every base-plus-overlay case under ignored `Trace/.generated/` and reparses it with the pinned trace processor.
+
+`npm run trace:sql-regression` validates the catalog, materializes the committed base-plus-overlay cases without requiring the Perfetto source submodule, and executes every discovered Skill SQL contract. Production execution, explicit read-only/context probes, and isolated state-changing branch probes are reported separately; any skipped or unavailable SQL fails the gate. This is part of the default backend gate.
 
 `npm run trace:regression` validates, builds, and executes the complete deterministic corpus. Per-case evidence is written below `Trace/.generated/constructed/<case-id>/`.
 

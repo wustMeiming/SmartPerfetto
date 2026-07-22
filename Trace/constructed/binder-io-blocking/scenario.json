@@ -148,6 +148,16 @@
       "thread": "main",
       "cpu": 0,
       "end_state": "D"
+    },
+    {
+      "type": "anr-event",
+      "at_ns": "800000000",
+      "process": "system",
+      "thread": "system-main",
+      "target_process": "app",
+      "error_id": "smartperfetto-synthetic-anr",
+      "subject": "Input dispatching timed out waiting for com.smartperfetto.fixture",
+      "cpu": 0
     }
   ]
 }

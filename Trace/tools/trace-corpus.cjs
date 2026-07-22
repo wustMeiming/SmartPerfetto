@@ -10,7 +10,7 @@ const {
   validateCatalog,
 } = require('./lib/catalog.cjs');
 const {writeIndexes} = require('./lib/indexer.cjs');
-const {buildCatalogCases} = require('./lib/builder.cjs');
+const {buildCatalogCases, materializeCatalogCases} = require('./lib/builder.cjs');
 const {importRealCase, promoteRealCase} = require('./lib/import-real.cjs');
 
 function parseArgs(argv) {
@@ -72,6 +72,7 @@ Commands:
   validate [--check-generated]   Validate manifests, hashes, and coverage
   coverage                       Print exact Skill and Strategy coverage
   build [--check] [--case <id>]  Materialize constructed trace cases
+  materialize [--case <id>]     Combine committed bases and overlays without proto sources
   resolve <case-id-or-alias>     Print the committed trace path
   import-real [options]          Stage a captured trace under ignored .private/
   promote-real <id> [options]    Publish a reviewed private draft atomically
@@ -131,6 +132,14 @@ function main(argv) {
       check: parsed.flags.has('--check'),
     });
     console.log(`built ${result.length} constructed case(s)`);
+    return 0;
+  }
+  if (parsed.command === 'materialize') {
+    const caseId = parsed.value('--case');
+    const caseIds = caseId ? [caseId] : undefined;
+    if (parsed.flags.has('--case') && !caseId) throw new Error('--case requires a case id');
+    const result = materializeCatalogCases(parsed.repoRoot, {caseIds});
+    console.log(`materialized ${result.length} constructed case(s) from committed overlays`);
     return 0;
   }
   if (parsed.command === 'resolve') {

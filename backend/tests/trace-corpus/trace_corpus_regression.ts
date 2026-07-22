@@ -34,7 +34,20 @@ async function main(): Promise<void> {
       `Trace corpus regression failed: ${result.executed.length} passed, ${result.failures.length} failed`,
     );
   }
-  console.log(`Trace corpus regression passed: ${result.executed.length} expectation(s)`);
+  const incompleteSql = result.sql.condition_skipped.length + result.sql.unavailable.length;
+  if (incompleteSql > 0) {
+    throw new Error(
+      `Trace corpus SQL coverage incomplete: ${result.sql.condition_skipped.length} skipped, `
+      + `${result.sql.unavailable.length} unavailable`,
+    );
+  }
+  const executedSql = result.sql.normal.length + result.sql.forced.length + result.sql.isolated.length;
+  console.log(
+    `Trace corpus regression passed: ${result.executed.length} expectation(s), `
+    + `${executedSql} SQL contract(s) executed `
+    + `(${result.sql.normal.length} production, ${result.sql.forced.length} forced read-only/context, `
+    + `${result.sql.isolated.length} isolated branch probe), 0 skipped, 0 unavailable`,
+  );
 }
 
 main().catch((error) => {

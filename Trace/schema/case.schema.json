@@ -117,6 +117,67 @@
               "target": {"type": "string", "minLength": 1},
               "mode": {"enum": ["semantic", "execution", "graceful_empty", "unavailable", "definition"]},
               "semantic_step": {"type": ["string", "null"]},
+              "required_steps": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+                "uniqueItems": true
+              },
+              "required_sql_steps": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+                "uniqueItems": true
+              },
+              "forced_sql_steps": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+                "uniqueItems": true
+              },
+              "isolated_sql_probes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["step", "setup_sql"],
+                  "properties": {
+                    "step": {"type": "string", "minLength": 1},
+                    "setup_sql": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {"type": "string", "minLength": 1}
+                    }
+                  }
+                }
+              },
+              "expected_condition_skips": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["step", "reason"],
+                  "properties": {
+                    "step": {"type": "string", "minLength": 1},
+                    "reason": {"type": "string", "minLength": 1}
+                  }
+                }
+              },
+              "expected_unavailable_sql_steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["step", "reason", "error"],
+                  "properties": {
+                    "step": {"type": "string", "minLength": 1},
+                    "reason": {"type": "string", "minLength": 1},
+                    "error": {"type": "string", "minLength": 1}
+                  }
+                }
+              },
+              "parameters": {"type": "object"},
+              "source_file": {"type": "string", "minLength": 1},
+              "required_marker": {"type": "string", "minLength": 1},
+              "query": {"type": "string"},
+              "expected_strategy": {"type": "string"},
               "min_rows": {"type": "integer", "minimum": 0},
               "max_rows": {"type": "integer", "minimum": 0},
               "assertions": {

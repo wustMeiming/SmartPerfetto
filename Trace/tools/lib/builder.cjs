@@ -7,7 +7,7 @@ const path = require('node:path');
 const {spawnSync} = require('node:child_process');
 
 const {loadCatalog, resolveCaseTrace} = require('./catalog.cjs');
-const {buildConstructedTrace, resolveTraceProcessor} = require('./generator.cjs');
+const {buildConstructedTrace, materializeTrace, resolveTraceProcessor} = require('./generator.cjs');
 const {sha256File} = require('./hash.cjs');
 
 function traceProcessorProvenance(repoRoot) {
@@ -29,6 +29,28 @@ function safeGeneratedPath(repoRoot, relativePath, caseId) {
     throw new Error(`constructed output must be Trace/.generated/constructed/${caseId}/trace.pftrace`);
   }
   return output;
+}
+
+function safeCaseFile(entry, relativePath, label) {
+  if (typeof relativePath !== 'string' || relativePath.length === 0 || path.isAbsolute(relativePath)) {
+    throw new Error(`${label} path must be a relative file inside case ${entry.id}`);
+  }
+  const caseDir = path.resolve(entry.case_dir);
+  const candidate = path.resolve(caseDir, relativePath);
+  if (!candidate.startsWith(`${caseDir}${path.sep}`)) {
+    throw new Error(`${label} path escapes case ${entry.id}: ${relativePath}`);
+  }
+  let stat;
+  try {
+    stat = fs.lstatSync(candidate);
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new Error(`${label} file is missing for case ${entry.id}: ${relativePath}`);
+    throw error;
+  }
+  if (!stat.isFile()) {
+    throw new Error(`${label} must be a regular file for case ${entry.id}: ${relativePath}`);
+  }
+  return candidate;
 }
 
 function updateTraceHash(entry, sha256) {
@@ -99,4 +121,55 @@ function buildCatalogCases(repoRoot, options = {}) {
   return results;
 }
 
-module.exports = {buildCatalogCases};
+function materializeCatalogCases(repoRoot, options = {}) {
+  const catalog = loadCatalog(repoRoot);
+  const casesById = new Map(catalog.cases.map((entry) => [entry.id, entry]));
+  const constructed = catalog.cases.filter((entry) => entry.kind === 'constructed');
+  const requested = options.caseIds ? new Set(options.caseIds) : null;
+  if (requested) {
+    const unknown = [...requested].filter((id) => !casesById.has(id) || casesById.get(id).kind !== 'constructed');
+    if (unknown.length > 0) throw new Error(`Unknown constructed case(s): ${unknown.join(', ')}`);
+  }
+  const selected = requested ? constructed.filter((entry) => requested.has(entry.id)) : constructed;
+  const results = [];
+
+  for (const entry of selected) {
+    const base = casesById.get(entry.construction.base_case_id);
+    if (!base || base.kind !== 'real') {
+      throw new Error(`constructed case ${entry.id} references unknown real base ${entry.construction.base_case_id}`);
+    }
+    const outputPath = safeGeneratedPath(repoRoot, entry.construction.output, entry.id);
+    const basePath = safeCaseFile(base, base.trace.file, 'base trace');
+    const overlayPath = safeCaseFile(entry, entry.trace.file, 'overlay trace');
+    const actualBaseHash = sha256File(basePath);
+    if (actualBaseHash !== base.trace.sha256) {
+      throw new Error(`base trace hash mismatch for ${entry.id}: manifest=${base.trace.sha256}, actual=${actualBaseHash}`);
+    }
+    const actualOverlayHash = sha256File(overlayPath);
+    if (actualOverlayHash !== entry.trace.sha256) {
+      throw new Error(`overlay trace hash mismatch for ${entry.id}: manifest=${entry.trace.sha256}, actual=${actualOverlayHash}`);
+    }
+    const materialization = materializeTrace(
+      fs.readFileSync(basePath),
+      fs.readFileSync(overlayPath),
+      outputPath,
+    );
+    const provenancePath = path.join(path.dirname(outputPath), 'build-provenance.json');
+    fs.writeFileSync(provenancePath, `${JSON.stringify({
+      schema_version: 1,
+      materialization: 'committed-base-plus-overlay',
+      case_id: entry.id,
+      base_case_id: base.id,
+      base_sha256: materialization.base_sha256,
+      overlay_sha256: materialization.overlay_sha256,
+      output_sha256: materialization.output_sha256,
+      base_bytes: materialization.base_bytes,
+      overlay_bytes: materialization.overlay_bytes,
+      output_bytes: materialization.output_bytes,
+    }, null, 2)}\n`);
+    results.push({case_id: entry.id, output: entry.construction.output});
+  }
+  return results;
+}
+
+module.exports = {buildCatalogCases, materializeCatalogCases, safeCaseFile, safeGeneratedPath};

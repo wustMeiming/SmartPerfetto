@@ -124,6 +124,17 @@
       "thread": "main",
       "cpu": 0,
       "end_state": "S"
+    },
+    {
+      "type": "perf-sample",
+      "at_ns": "700000000",
+      "process": "app",
+      "thread": "main",
+      "function_name": "SmartPerfettoSyntheticHotFunction",
+      "module_name": "libsmartperfetto_fixture.so",
+      "sample_count": 12,
+      "sample_interval_ns": "1000000",
+      "cpu": 0
     }
   ]
 }

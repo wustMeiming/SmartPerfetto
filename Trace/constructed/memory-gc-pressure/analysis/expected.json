@@ -11,8 +11,23 @@
       "source_file": "backend/skills/atomic/android_bitmap_memory_per_process.skill.yaml",
       "parameters": {},
       "required_steps": [
-        "bitmap_memory"
+        "bitmap_memory",
+        "heap_bitmap_availability",
+        "heap_bitmap_metadata",
+        "heap_bitmap_sender_attribution"
       ],
+      "required_sql_steps": [
+        "bitmap_memory",
+        "heap_bitmap_availability",
+        "heap_bitmap_metadata",
+        "heap_bitmap_sender_attribution"
+      ],
+      "forced_sql_steps": [
+        "heap_bitmap_metadata",
+        "heap_bitmap_sender_attribution"
+      ],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "bitmap_memory",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
@@ -29,6 +44,13 @@
         "data_check",
         "dominator_paths"
       ],
+      "required_sql_steps": [
+        "data_check",
+        "dominator_paths"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "dominator_paths",
       "min_rows": 1,
       "assertions": [
@@ -57,8 +79,16 @@
         "max_reference_edges": 100
       },
       "required_steps": [
-        "leak_candidates"
+        "leak_candidates",
+        "reference_holders"
       ],
+      "required_sql_steps": [
+        "leak_candidates",
+        "reference_holders"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "leak_candidates",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
@@ -72,8 +102,18 @@
         "max_rows": 30
       },
       "required_steps": [
-        "heap_graph_availability"
+        "heap_graph_availability",
+        "heap_graph_samples",
+        "top_retained_classes"
       ],
+      "required_sql_steps": [
+        "heap_graph_availability",
+        "heap_graph_samples",
+        "top_retained_classes"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "heap_graph_availability",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
@@ -89,8 +129,26 @@
       },
       "required_steps": [
         "data_check",
-        "heap_graph_repeated_objects"
+        "heap_graph_repeated_objects",
+        "heap_graph_size_frequencies",
+        "heap_profile_hotspots",
+        "no_data_contract"
       ],
+      "required_sql_steps": [
+        "data_check",
+        "heap_graph_repeated_objects",
+        "heap_graph_size_frequencies",
+        "heap_profile_hotspots",
+        "no_data_contract"
+      ],
+      "forced_sql_steps": [
+        "heap_graph_repeated_objects",
+        "heap_graph_size_frequencies",
+        "heap_profile_hotspots",
+        "no_data_contract"
+      ],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "heap_graph_repeated_objects",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
@@ -98,44 +156,110 @@
       "id": "execute-dmabuf_analysis",
       "type": "skill",
       "target": "dmabuf_analysis",
-      "mode": "unavailable",
+      "mode": "graceful_empty",
       "source_file": "backend/skills/composite/dmabuf_analysis.skill.yaml",
       "parameters": {
         "min_size_mb": 1
       },
       "required_steps": [
         "data_check",
-        "dmabuf_overview"
+        "dmabuf_overview",
+        "dmabuf_cumulative",
+        "large_buffer_allocs",
+        "dmabuf_frequency",
+        "thread_alloc_stats",
+        "buffer_lifecycle",
+        "root_cause_classification"
       ],
+      "required_sql_steps": [
+        "data_check",
+        "dmabuf_overview",
+        "dmabuf_cumulative",
+        "large_buffer_allocs",
+        "dmabuf_frequency",
+        "thread_alloc_stats",
+        "buffer_lifecycle",
+        "root_cause_classification"
+      ],
+      "forced_sql_steps": [
+        "dmabuf_overview",
+        "dmabuf_cumulative",
+        "large_buffer_allocs",
+        "dmabuf_frequency",
+        "thread_alloc_stats",
+        "buffer_lifecycle",
+        "root_cause_classification"
+      ],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "dmabuf_overview",
-      "limitation_reason": "The fixture does not contain DMA-BUF allocation/residency events.",
-      "expected_error": "Condition not met",
+      "limitation_reason": "The SQL contract executes, but this fixture does not contain DMA-BUF allocation or residency events.",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
     {
       "id": "execute-gc_analysis",
       "type": "skill",
       "target": "gc_analysis",
-      "mode": "unavailable",
+      "mode": "graceful_empty",
       "source_file": "backend/skills/composite/gc_analysis.skill.yaml",
       "parameters": {
         "min_gc_dur_ms": 5
       },
       "required_steps": [
         "data_check",
-        "gc_overview"
+        "gc_overview",
+        "gc_time_breakdown",
+        "long_gc_events",
+        "gc_frame_impact",
+        "process_gc_stats",
+        "gc_frequency",
+        "root_cause_classification"
       ],
+      "required_sql_steps": [
+        "data_check",
+        "gc_overview",
+        "gc_time_breakdown",
+        "long_gc_events",
+        "gc_frame_impact",
+        "process_gc_stats",
+        "gc_frequency",
+        "root_cause_classification"
+      ],
+      "forced_sql_steps": [
+        "gc_overview",
+        "gc_time_breakdown",
+        "long_gc_events",
+        "gc_frame_impact",
+        "process_gc_stats",
+        "gc_frequency",
+        "root_cause_classification"
+      ],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "gc_overview",
-      "limitation_reason": "The fixture has GC marker slices but not ART garbage-collection packets.",
-      "expected_error": "Condition not met",
+      "limitation_reason": "The SQL contract executes, but this fixture does not contain ART garbage-collection packets.",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
     {
-      "id": "definition-gc_events_in_range",
+      "id": "execute-gc_events_in_range",
       "type": "skill",
       "target": "gc_events_in_range",
-      "mode": "definition",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/gc_events_in_range.skill.yaml",
+      "parameters": {
+        "package": "com.smartperfetto.fixture"
+      },
+      "required_steps": [
+        "root"
+      ],
+      "required_sql_steps": [
+        "root"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
+      "semantic_step": "root",
+      "min_rows": 0,
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
     {
@@ -148,6 +272,12 @@
       "required_steps": [
         "rss_swap_peaks"
       ],
+      "required_sql_steps": [
+        "rss_swap_peaks"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "rss_swap_peaks",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
@@ -160,8 +290,35 @@
       "parameters": {},
       "required_steps": [
         "data_check",
-        "lmk_overview"
+        "lmk_overview",
+        "lmk_timeline",
+        "high_priority_kills",
+        "lmk_memory_context",
+        "lmk_frequency",
+        "process_restart_after_lmk",
+        "root_cause_classification"
       ],
+      "required_sql_steps": [
+        "data_check",
+        "lmk_overview",
+        "lmk_timeline",
+        "high_priority_kills",
+        "lmk_memory_context",
+        "lmk_frequency",
+        "process_restart_after_lmk",
+        "root_cause_classification"
+      ],
+      "forced_sql_steps": [
+        "lmk_overview",
+        "lmk_timeline",
+        "high_priority_kills",
+        "lmk_memory_context",
+        "lmk_frequency",
+        "process_restart_after_lmk",
+        "root_cause_classification"
+      ],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "lmk_overview",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
@@ -175,15 +332,33 @@
       "required_steps": [
         "lmk_events"
       ],
+      "required_sql_steps": [
+        "lmk_events"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "lmk_events",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
     {
-      "id": "definition-logcat_analysis",
+      "id": "execute-logcat_analysis",
       "type": "skill",
       "target": "logcat_analysis",
-      "mode": "definition",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/logcat_analysis.skill.yaml",
+      "parameters": {},
+      "required_steps": [
+        "root"
+      ],
+      "required_sql_steps": [
+        "root"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
+      "semantic_step": "root",
+      "min_rows": 0,
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
     {
@@ -200,7 +375,50 @@
         "single_gc_warning_ms": 50
       },
       "required_steps": [
-        "get_process"
+        "get_process",
+        "init_gc_view",
+        "get_vsync_period",
+        "memory_growth_summary",
+        "rss_swap_peaks",
+        "heap_graph_summary",
+        "heap_graph_leak_candidates",
+        "bitmap_memory",
+        "native_heap_hotspots",
+        "lmk_events",
+        "gc_overview",
+        "gc_stats",
+        "gc_frame_impact",
+        "main_thread_gc",
+        "gc_thread_state",
+        "gc_interval_analysis",
+        "long_gc_events"
+      ],
+      "required_sql_steps": [
+        "get_process",
+        "init_gc_view",
+        "gc_overview",
+        "gc_stats",
+        "gc_frame_impact",
+        "main_thread_gc",
+        "gc_thread_state",
+        "gc_interval_analysis",
+        "long_gc_events"
+      ],
+      "forced_sql_steps": [
+        "gc_overview",
+        "gc_stats",
+        "gc_frame_impact",
+        "main_thread_gc",
+        "gc_thread_state",
+        "gc_interval_analysis",
+        "long_gc_events"
+      ],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [
+        {
+          "step": "init_gc_view",
+          "reason": "This conditional SQL is exercised only on its production branch because forcing it would mutate state or require condition-populated context."
+        }
       ],
       "semantic_step": "get_process",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
@@ -222,6 +440,12 @@
       "required_steps": [
         "memory_growth"
       ],
+      "required_sql_steps": [
+        "memory_growth"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "memory_growth",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
@@ -233,8 +457,28 @@
       "source_file": "backend/skills/modules/hardware/memory_module.skill.yaml",
       "parameters": {},
       "required_steps": [
-        "memory_overview"
+        "memory_overview",
+        "lmk_events",
+        "dmabuf_usage",
+        "memory_psi",
+        "process_memory",
+        "memory_timeline",
+        "page_fault_analysis",
+        "allocation_events"
       ],
+      "required_sql_steps": [
+        "memory_overview",
+        "lmk_events",
+        "dmabuf_usage",
+        "memory_psi",
+        "process_memory",
+        "memory_timeline",
+        "page_fault_analysis",
+        "allocation_events"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "memory_overview",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
@@ -251,6 +495,12 @@
       "required_steps": [
         "memory_pressure_analysis"
       ],
+      "required_sql_steps": [
+        "memory_pressure_analysis"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "memory_pressure_analysis",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
@@ -266,6 +516,12 @@
       "required_steps": [
         "rss_peaks"
       ],
+      "required_sql_steps": [
+        "rss_peaks"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "rss_peaks",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },
@@ -279,6 +535,12 @@
       "required_steps": [
         "native_heap_hotspots"
       ],
+      "required_sql_steps": [
+        "native_heap_hotspots"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "native_heap_hotspots",
       "limitation_reason": "The fixture does not contain heapprofd allocation packets.",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
@@ -293,6 +555,12 @@
       "required_steps": [
         "oom_intervals"
       ],
+      "required_sql_steps": [
+        "oom_intervals"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "oom_intervals",
       "required_marker": "SmartPerfetto::CASE::memory-gc-pressure"
     },

@@ -7,16 +7,37 @@
       "id": "execute-callstack_analysis",
       "type": "skill",
       "target": "callstack_analysis",
-      "mode": "graceful_empty",
+      "mode": "execution",
       "source_file": "backend/skills/deep/callstack_analysis.skill.yaml",
       "parameters": {
         "min_samples": 10
       },
       "required_steps": [
-        "check_samples"
+        "check_samples",
+        "hot_functions",
+        "module_distribution",
+        "thread_hotspots",
+        "caller_analysis",
+        "analysis_conclusion"
       ],
+      "required_sql_steps": [
+        "check_samples",
+        "hot_functions",
+        "module_distribution",
+        "thread_hotspots",
+        "caller_analysis",
+        "analysis_conclusion"
+      ],
+      "forced_sql_steps": [
+        "hot_functions",
+        "module_distribution",
+        "thread_hotspots",
+        "caller_analysis",
+        "analysis_conclusion"
+      ],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "check_samples",
-      "limitation_reason": "The fixture does not contain perf samples or interned callstacks.",
       "required_marker": "SmartPerfetto::CASE::general-runtime-contracts"
     },
     {
@@ -30,8 +51,20 @@
         "end_ts": "${trace_end}"
       },
       "required_steps": [
-        "acquire_fence_wait"
+        "acquire_fence_wait",
+        "present_fence_timing",
+        "release_fence_impact",
+        "fence_attribution_hint"
       ],
+      "required_sql_steps": [
+        "acquire_fence_wait",
+        "present_fence_timing",
+        "release_fence_impact",
+        "fence_attribution_hint"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "acquire_fence_wait",
       "required_marker": "SmartPerfetto::CASE::general-runtime-contracts"
     },
@@ -45,25 +78,75 @@
         "max_rows": 20
       },
       "required_steps": [
-        "trace_window"
+        "trace_window",
+        "top_long_slices",
+        "top_d_state_threads",
+        "top_runnable_waits",
+        "runqueue_pressure",
+        "top_cpu_processes"
       ],
+      "required_sql_steps": [
+        "trace_window",
+        "top_long_slices",
+        "top_d_state_threads",
+        "top_runnable_waits",
+        "runqueue_pressure",
+        "top_cpu_processes"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
       "semantic_step": "trace_window",
       "required_marker": "SmartPerfetto::CASE::general-runtime-contracts"
     },
     {
-      "id": "definition-main_thread_slices_in_range",
+      "id": "execute-main_thread_slices_in_range",
       "type": "skill",
       "target": "main_thread_slices_in_range",
-      "mode": "definition",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/main_thread_slices_in_range.skill.yaml",
+      "parameters": {
+        "start_ts": "${trace_start}",
+        "end_ts": "${trace_end}",
+        "upid": "${fixture_upid}",
+        "pid": 700000
+      },
+      "required_steps": [
+        "root"
+      ],
+      "required_sql_steps": [
+        "root"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
+      "semantic_step": "root",
+      "min_rows": 0,
       "required_marker": "SmartPerfetto::CASE::general-runtime-contracts"
     },
     {
-      "id": "definition-main_thread_states_in_range",
+      "id": "execute-main_thread_states_in_range",
       "type": "skill",
       "target": "main_thread_states_in_range",
-      "mode": "definition",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/main_thread_states_in_range.skill.yaml",
+      "parameters": {
+        "start_ts": "${trace_start}",
+        "end_ts": "${trace_end}",
+        "upid": "${fixture_upid}",
+        "pid": 700000
+      },
+      "required_steps": [
+        "root"
+      ],
+      "required_sql_steps": [
+        "root"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
+      "semantic_step": "root",
+      "min_rows": 0,
       "required_marker": "SmartPerfetto::CASE::general-runtime-contracts"
     },
     {
@@ -75,11 +158,25 @@
       "required_marker": "SmartPerfetto::CASE::general-runtime-contracts"
     },
     {
-      "id": "definition-process_identity_resolver",
+      "id": "execute-process_identity_resolver",
       "type": "skill",
       "target": "process_identity_resolver",
-      "mode": "definition",
+      "mode": "execution",
       "source_file": "backend/skills/atomic/process_identity_resolver.skill.yaml",
+      "parameters": {
+        "max_rows": 20
+      },
+      "required_steps": [
+        "root"
+      ],
+      "required_sql_steps": [
+        "root"
+      ],
+      "forced_sql_steps": [],
+      "isolated_sql_probes": [],
+      "expected_condition_skips": [],
+      "semantic_step": "root",
+      "min_rows": 0,
       "required_marker": "SmartPerfetto::CASE::general-runtime-contracts"
     },
     {

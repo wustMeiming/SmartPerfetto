@@ -70,6 +70,8 @@ Skill execution quality: ${modes.semantic ?? 0} assertion-backed semantic, ${mod
 
 \`npm run trace:build\` deterministically materializes every base-plus-overlay case under ignored \`Trace/.generated/\` and reparses it with the pinned trace processor.
 
+\`npm run trace:sql-regression\` validates the catalog, materializes the committed base-plus-overlay cases without requiring the Perfetto source submodule, and executes every discovered Skill SQL contract. Production execution, explicit read-only/context probes, and isolated state-changing branch probes are reported separately; any skipped or unavailable SQL fails the gate. This is part of the default backend gate.
+
 \`npm run trace:regression\` validates, builds, and executes the complete deterministic corpus. Per-case evidence is written below \`Trace/.generated/constructed/<case-id>/\`.
 
 ## Add a real case
